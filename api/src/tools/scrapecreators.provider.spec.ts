@@ -230,6 +230,25 @@ describe('the provider behind the seam', () => {
     expect((await provider().execute('svc:instagram.search_hashtag', { hashtag: 'x' })).error).toContain('API key');
   });
 
+  it('their "No posts found" (404, error:not_found, 0 credits) is a failed result marked notFound — any other refusal is not (BEA-1359)', async () => {
+    const p = provider('sk-test');
+    // exactly what api.scrapecreators.com answered on 2026-08-18 for every hashtag / reels search
+    global.fetch = jest.fn(async () => jsonResponse(404, { success: false, credits_remaining: 25068, credits_charged: 0, error: 'not_found', errorStatus: 404, message: 'No posts found' })) as any;
+    const r = await p.execute('svc:instagram.search_hashtag', { hashtag: 'smarthomeindia', date_posted: 'last-month' });
+    expect(r.ok).toBe(false);
+    expect(r.notFound).toBe(true);
+    expect(r.credits).toBe(0);
+    expect(r.error).toContain('No posts found');
+    global.fetch = jest.fn(async () => jsonResponse(404, { success: false, credits_charged: 0, error: 'not_found', errorStatus: 404, message: 'No scrapeable reels found for that query. You were not charged for this request.' })) as any;
+    expect((await p.execute('svc:instagram.reels_search', { query: 'smart home India' })).notFound).toBe(true);
+    for (const [status, body] of [[429, { success: false, message: 'rate limited' }], [402, { success: false, message: 'out of credits' }], [500, { success: false, message: 'boom' }], [400, { success: false, message: 'cursor cannot exceed 11' }]] as [number, any][]) {
+      global.fetch = jest.fn(async () => jsonResponse(status, body)) as any;
+      const x = await p.execute('svc:instagram.search_hashtag', { hashtag: 'x' });
+      expect(x.ok).toBe(false);
+      expect(x.notFound).toBeUndefined();
+    }
+  });
+
   // ---- BEA-1364: the first call after a deploy failed "fetch failed" — name the cause, retry once ----
 
   const transportError = (code: string, message: string) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), { code }) });

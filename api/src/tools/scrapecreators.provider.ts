@@ -558,7 +558,14 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
       const charged = Number(r.body?.credits_charged);
       const credits = Number.isFinite(charged) ? charged : undefined;
       // A refusal can come back HTTP 200 with `success:false`; the status code alone is not the verdict.
-      if (!r.ok) return { ok: false, error: r.error || 'The service refused that call.', data: r.body, ms, credits, status: r.status };
+      if (!r.ok) {
+        // "No posts found" is their empty answer, not a broken one (BEA-1359): `error:"not_found"`
+        // (HTTP 404, 0 credits). Said as `notFound` so a job can treat a search that found nothing
+        // as an empty source; every other refusal (401/402/429/5xx, any other `success:false`) is
+        // still just a failure.
+        const notFound = r.body?.error === 'not_found' || (r.status === 404 && r.body?.success === false);
+        return { ok: false, error: r.error || 'The service refused that call.', data: r.body, ms, credits, status: r.status, ...(notFound ? { notFound: true } : {}) };
+      }
       return { ok: true, data: r.body, ms, credits };
     } catch (e: any) {
       return { ok: false, error: this.plainError(e), ms: Date.now() - started };

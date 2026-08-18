@@ -110,6 +110,9 @@ export class SocialAgentRunService {
 
       // ---- 1. fetch — every tool, direct, pinned arguments, credits recorded --------------------
       const fetched: { id: string; r: ServiceRunResult }[] = [];
+      // Searches the vendor answered "not_found" for (BEA-1359) — empty sources, said on the run,
+      // never a failed run: a two-source digest still completes when one search has nothing.
+      const empties: string[] = [];
       let credits = 0;
       for (const id of tools) {
         // The daily credit ceiling (BEA-1358): would THIS call pass it? Then it is not made — the
@@ -126,6 +129,11 @@ export class SocialAgentRunService {
           return fail(b.reason!);
         }
         const r = await this.actions.runDetailed(id, '', { runId, runKind: 'agent', agentId: agent.id, args: args[id], argsPinned: true, label: id });
+        if (!r.ok && isEmptySearch(id, r)) {
+          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300) });
+          empties.push(id);
+          continue;
+        }
         if (!r.ok) {
           const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
           return fail(`Could not fetch ${r.serviceName || id}: ${why}`);
@@ -136,6 +144,16 @@ export class SocialAgentRunService {
         fetched.push({ id, r });
       }
 
+      // Every source empty (BEA-1359): the run finishes honestly — 0 found, nothing to write, no
+      // sheet made, nothing sent. Not a failure: the calls reached the vendor and it said "nothing".
+      const nothingFound = async () => {
+        const n = empties.length;
+        const label = `0 ${nounOf(tools[0])} found — nothing to write, no sheet made${n > 1 ? ` (all ${n} sources answered not_found)` : ''}`;
+        await step({ label, status: 'done' });
+        await this.agent.finishRun(runId, { status: 'done', resultText: `**${label}.**\n\nThe vendor answered not_found for ${n === 1 ? 'the search' : `every one of the ${n} searches`} — nothing to write, no sheet made, nothing sent${agent.notifyWhatsApp ? ' (WhatsApp skipped — nothing to send)' : ''}. ${credits} credit${credits === 1 ? '' : 's'}.` });
+      };
+      if (!fetched.length) return await nothingFound();
+
       // A Watch / Alert (BEA-1358) says only what changed since last time, then stores the new result.
       const mode = String(agent.mode || 'run');
       if (mode === 'watch' || mode === 'alert') return await this.watch(runId, agent, title, mode, fetched, credits, step, fail);
@@ -143,7 +161,10 @@ export class SocialAgentRunService {
       // ---- 2. rows — as fetched, or shaped the way the owner asked ----------------------------
       const tables = fetched.map((f) => ({ id: f.id, table: tableOf(f.r.data) }));
       let table = tables.length === 1 ? tables[0].table : mergeTables(tables);
-      if (!table.rows.length) return fail('Nothing came back to write — the fetch answered with no items. Check the arguments on the job, or try again later.');
+      if (!table.rows.length) {
+        if (empties.length) return await nothingFound();
+        return fail('Nothing came back to write — the fetch answered with no items. Check the arguments on the job, or try again later.');
+      }
 
       // Append mode reads the sheet FIRST, so the shaping step can be told the columns it must fit.
       const dest = String(agent.outputDest || 'document');
@@ -516,6 +537,26 @@ export class SocialAgentRunService {
       : outRows;
     return { ok: true, columns: finalCols, rows: rowsFixed };
   }
+}
+
+/**
+ * A vendor "not_found" on a SEARCH is an empty source, not a broken one (BEA-1359): Scrape Creators'
+ * Google-indexed searches answer `404 not_found` for a query with no posts. A profile or a post
+ * lookup that answers not_found still fails the run — that means the thing does not exist.
+ */
+export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
+  if (!r?.notFound) return false;
+  const endpoint = String(id || '').replace(/^svc:/, '').split('.')[1] || '';
+  return /search/.test(endpoint);
+}
+
+/** What a search finds, for the run's own words: posts · reels · videos · results. */
+export function nounOf(id: string): string {
+  const endpoint = String(id || '').replace(/^svc:/, '').split('.')[1] || '';
+  if (/reel/.test(endpoint)) return 'reels';
+  if (/video/.test(endpoint)) return 'videos';
+  if (/post|hashtag|keyword|topic|trend/.test(endpoint)) return 'posts';
+  return 'results';
 }
 
 /** Several tools' tables → one: a `source` column first (which tool each row came from), then the columns unioned. */

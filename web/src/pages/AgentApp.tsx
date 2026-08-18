@@ -14,6 +14,7 @@ import { SchedulePicker, schedText } from '../ui/SchedulePicker';
 import { StatusBadge, timeAgo } from './Agents';
 import { OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdDraftOf, thresholdOfDraft } from '../ui/agentJobFields';
 import { plainPreview } from '../ui/plainPreview';
+import { AddSourcePanel } from './social/AddSourcePanel';
 
 type UiInput = { key: string; label: string; type: 'topic' | 'text' | 'url' | 'contact' | 'date' | 'choice'; placeholder?: string; options?: string[] };
 type UiSpec = { headline: string; inputs: UiInput[]; view: 'report' | 'brief' | 'checklist' | 'plain'; runLabel: string };
@@ -46,6 +47,7 @@ export function AgentApp() {
   const [redesigning, setRedesigning] = useState(false);
   const [flow, setFlow] = useState<any>(null);
   const [pickingTools, setPickingTools] = useState(false); // this job's own toolbox (BEA-1168)
+  const [addingSource, setAddingSource] = useState(false); // another Social source on a direct-fetch job (BEA-1359)
   const catalog = useCatalog();
   const toolNames: Record<string, string> = Object.fromEntries((catalog?.tools || []).map((t: any) => [t.id, t.name]));
   const [allSkills, setAllSkills] = useState<any[] | null>(null);
@@ -471,10 +473,25 @@ export function AgentApp() {
             <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <h2 className="text-sm font-semibold">What it fetches</h2>
               {Object.entries(a.toolArgs as Record<string, any>).map(([tool, args]) => (
-                <ToolArgsEditor key={tool} tool={tool} args={args || {}} toolName={toolNames[tool]} onChange={(next) => setA((p: any) => ({ ...p, toolArgs: { ...p.toolArgs, [tool]: next } }))} />
+                <ToolArgsEditor key={tool} tool={tool} args={args || {}} toolName={toolNames[tool]} onChange={(next) => setA((p: any) => ({ ...p, toolArgs: { ...p.toolArgs, [tool]: next } }))}
+                  onRemove={Object.keys(a.toolArgs).length > 1 ? async () => {
+                    if (!window.confirm(`Remove ${toolNames[tool] || tool} from this job? The next run will not fetch it.`)) return;
+                    const toolArgs = Object.fromEntries(Object.entries(a.toolArgs).filter(([k]) => k !== tool));
+                    const d = await patch({ tools: Object.keys(toolArgs), toolArgs });
+                    if (d) toast('success', 'Source removed');
+                  } : undefined} />
               ))}
-              <button onClick={async () => { const d = await patch({ toolArgs: a.toolArgs }); if (d) toast('success', 'Saved — the next run uses these values'); }} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"><Save className="h-4 w-4" />Save</button>
-              <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button onClick={async () => { const d = await patch({ toolArgs: a.toolArgs }); if (d) toast('success', 'Saved — the next run uses these values'); }} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"><Save className="h-4 w-4" />Save</button>
+                {!addingSource && <button type="button" onClick={() => setAddingSource(true)} className="text-xs font-medium text-pink-700 hover:underline dark:text-pink-300">+ Add another source</button>}
+              </div>
+              {/* Another source (BEA-1359): the same platform/endpoint/form as the Social page; saved at once with its arguments pinned. */}
+              {addingSource && (
+                <AddSourcePanel defaultPlatform={String(Object.keys(a.toolArgs)[0] || '').replace(/^svc:/, '').split('.')[0]} taken={Object.keys(a.toolArgs)}
+                  onAdd={async (x) => { const toolArgs = { ...a.toolArgs, [x.tool]: x.args }; const d = await patch({ tools: Object.keys(toolArgs), toolArgs }); if (d) { toast('success', `Added ${x.label || x.tool}`); setAddingSource(false); } }}
+                  onCancel={() => setAddingSource(false)} />
+              )}
+              <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.{Object.keys(a.toolArgs).length > 1 ? ' Several sources are fetched one after the other and merged into one table.' : ''}</p>
               {/* Watch / Alert (BEA-1358): the same picker as the builder, so the two can never disagree. */}
               {modeDraft && (
                 <div className="space-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">

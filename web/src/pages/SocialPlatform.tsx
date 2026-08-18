@@ -5,7 +5,7 @@ import { Column, DataTable, SortOption } from '../ui/DataTable';
 import { Skeleton } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
 import { useUrlState } from '../ui/useUrlState';
-import { CHIP, CreditStrip, Endpoint, GHOST_BTN, INPUT, NoKeyNotice, Notice, Platform, PlatformLogo, PRIMARY_BTN, RunResult, Spend, num, plural } from './social/socialShared';
+import { CHIP, CreditStrip, Endpoint, FieldInput, argsOf, GHOST_BTN, INPUT, NoKeyNotice, Notice, Platform, PlatformLogo, PRIMARY_BTN, RunResult, Spend, fieldsOf, num, plural } from './social/socialShared';
 import { cell, format, heading, pickColumns, shapeOf, toMarkdown } from './social/resultShape';
 
 /**
@@ -290,16 +290,6 @@ function EndpointCard({ e, platform, open, onToggle, noKey, topUpUrl, onRan }: {
 
 // ---- the form + the run -----------------------------------------------------------------------
 
-type FieldDef = { name: string; schema: any; required: boolean };
-
-/** The fields, required first, then the rest in the schema's own order. */
-function fieldsOf(e: Endpoint): FieldDef[] {
-  const props = e.schema?.properties || {};
-  const required = e.schema?.required || [];
-  const all = Object.keys(props).map((name) => ({ name, schema: props[name] || {}, required: required.includes(name) }));
-  return [...all.filter((f) => f.required), ...all.filter((f) => !f.required)];
-}
-
 /** Which field pages the answer, if any — a `cursor` or a `page`. Named by the spec, never guessed. */
 function pagingField(e: Endpoint): { name: string; kind: 'cursor' | 'page' } | null {
   const props = e.schema?.properties || {};
@@ -343,11 +333,7 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
     }
     setBusy(true);
     setError(null);
-    const args: Record<string, any> = {};
-    for (const f of fields) {
-      const v = values[f.name];
-      if (v !== undefined && v !== '') args[f.name] = v;
-    }
+    const args: Record<string, any> = argsOf(fields, values);
     Object.assign(args, extra);
     try {
       const r = await fetch('/api/social/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actionId: e.id, args }) });
@@ -515,49 +501,6 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
         </div>
       )}
     </div>
-  );
-}
-
-/** One input, generated from its JSON schema: enums are selects, booleans yes/no, numbers numeric. */
-function FieldInput({ f, value, onChange }: { f: FieldDef; value: string; onChange: (v: string) => void }) {
-  const s = f.schema || {};
-  const type = String(s.type || 'string');
-  const label = (
-    <span className="mb-1 flex min-w-0 items-center gap-1 text-zinc-600 dark:text-zinc-400">
-      <span className="truncate font-medium">{f.name}</span>
-      {f.required && <span className="text-[10px] font-semibold uppercase text-emerald-600">required</span>}
-      {!f.required && <span className="text-[10px] text-zinc-400">optional</span>}
-    </span>
-  );
-  const help = s.description ? <span className="mt-1 block break-words text-[11px] leading-snug text-zinc-400">{String(s.description).slice(0, 220)}</span> : null;
-  const placeholder = s.example !== undefined ? `e.g. ${String(s.example)}` : s.default !== undefined ? `default ${String(s.default)}` : '';
-  return (
-    <label className="block min-w-0 text-sm">
-      {label}
-      {Array.isArray(s.enum) ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className={INPUT} aria-label={f.name}>
-          <option value="">{f.required ? 'Pick one…' : 'Any'}</option>
-          {s.enum.map((o: any) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
-        </select>
-      ) : type === 'boolean' ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className={INPUT} aria-label={f.name}>
-          <option value="">{s.default !== undefined ? `Default (${String(s.default)})` : 'Default'}</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
-      ) : (
-        <input
-          type={type === 'integer' || type === 'number' ? 'number' : 'text'}
-          inputMode={type === 'integer' || type === 'number' ? 'numeric' : undefined}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className={INPUT}
-          aria-label={f.name}
-        />
-      )}
-      {help}
-    </label>
   );
 }
 

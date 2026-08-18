@@ -49,13 +49,16 @@ export function OutputDestPicker({ dest, sheetId, onChange, onCommitSheetId, com
 }
 
 /** A tool's pinned arguments, editable one field at a time. Keys are the endpoint's own field names. */
-export function ToolArgsEditor({ tool, args, onChange, toolName }: { tool: string; args: Record<string, any>; onChange: (next: Record<string, any>) => void; toolName?: string }) {
+export function ToolArgsEditor({ tool, args, onChange, toolName, onRemove }: { tool: string; args: Record<string, any>; onChange: (next: Record<string, any>) => void; toolName?: string; /** Shown as a Remove link when a job has more than one source (BEA-1359). */ onRemove?: () => void }) {
   const keys = Object.keys(args || {});
   return (
     <div className="space-y-1.5 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700" data-testid="tool-args">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <span className="rounded-full bg-pink-50 px-2 py-0.5 font-semibold text-pink-700 dark:bg-pink-500/10 dark:text-pink-300">📣 {toolName || 'Social'}</span>
-        <code className="truncate text-[11px] text-zinc-400">{tool}</code>
+        <code className="min-w-0 truncate text-[11px] text-zinc-400">{tool}</code>
+        {onRemove && (
+          <button type="button" onClick={onRemove} aria-label={`Remove source ${toolName || tool}`} title="Remove this source" className="ml-auto rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10">Remove</button>
+        )}
       </div>
       {keys.length === 0 ? (
         <p className="text-[11px] text-zinc-400">This endpoint takes no inputs — it runs as is.</p>

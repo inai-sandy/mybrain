@@ -1,4 +1,4 @@
-import { KEEP_AS_FETCHED, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunService, mergeTables } from './social-agent-run.service';
+import { KEEP_AS_FETCHED, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunService, isEmptySearch, mergeTables, nounOf } from './social-agent-run.service';
 
 /**
  * BEA-1357 — a Social agent's run: direct fetch (no engine turn), rows → a Google Sheet through the
@@ -7,7 +7,7 @@ import { KEEP_AS_FETCHED, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunS
 
 const POSTS = { success: true, credits_charged: 1, posts: [{ url: 'u1', caption: 'Smart home India', like_count: 3, owner: { username: 'a' } }, { url: 'u2', caption: 'Elsewhere', like_count: 5, owner: { username: 'b' } }] };
 
-function harness(opts: { fetchOk?: boolean; sheets?: 'ok' | 'not-connected'; existing?: { count: number; header: string[] } | null; whatsapp?: { sent: boolean; why?: string; via?: 'template' | 'text'; error?: string; note?: string } | null; shapeReply?: string | null; docs?: boolean } = {}) {
+function harness(opts: { fetchOk?: boolean; sheets?: 'ok' | 'not-connected'; existing?: { count: number; header: string[] } | null; whatsapp?: { sent: boolean; why?: string; via?: 'template' | 'text'; error?: string; note?: string } | null; shapeReply?: string | null; docs?: boolean; perTool?: Record<string, any> } = {}) {
   const steps: any[] = [];
   const finish: any[] = [];
   const calls: { id: string; ctx: any }[] = [];
@@ -19,6 +19,7 @@ function harness(opts: { fetchOk?: boolean; sheets?: 'ok' | 'not-connected'; exi
   const actions = {
     runDetailed: jest.fn(async (id: string, _input: string, ctx: any) => {
       calls.push({ id, ctx });
+      if (opts.perTool && id in opts.perTool) return opts.perTool[id]; // one answer per tool (BEA-1359)
       if (id.startsWith('svc:instagram.')) {
         return opts.fetchOk === false
           ? { ok: false, error: 'Instagram could not do that: No posts found', credits: 0, serviceName: 'Instagram', actionName: 'Search' }
@@ -244,5 +245,79 @@ describe('the ENGINE road with outputDest sheet — deliverTextToSheet (never a 
     const h = harness({ shapeReply: null });
     await expect(h.svc.deliverTextToSheet('run9', job({ prompt: 'x' }), 'T', 'answer')).rejects.toThrow(/Could not shape the answer into rows/);
     expect(h.calls.some((c) => c.id === SHEET_CREATE)).toBe(false);
+  });
+});
+
+/**
+ * BEA-1359 — the owner's example is a TWO-source digest, and the vendor's Google-indexed searches
+ * answer `404 not_found` for a query with no posts (for stretches, for every query). A not_found on
+ * a SEARCH is an empty source — 0 items, 0 credits, said plainly on the run — never a failed run.
+ * A transport error, 401/402/429/5xx or any other `success:false` still fails it. All sources empty
+ * → the run finishes honestly: "0 posts found — nothing to write, no sheet made", nothing sent.
+ */
+describe('BEA-1359 — a vendor not_found on a search is an empty source, not a failed run', () => {
+  const HASHTAG = 'svc:instagram.search_hashtag';
+  const REELS = 'svc:instagram.reels_search';
+  const NOT_FOUND = { ok: false, error: 'Instagram could not do that: No posts found', credits: 0, status: 404, notFound: true, serviceName: 'Instagram', actionName: 'Search Hashtag Posts' };
+  const two = (over: any = {}) => job({ tools: [HASHTAG, REELS], toolArgs: { [HASHTAG]: { hashtag: 'smarthomeindia', date_posted: 'last-month' }, [REELS]: { query: 'smart home India', date_posted: 'last-month' } }, notifyWhatsApp: true, ...over });
+
+  it('isEmptySearch: only a notFound answer, and only on a search endpoint', () => {
+    expect(isEmptySearch(HASHTAG, NOT_FOUND as any)).toBe(true);
+    expect(isEmptySearch(REELS, NOT_FOUND as any)).toBe(true);
+    expect(isEmptySearch('svc:instagram.profile', NOT_FOUND as any)).toBe(false); // a missing profile is a real failure
+    expect(isEmptySearch(HASHTAG, { ok: false, error: 'rate-limited', status: 429 } as any)).toBe(false);
+    expect(nounOf(HASHTAG)).toBe('posts');
+    expect(nounOf(REELS)).toBe('reels');
+    expect(nounOf('svc:instagram.search')).toBe('results');
+  });
+
+  it('one search empty, the other with posts → the run completes with the rows it has, and says the empty one plainly', async () => {
+    const h = harness({ perTool: { [HASHTAG]: NOT_FOUND, [REELS]: { ok: true, data: POSTS, credits: 1, serviceName: 'Instagram', actionName: 'Search Reels' } } });
+    await h.svc.run('run1', two());
+    expect(h.finish[0].status).toBe('done');
+    expect(h.steps.some((s) => /Instagram · Search Hashtag Posts — no posts found \(vendor answered not_found\) · 0 credits/.test(s.label) && s.status === 'done')).toBe(true);
+    // the sheet was made from the reels rows alone
+    const write = h.calls.find((c) => c.id === SHEET_WRITE)!.ctx;
+    expect(write.args.values).toHaveLength(3); // header + 2 rows
+    expect(h.finish[0].outputUrl).toBe('https://docs.google.com/spreadsheets/d/SHEET_NEW');
+    // and the WhatsApp went out — there were real rows
+    expect(h.alerts.runFinished).toHaveBeenCalled();
+  });
+
+  it('every search empty → done honestly: 0 posts found, no sheet made, no WhatsApp, and the run says why', async () => {
+    const h = harness({ perTool: { [HASHTAG]: NOT_FOUND, [REELS]: { ...NOT_FOUND, actionName: 'Search Reels' } } });
+    await h.svc.run('run1', two());
+    expect(h.finish[0].status).toBe('done');
+    expect(h.finish[0].resultText).toMatch(/0 posts found — nothing to write, no sheet made/);
+    expect(h.finish[0].resultText).toMatch(/every one of the 2 searches/);
+    expect(h.finish[0].outputUrl).toBeUndefined();
+    expect(h.calls.map((c) => c.id)).toEqual([HASHTAG, REELS]); // no create, no write
+    expect(h.alerts.runFinished).not.toHaveBeenCalled(); // nothing to send
+    expect(h.llm.completeHelper).not.toHaveBeenCalled(); // no shaping of nothing
+    expect(h.steps.filter((s) => /no (posts|reels) found \(vendor answered not_found\)/.test(s.label))).toHaveLength(2);
+  });
+
+  it('a Watch job with every search empty also finishes "0 found" and stores no baseline', async () => {
+    const h = harness({ perTool: { [HASHTAG]: NOT_FOUND, [REELS]: NOT_FOUND } });
+    await h.svc.run('run1', two({ mode: 'watch' }));
+    expect(h.finish[0].status).toBe('done');
+    expect(h.finish[0].resultText).toMatch(/0 posts found/);
+  });
+
+  it('any OTHER refusal still fails the run — 429, a transport error, a not_found on a profile', async () => {
+    for (const bad of [
+      { ok: false, error: 'Instagram could not do that: Scrape Creators is rate-limiting us right now — try again in a minute.', status: 429, serviceName: 'Instagram' },
+      { ok: false, error: 'Instagram could not do that: fetch failed (ECONNRESET: socket hang up)', serviceName: 'Instagram' },
+      { ok: false, error: 'Instagram could not do that: The Scrape Creators account is out of credits.', status: 402, outOfCredits: true, serviceName: 'Instagram' },
+    ]) {
+      const h = harness({ perTool: { [HASHTAG]: bad, [REELS]: { ok: true, data: POSTS, credits: 1, serviceName: 'Instagram', actionName: 'Search Reels' } } });
+      await h.svc.run('run1', two());
+      expect(h.finish[0].status).toBe('failed');
+      expect(h.calls.some((c) => c.id === SHEET_CREATE)).toBe(false);
+    }
+    const h = harness({ perTool: { 'svc:instagram.profile': { ...NOT_FOUND, actionName: 'Profile' } } });
+    await h.svc.run('run1', job({ tools: ['svc:instagram.profile'], toolArgs: { 'svc:instagram.profile': { handle: 'nobody_here_x' } } }));
+    expect(h.finish[0].status).toBe('failed');
+    expect(h.finish[0].error).toMatch(/No posts found/);
   });
 });
