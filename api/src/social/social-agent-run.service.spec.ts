@@ -1,4 +1,4 @@
-import { KEEP_AS_FETCHED, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunService, isEmptySearch, mergeTables, nounOf, shapeInput } from './social-agent-run.service';
+import { KEEP_AS_FETCHED, SHAPE_BATCH, SHAPE_MAX_TOKENS, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunService, isEmptySearch, mergeTables, nounOf, salvageRowsJson, shapeInput } from './social-agent-run.service';
 
 /**
  * BEA-1357 — a Social agent's run: direct fetch (no engine turn), rows → a Google Sheet through the
@@ -169,6 +169,25 @@ describe('the shaping step (columns · a filter like "in India")', () => {
     const prompt: string = (h.llm.completeHelper as jest.Mock).mock.calls[0][1];
     expect(prompt).toContain('["creator","link"]');
   });
+  it('BEA-1369: a reply CUT OFF mid-row is salvaged to its complete rows; batches are 30 items with a 32k ceiling (a 60-item batch was cut at 12k live)', async () => {
+    expect(SHAPE_BATCH).toBe(30);
+    expect(SHAPE_MAX_TOKENS).toBeGreaterThanOrEqual(32_000);
+    const cut = 'Here you go:\n{"columns":["creator","link","caption"],"rows":[["a","u1","one"],["b","u2","two"],["c","u3","thr';
+    expect(salvageRowsJson(cut)).toEqual({ columns: ['creator', 'link', 'caption'], rows: [['a', 'u1', 'one'], ['b', 'u2', 'two']] });
+    expect(salvageRowsJson('{"columns":["x"],"rows":[["1"]]}')).toEqual({ columns: ['x'], rows: [['1']] });
+    expect(salvageRowsJson('{"columns":["x"],"rows":[["1"],["2"]]} trailing')).toEqual({ columns: ['x'], rows: [['1'], ['2']] });
+    expect(salvageRowsJson('no json here')).toBeNull();
+    expect(salvageRowsJson('{"columns":["x"],"rows":[["never clo')).toEqual({ columns: ['x'], rows: [] }); // nothing complete → 0 rows, not a crash
+    // through the run: the cut reply still writes the two complete rows
+    const h = harness({ shapeReply: cut });
+    await h.svc.run('run1', job({ prompt: 'Only posts about India. Columns: creator, link, caption' }));
+    const write = h.calls.find((c) => c.id === SHEET_WRITE)!.ctx;
+    expect(write.args.values).toEqual([['creator', 'link', 'caption'], ['a', 'u1', 'one'], ['b', 'u2', 'two']]);
+    expect(h.finish[0].status).toBe('done');
+    // the ceiling asked for is the new one
+    expect((h.llm.completeHelper as jest.Mock).mock.calls[0][2]).toBe(SHAPE_MAX_TOKENS);
+  });
+
   it('a shaping model that answers nothing fails the run — a run may never say done if a step failed', async () => {
     const h = harness({ shapeReply: null });
     await h.svc.run('run1', job({ prompt: 'Only posts about India' }));
