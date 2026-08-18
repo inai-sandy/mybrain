@@ -1095,7 +1095,8 @@ function ServiceSheet({ slug, onClose, onChanged }: { slug: string; onClose: () 
                 {svc ? <Logo s={svc} size={44} /> : <Skeleton className="h-11 w-11 shrink-0" />}
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-lg font-bold">{svc?.name || slug}</h3>
-                  <p className="mt-0.5 truncate text-xs text-zinc-400">
+                  {/* Wraps on a phone: "823 actions (42 retired) · 46 events" is longer than 390px allows (BEA-1365). */}
+                  <p className="mt-0.5 text-xs text-zinc-400 sm:truncate">
                     {svc ? `${svc.category} · ${plural(num(svc.availableActionCount ?? svc.actionCount), 'action')}${num(svc.retiredActionCount) ? ` (${num(svc.retiredActionCount)} retired)` : ''}${num(svc.triggerCount) ? ` · ${plural(num(svc.triggerCount), 'event')}` : ''}` : 'Loading…'}
                   </p>
                 </div>
