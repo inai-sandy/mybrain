@@ -281,6 +281,38 @@ Mentor → Push, never back — `PushModule` cannot import Telegram, which is wh
 is not inside `AlertsService`). Traps: `SocialWatch` has no FK — `deleteAgent` deletes its rows by
 hand; `GET/DELETE /api/social/watch/:agentId` ("watching since", "Forget what it saw").
 
+**Every agent shows its flow picture, automatically (BEA-1366).** The Flow tab (`AgentApp` → `FlowPanel`
+in `AgentJobPanels.tsx`) opens ON the picture, run screen on top; the "Draw the flow" button remains only
+for a legacy job with no flow at all. Two roads, one seam: `AgentFlowSyncService` (`api/src/flows/
+agent-flow-sync.service.ts`) registers itself with `AgentService.setFlowSync()` at boot (AgentModule cannot
+import FlowsModule) and runs after every `createAgent`/`updateAgent` (`createAgent(input, { drawFlow:false })`
+opts out — the voice research job draws its own). **A Social agent (direct runner) is BUILT, never planned**:
+`buildSocialFlow()` in `api/src/social/social-flow.ts` is a pure function of the same facts `SocialAgentRunService.
+run()` reads — one `tool` node per source (`src:<svc id>`, args + last-known credits from `ToolCall`), `merge`
+(mode raw, an honest "Union" — `mergeTables()` never de-dupes; only the shaping step does what the task says) when >1, the `ask_ai` shaping node ONLY when `wantsShaping()` AND mode is
+`run` (a Watch never shapes), `filter`/`if` for watch/alert, the writer (`svc:googlesheets.create_google_sheet1`
+| `batch_update` for append | `save_document`), `whatsapp`/`telegram`, then `output`. Existing kinds only, and
+every node carries `say` (its plain-English line, which `describeFlow`/`stepAction` prefer). Saved
+`locked:true` + `drawnBy:'social'` through `FlowsService.saveDrawn()` — the one writer past the lock — and
+the canvas is READ-ONLY for it (`FlowEditor readOnly`, also auto on `/flows/:id`), because the runner never
+executes this graph and an edit would fork from what runs; a save that touches `SOCIAL_KEYS` (tools,
+toolArgs, outputDest, sheetId, notifyWhatsApp, mode, prompt, alertCondition, threshold, name) rebuilds it in
+place, a pause does not; `backfillSocial()` draws every Social agent 15s after boot, idempotent (an equal
+graph is not rewritten). **Every other agent is planned on save** — create and any prompt change — via
+`planAndSave` in the BACKGROUND (`Flow.drawStatus:'drawing'`, the panel polls every 3s; one planner per flow,
+a mid-plan save queues exactly one more); legacy normal agents are NOT planned at boot (a model call each); flows left `'drawing'` by a
+deploy are swept to `'failed'` at boot (`reconcileStuckDrawing`), same rule as the AgentRun reconciler.
+**A planner failure keeps the last picture**: `planAndSave` no longer overwrites a real graph with the bare
+Ask-AI stand-in — it sets `drawStatus:'failed'` + `drawNote` (`REDRAW_FAILED_NOTE`) and the panel says so with
+Try again; a first draw that fails still saves the marked fallback (never blank). The Chat path no longer
+calls `/plan` itself (that made two plans) — `patch()` reloads the flow and the server does it. Draw/re-draw
+from the UI = `POST /api/flows/agents/:agentId/draw` (server decides which road). **Runs mark the picture**:
+a Social run's steps carry `nodeId` (the ids above); `nodeResultsFromRun()` folds the newest job run's
+`stepLog` into `FlowEditor runResults` → the existing `RunBadge` ring + a small note per node (`info` steps
+read as skipped). Traps: `Flow.drawnBy/drawStatus/drawNote` are new columns (migration `flow_drawn`);
+`jobBuilderCreate` now passes tools + notifyWhatsApp INTO `createAgent` so the first plan sees the toolbox;
+`FlowsService.update()`'s locked guard is untouched, so a hand edit of a social flow answers 400 by design.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

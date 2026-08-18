@@ -9,13 +9,14 @@ function stepTag(s: string): { label: string; cls: string } {
   if (/gmail|calendar|google drive/.test(t)) return { label: 'Google', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' };
   if (/the web|read the most relevant|open and read|http/.test(t)) return { label: 'Web', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' };
   if (/\bskill\b/.test(t)) return { label: 'Skill', cls: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300' };
-  if (/save the result|send the result|telegram|as a document/.test(t)) return { label: 'Save/send', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' };
+  if (/save the result|send the result|telegram|as a document|google sheet|whatsapp|documents library/.test(t)) return { label: 'Save/send', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' };
+  if (/directly through your tools/.test(t)) return { label: 'Fetch', cls: 'bg-pink-100 text-pink-700 dark:bg-pink-500/15 dark:text-pink-300' };
   if (/ask me|pause and ask/.test(t)) return { label: 'Ask you', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' };
   return { label: 'Think', cls: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' };
 }
 const LEGEND = [
   { label: 'Brain', cls: 'bg-indigo-500' }, { label: 'Web', cls: 'bg-blue-500' }, { label: 'Google', cls: 'bg-sky-500' },
-  { label: 'Skill', cls: 'bg-violet-500' }, { label: 'Save/send', cls: 'bg-emerald-500' }, { label: 'Ask you', cls: 'bg-amber-500' }, { label: 'Think', cls: 'bg-zinc-400' },
+  { label: 'Skill', cls: 'bg-violet-500' }, { label: 'Fetch', cls: 'bg-pink-500' }, { label: 'Save/send', cls: 'bg-emerald-500' }, { label: 'Ask you', cls: 'bg-amber-500' }, { label: 'Think', cls: 'bg-zinc-400' },
 ];
 function Step({ s }: { s: string }) {
   const tag = stepTag(s);
@@ -60,7 +61,7 @@ export function FlowProcess({ process, prompt }: { process: any; prompt: string 
               ))}
             </ol>
             <p className="mt-2 text-xs text-zinc-500">
-              {process?.merge === 'raw' ? '→ Then each part is shown one after another, under its own heading.' : '→ Then all parts are combined into one clear answer.'}
+              {process?.mergeText ? `→ Then: ${process.mergeText}` : process?.merge === 'raw' ? '→ Then each part is shown one after another, under its own heading.' : '→ Then all parts are combined into one clear answer.'}
               {process?.hasAskUser ? ' It pauses to ask you along the way.' : ''}
             </p>
             {process?.finishing?.length > 0 && (

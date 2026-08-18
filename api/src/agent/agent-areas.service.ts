@@ -129,6 +129,8 @@ export class AgentAreasService {
     // they actually said, not invented.
     if (!checks.length && j.outcome) checks = [String(j.outcome).trim().slice(0, 300)];
 
+    // Tools + WhatsApp go in WITH the create (BEA-1366): the flow is planned on save, inside the
+    // job's toolbox — a patch straight after would have planned it against no toolbox at all.
     const created: any = await this.agentSvc.createAgent({
       areaId,
       name: String(j.name).trim().slice(0, 120),
@@ -139,12 +141,9 @@ export class AgentAreasService {
       schedule: j.schedule && typeof j.schedule === 'object' ? j.schedule : undefined,
       scheduleText: j.scheduleText || undefined,
       evals: checks.slice(0, 12).map((input: any) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input: String(input).slice(0, 300) })),
+      ...(tools.length ? { tools: tools.slice(0, 60) } : {}),
+      ...(j.notifyWhatsApp != null ? { notifyWhatsApp: !!j.notifyWhatsApp } : {}),
     } as any);
-
-    const patch: any = {};
-    if (tools.length) patch.tools = tools.slice(0, 60);
-    if (j.notifyWhatsApp != null) patch.notifyWhatsApp = !!j.notifyWhatsApp;
-    if (Object.keys(patch).length) await this.agentSvc.updateAgent(created.id, patch).catch(() => undefined);
 
     st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
     st.job = null;

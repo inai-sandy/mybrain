@@ -51,7 +51,7 @@ const KIND_META: Record<string, { icon: string; name: string }> = {
 };
 
 // Lets a node's controls (inline "+", on/off) reach the editor.
-const NodeCtx = createContext<{ addAfter: (id: string) => void; toggleEnabled: (id: string) => void }>({ addAfter: () => undefined, toggleEnabled: () => undefined });
+const NodeCtx = createContext<{ addAfter: (id: string) => void; toggleEnabled: (id: string) => void; readOnly?: boolean }>({ addAfter: () => undefined, toggleEnabled: () => undefined });
 const TOGGLEABLE = new Set(['skill', 'tool', 'ask_ai', 'subquestion']);
 
 function RunBadge({ s }: { s?: string }) {
@@ -65,7 +65,7 @@ function RunBadge({ s }: { s?: string }) {
 }
 
 function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boolean }) {
-  const { addAfter, toggleEnabled } = useContext(NodeCtx);
+  const { addAfter, toggleEnabled, readOnly } = useContext(NodeCtx);
   const off = data.enabled === false;
   const rs = data.runStatus as string | undefined;
   const runRing = rs === 'running' ? ' ring-2 ring-blue-400' : rs === 'done' ? ' ring-2 ring-emerald-400' : rs === 'failed' ? ' ring-2 ring-rose-400' : '';
@@ -82,7 +82,13 @@ function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boo
           </div>
           <div className="truncate font-medium text-zinc-800 dark:text-zinc-100">{data.label}</div>
           {data.sub && <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-500">{data.sub}</div>}
-          {data.kind === 'merge' && <div className="mt-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">{(data.mode || 'ai') === 'ai' ? 'AI synthesise' : 'Stack raw'}</div>}
+          {data.kind === 'merge' && <div className="mt-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">{data.modeText || ((data.mode || 'ai') === 'ai' ? 'AI synthesise' : 'Stack raw')}</div>}
+          {/* What happened here LAST run (BEA-1366) — a Social job's step log names its node. */}
+          {data.runNote && (
+            <div className={'mt-1 line-clamp-2 rounded px-1.5 py-0.5 text-[10px] leading-snug ' + (rs === 'failed' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' : rs === 'skipped' ? 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300')} title={data.runNote}>
+              {data.runNote}
+            </div>
+          )}
           {/* BEA-1253 — a bare fallback looks exactly like a real one-branch plan. Say which it is. */}
           {data.warn && (
             <div className="mt-1 rounded bg-amber-100 px-1.5 py-1 text-[10px] font-medium leading-snug text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
@@ -90,14 +96,14 @@ function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boo
             </div>
           )}
         </div>
-        {TOGGLEABLE.has(data.kind) && (
+        {TOGGLEABLE.has(data.kind) && !readOnly && (
           <button className="nodrag nopan mt-0.5 shrink-0" title={off ? 'Disabled — click to include' : 'Click to skip this branch'} onClick={(e) => { e.stopPropagation(); toggleEnabled(id); }}>
             <span className={'flex h-3.5 w-6 items-center rounded-full px-0.5 transition-colors ' + (off ? 'bg-zinc-300 dark:bg-zinc-600' : 'bg-emerald-500')}><span className={'block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform ' + (off ? 'translate-x-0' : 'translate-x-2.5')} /></span>
           </button>
         )}
       </div>
       {data.kind !== 'output' && <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-zinc-400" />}
-      {data.kind !== 'output' && (
+      {data.kind !== 'output' && !readOnly && (
         <button
           className="nodrag nopan absolute -bottom-3 left-1/2 z-10 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-300 bg-white text-zinc-500 shadow-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-600 dark:bg-zinc-900"
           title="Add the next block" onClick={(e) => { e.stopPropagation(); addAfter(id); }}
@@ -143,8 +149,15 @@ const edgeTypes = { deletable: DeletableEdge };
 let idc = 0;
 const nid = (p: string) => `${p}_${Date.now().toString(36)}_${idc++}`;
 
-function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
+/** What a node did last run — `{status, note}` per node id (BEA-1366); shown when no live run is being watched. */
+export type NodeRunResults = Record<string, { status?: string; note?: string }>;
+
+function Editor({ flowId, embedded, readOnly: readOnlyProp, runResults }: { flowId?: string; embedded?: boolean; readOnly?: boolean; runResults?: NodeRunResults }) {
   const params = useParams();
+  // A machine-drawn picture (BEA-1366, `drawnBy:'social'`) is read-only wherever it is opened — the
+  // standalone /flows/:id route too, not only the job's Flow tab — because the runner never reads it.
+  const [drawnFromSettings, setDrawnFromSettings] = useState(false);
+  const readOnly = !!readOnlyProp || drawnFromSettings;
   const id = flowId ?? params.id;
   const nav = useNavigate();
   const goBack = useGoBack('/flows');
@@ -195,6 +208,7 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
       setName(f.name || 'Untitled flow');
       setQuestion(f.question || '');
       setAgentId(f.agentId || null);
+      setDrawnFromSettings(f.drawnBy === 'social');
       setSchedule(f.schedule || null);
       const g = f.graph || { nodes: [], edges: [] };
       setResearchFrom(g.researchFrom || '');
@@ -259,8 +273,11 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
       setSelected(null);
       // BEA-1253: the planner returns 200 even when it could not plan, so a blanket success toast
       // was telling the owner it worked while handing him a stand-in. Say which one he got.
+      // BEA-1366: when it could not plan and a picture already existed, that picture is KEPT and
+      // the flow says `drawStatus:'failed'` — so say that, not "planned".
       const planFailed = (g.nodes || []).find((n: any) => n.id === 'question')?.data?.planFailed;
-      if (planFailed) toast('error', 'Could not plan this one — you have a single fallback step. Try again, or reword the question.');
+      if (f.drawStatus === 'failed' && !planFailed) toast('error', f.drawNote || 'Could not re-draw the flow — the last picture is kept. Try again.');
+      else if (planFailed) toast('error', 'Could not plan this one — you have a single fallback step. Try again, or reword the question.');
       else toast('success', 'Planned the whole flow — tweak any block, then Run');
       openProcess(); // show how it will run
     } catch { toast('error', 'Could not plan the flow'); } finally { setSplitting(false); }
@@ -403,8 +420,15 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
     }
     return set;
   })();
-  const dispNodes = nodes.map((n) => ({ ...n, selected: n.id === selected, data: { ...n.data, runStatus: watchRunId ? runStatuses[n.id] : undefined } }));
-  const dispEdges = edges.map((e) => ({ ...e, type: 'deletable' })); // render every link with a ✕ to disconnect
+  // Live run being watched → its statuses; else what the LAST run did per node (BEA-1366), when given.
+  const dispNodes = nodes.map((n) => ({
+    ...n,
+    selected: n.id === selected,
+    draggable: !readOnly,
+    data: { ...n.data, runStatus: watchRunId ? runStatuses[n.id] : runResults?.[n.id]?.status, runNote: watchRunId ? undefined : runResults?.[n.id]?.note },
+  }));
+  // Every link gets a ✕ to disconnect — except on a read-only picture, where the plain line is the point.
+  const dispEdges = edges.map((e) => (readOnly ? { ...e, type: undefined } : { ...e, type: 'deletable' }));
 
   return (
     <div className="flex flex-col" style={{ height: embedded ? '100%' : 'calc(100dvh - 1px)' }}>
@@ -412,12 +436,15 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
         {!embedded && <button onClick={goBack} title="Back" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /></button>}
         {embedded ? <div className="min-w-0 flex-1" /> : <input value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none hover:border-zinc-200 focus:border-emerald-400 dark:hover:border-zinc-700" />}
         {agentId && !embedded && <button onClick={() => nav(`/agent/a/${agentId}`)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-300 px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10"><Bot className="h-4 w-4" />Open agent</button>}
-        <button onClick={openToolbarPicker} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700"><Plus className="h-4 w-4" />Add block</button>
-        <button onClick={() => setSchedOpen((o) => !o)} title="Run on a schedule" className={'inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (schedule ? 'border-amber-300 text-amber-700 dark:border-amber-500/40 dark:text-amber-300' : 'border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800')}><Clock className="h-4 w-4" /><span className="hidden sm:inline">{schedLabel(schedule)}</span></button>
+        {/* A read-only picture (BEA-1366: drawn from a job's settings) keeps only "How it runs" — the
+            runner never reads this graph, so Add block / Save / Run / Auto-plan would draw a lie. */}
+        {readOnly && <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400" title="Drawn from this job’s settings — change them in Settings and the picture follows">🔒 read-only picture</span>}
+        {!readOnly && <button onClick={openToolbarPicker} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700"><Plus className="h-4 w-4" />Add block</button>}
+        {!readOnly && <button onClick={() => setSchedOpen((o) => !o)} title="Run on a schedule" className={'inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (schedule ? 'border-amber-300 text-amber-700 dark:border-amber-500/40 dark:text-amber-300' : 'border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800')}><Clock className="h-4 w-4" /><span className="hidden sm:inline">{schedLabel(schedule)}</span></button>}
         <button onClick={openProcess} title="How this flow will run" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><ListOrdered className="h-4 w-4" /><span className="hidden sm:inline">How it runs</span></button>
         {!embedded && <button onClick={() => nav(`/flows/${id}/runs`)} title="Run history & documents" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><History className="h-4 w-4" /></button>}
-        <button onClick={save} disabled={saving} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>
-        <button onClick={run} disabled={running} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Run</button>
+        {!readOnly && <button onClick={save} disabled={saving} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>}
+        {!readOnly && <button onClick={run} disabled={running} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Run</button>}
       </header>
       {schedOpen && <SchedulePopover schedule={schedule} onSave={saveSchedule} onClose={() => setSchedOpen(false)} />}
       {/* canvas → words offer (BEA-1065) */}
@@ -465,12 +492,12 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
           </div>
         </div>
       )}
-      <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
+      {!readOnly && <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
         <span className="shrink-0 text-xs font-medium text-zinc-500">Question</span>
         <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="The one big ask… e.g. “Full competitor analysis of Tesla.”" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
         <button onClick={autoPlan} disabled={splitting} title="Let the agent plan the whole flow from your question" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{splitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Auto-plan</button>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
+      </div>}
+      {!readOnly && <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
         <span className="shrink-0 text-xs font-medium text-zinc-500">Only look at things published</span>
         <input type="date" aria-label="Published from" value={researchFrom} onChange={(e) => setResearchFrom(e.target.value)} className="rounded-lg border border-zinc-200 bg-transparent px-2 py-1 text-xs outline-none focus:border-emerald-400 dark:border-zinc-700" />
         <span className="text-xs text-zinc-400">to</span>
@@ -483,7 +510,7 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
             ? 'Applies to every research step in this flow. Leave a side empty to leave it open.'
             : 'Optional. Leave both empty and each question works its own dates out.'}
         </span>
-      </div>
+      </div>}
       {/* "picture of your words" banner (BEA-1092) — only on the standalone editor; the agent's Flow tab has its own */}
       {agentId && !embedded && (
         <div className="flex items-center gap-2 border-b border-violet-200 bg-violet-50/70 px-4 py-2 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
@@ -494,10 +521,10 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
       <div className="min-h-0 flex-1">
         <div className="flex h-full">
           <div className="relative min-h-0 flex-1" ref={wrap}>
-            <NodeCtx.Provider value={{ addAfter, toggleEnabled }}>
+            <NodeCtx.Provider value={{ addAfter, toggleEnabled, readOnly }}>
              <EdgeCtx.Provider value={removeEdge}>
               <EdgeErrCtx.Provider value={toggleEdgeError}>
-              <ReactFlow nodes={dispNodes} edges={dispEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_, n) => setSelected(n.id)} onPaneClick={() => setSelected(null)} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: 'deletable', animated: true }} deleteKeyCode={['Backspace', 'Delete']} fitView proOptions={{ hideAttribution: true }} colorMode="system">
+              <ReactFlow nodes={dispNodes} edges={dispEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_, n) => setSelected(n.id)} onPaneClick={() => setSelected(null)} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: 'deletable', animated: true }} deleteKeyCode={readOnly ? null : ['Backspace', 'Delete']} nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesFocusable={!readOnly} fitView proOptions={{ hideAttribution: true }} colorMode="system">
                 <Background gap={16} />
                 <Controls showInteractive={false} />
               </ReactFlow>
@@ -554,7 +581,9 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
               </div>
             )}
           </div>
-          {selectedNode && <Inspector node={selectedNode} postMerge={postMergeIds.has(selectedNode.id)} onChange={setNodeData} onDelete={deleteNode} onClose={() => setSelected(null)} onTest={testToNode} testing={testing === selectedNode.id} />}
+          {selectedNode && (readOnly
+            ? <ReadOnlyInspector node={selectedNode} onClose={() => setSelected(null)} />
+            : <Inspector node={selectedNode} postMerge={postMergeIds.has(selectedNode.id)} onChange={setNodeData} onDelete={deleteNode} onClose={() => setSelected(null)} onTest={testToNode} testing={testing === selectedNode.id} />)}
         </div>
       </div>
     </div>
@@ -881,6 +910,49 @@ function SchedulePopover({ schedule, onSave, onClose }: { schedule: any; onSave:
   );
 }
 
-export function FlowEditor({ flowId, embedded }: { flowId?: string; embedded?: boolean } = {}) {
-  return <ReactFlowProvider><Editor flowId={flowId} embedded={embedded} /></ReactFlowProvider>;
+/**
+ * The read-only look at one node of a machine-drawn picture (BEA-1366): what the step is, the exact
+ * arguments it runs with, and what it did last run. Nothing here edits — the settings do.
+ */
+function ReadOnlyInspector({ node, onClose }: { node: Node; onClose: () => void }) {
+  const d: any = node.data;
+  const kind: string = d.kind;
+  const args = d.args && typeof d.args === 'object' ? Object.entries(d.args as Record<string, any>).filter(([, v]) => v !== '' && v !== null && v !== undefined) : [];
+  return (
+    <>
+      <div className="fixed inset-0 z-[55] bg-black/40 sm:hidden" onClick={onClose} />
+      <div className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[82vh] flex-col rounded-t-2xl border-t border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:static sm:z-auto sm:h-full sm:max-h-none sm:w-80 sm:shrink-0 sm:rounded-none sm:border-l sm:border-t-0">
+        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600 sm:hidden" />
+        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{(KIND_META[kind] || KIND_META.tool).icon} {(KIND_META[kind] || KIND_META.tool).name}</span>
+          <button onClick={onClose} className="ml-auto text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 space-y-3 overflow-auto p-3 pb-24 text-sm sm:pb-3">
+          <div className="font-medium text-zinc-800 dark:text-zinc-100">{d.label}</div>
+          {d.say && <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{d.say}</p>}
+          {args.length > 0 && (
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Runs with</div>
+              <dl className="mt-1 space-y-1 rounded-lg bg-zinc-50 px-2.5 py-2 text-xs dark:bg-zinc-800/60">
+                {args.map(([k, v]) => (
+                  <div key={k} className="flex gap-2"><dt className="shrink-0 text-zinc-500">{k.replace(/_/g, ' ')}</dt><dd className="min-w-0 break-words font-mono text-zinc-800 dark:text-zinc-200">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd></div>
+                ))}
+              </dl>
+            </div>
+          )}
+          {d.runNote && (
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Last run</div>
+              <p className={'mt-1 rounded-lg px-2.5 py-2 text-xs ' + (d.runStatus === 'failed' ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300')}>{d.runNote}</p>
+            </div>
+          )}
+          <p className="text-[11px] text-zinc-400">Drawn from this job’s settings — change them in Settings and the picture follows.</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function FlowEditor({ flowId, embedded, readOnly, runResults }: { flowId?: string; embedded?: boolean; readOnly?: boolean; runResults?: NodeRunResults } = {}) {
+  return <ReactFlowProvider><Editor flowId={flowId} embedded={embedded} readOnly={readOnly} runResults={runResults} /></ReactFlowProvider>;
 }

@@ -1098,6 +1098,14 @@ model Flow {
   /// replace AI News Daily's fetch/split/categorise steps with generic web searches and silently
   /// throw the RSS work away. Same class of failure as BEA-1246.
   locked       Boolean  @default(false)
+  /// Who drew this picture (BEA-1366): 'social' = built from the linked agent's settings, no AI, and
+  /// rebuilt on every save of those settings; 'planner' = the AI planner drew it on the agent's save.
+  /// null = drawn by hand / by an older path.
+  drawnBy      String?
+  /// 'drawing' while a re-draw runs in the background; 'failed' when the last one could not draw —
+  /// the previous picture is KEPT and `drawNote` says so; null = the picture is current.
+  drawStatus   String?
+  drawNote     String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }

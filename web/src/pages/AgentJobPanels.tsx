@@ -43,12 +43,36 @@ function RunIcon({ s }: { s?: string }) {
 
 // ---- Flow ---------------------------------------------------------------------------------------
 
-export function FlowPanel({ id, flow, onChanged, goChat }: { id: string; flow: any; onChanged: () => void; goChat: () => void }) {
+/**
+ * A run's step log → what each node of the picture did last time (BEA-1366). A Social run's steps
+ * carry `nodeId` (`social-flow.ts` ids); later steps for the same node override earlier ones, so a
+ * "Shaping…" (running) line is replaced by "Shaped 12 rows" (done). Steps without a nodeId (log
+ * lines, engine runs) mark nothing — the picture never guesses.
+ */
+export function nodeResultsFromRun(run: any): Record<string, { status?: string; note?: string }> {
+  const out: Record<string, { status?: string; note?: string }> = {};
+  const steps: any[] = Array.isArray(run?.stepLog) ? run.stepLog : [];
+  for (const s of steps) {
+    if (!s?.nodeId) continue;
+    const st = s.status === 'failed' ? 'failed' : s.status === 'running' ? 'running' : s.status === 'info' ? 'skipped' : 'done';
+    out[s.nodeId] = { status: st, note: String(s.label || '').slice(0, 160) };
+  }
+  // A run that ended while a node still says "running" did not finish that node.
+  if (run && run.status !== 'running') for (const k of Object.keys(out)) if (out[k].status === 'running') out[k] = { ...out[k], status: run.status === 'failed' ? 'failed' : 'done' };
+  return out;
+}
+
+export function FlowPanel({ id, flow, onChanged, goChat, lastRun }: { id: string; flow: any; onChanged: () => void; goChat: () => void; lastRun?: any }) {
   const toast = useToast();
   const [gen, setGen] = useState(false);
   const [showCanvas, setShowCanvas] = useState(true);
   const [prompt, setPrompt] = useState('');
   const [process, setProcess] = useState<any>(null);
+  const social = flow?.drawnBy === 'social';
+  const drawing = flow?.drawStatus === 'drawing';
+  const failed = flow?.drawStatus === 'failed';
+  const hasNodes = (flow?.graph?.nodes || []).length > 0;
+  const runResults = social && lastRun ? nodeResultsFromRun(lastRun) : undefined;
 
   // Mobile leads with the readable steps; the canvas is a tap away (editing on a phone is fiddly).
   useEffect(() => { if (typeof window !== 'undefined') setShowCanvas(window.innerWidth >= 640); }, []);
@@ -56,24 +80,33 @@ export function FlowPanel({ id, flow, onChanged, goChat }: { id: string; flow: a
     if (!flow?.id) return;
     fetch(`/api/flows/${flow.id}/prompt`).then((r) => r.json()).then((p) => { setPrompt(p.prompt || ''); setProcess(p.process || null); }).catch(() => undefined);
   }, [flow?.id, flow?.updatedAt]);
+  // A picture being drawn in the background (a normal agent's planner) — keep looking until it lands (BEA-1366).
+  useEffect(() => {
+    if (!drawing) return;
+    let ticks = 0;
+    const t = setInterval(() => { ticks++; onChanged(); if (ticks > 60) clearInterval(t); }, 3000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [drawing, flow?.id]);
 
+  // One road for "Draw the flow" and "Re-draw" (BEA-1366): the server decides — a Social agent is
+  // rebuilt from its settings, any other agent is (re)planned in the background and we poll.
   async function generate() {
     setGen(true);
     try {
-      let fl = flow;
-      if (!fl) {
-        const r = await fetch('/api/flows', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Flow', question: '', agentId: id }) });
-        fl = await r.json().catch(() => ({}));
-        if (!r.ok || !fl.id) throw new Error();
-      }
-      await fetch(`/api/flows/${fl.id}/plan`, { method: 'POST' }).catch(() => undefined);
+      const r = await fetch(`/api/flows/agents/${id}/draw`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not draw the flow');
       onChanged();
-      toast('success', 'Flow drawn — have a look at the steps');
-    } catch { toast('error', 'Could not draw the flow'); }
+      if (!d.flow) toast('error', 'Nothing to draw from yet — give this job a task first');
+      else if (d.flow.drawnBy === 'social') toast('success', 'Drawn from this job’s settings');
+      else toast('success', 'Drawing the steps — they appear in a moment');
+    } catch (e: any) { toast('error', e?.message || 'Could not draw the flow'); }
     setGen(false);
   }
 
   if (!flow) {
+    // Only a legacy job that was never saved since this shipped lands here — one press draws it the same way a save does.
     return (
       <div className="rounded-2xl border border-dashed border-zinc-300 p-10 text-center dark:border-zinc-700">
         <Workflow className="mx-auto h-8 w-8 text-zinc-300 dark:text-zinc-600" />
@@ -87,25 +120,51 @@ export function FlowPanel({ id, flow, onChanged, goChat }: { id: string; flow: a
 
   return (
     <div>
-      <div className="mb-2 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
-        ✦ This is the <b>picture</b> of what you told this job to do. Change it here — or just <button onClick={goChat} className="font-semibold underline decoration-violet-400 underline-offset-2 hover:text-violet-600 dark:hover:text-violet-100">💬 Chat</button> and it re-draws itself.
-      </div>
+      {social ? (
+        <div className="mb-2 rounded-xl border border-pink-200 bg-pink-50/60 px-3 py-2 text-xs text-pink-800 dark:border-pink-500/30 dark:bg-pink-500/10 dark:text-pink-200">
+          ✦ This picture is <b>drawn from this job’s settings</b> — the sources, the task, where the result goes, WhatsApp, Watch/Alert. Change them in <b>Settings</b> and the picture follows. Nothing here can drift from what actually runs.
+        </div>
+      ) : (
+        <div className="mb-2 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
+          ✦ This is the <b>picture</b> of what you told this job to do. Change it here — or just <button onClick={goChat} className="font-semibold underline decoration-violet-400 underline-offset-2 hover:text-violet-600 dark:hover:text-violet-100">💬 Chat</button> and it re-draws itself.
+        </div>
+      )}
+      {/* The state of the last (re-)draw (BEA-1366): drawing… / could not re-draw (the last picture is kept). */}
+      {drawing && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />{hasNodes ? 'Re-drawing the steps to match the new task…' : 'Drawing the steps from what this job is asked to do…'}
+        </div>
+      )}
+      {failed && !drawing && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 flex-1">{flow.drawNote || 'Could not re-draw the flow — the last picture is kept.'}</span>
+          <button onClick={generate} disabled={gen} className="rounded-md border border-amber-300 px-2 py-0.5 font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/40 dark:hover:bg-amber-500/20">Try again</button>
+        </div>
+      )}
       <div className="mb-2 flex items-center justify-between gap-2">
-        <button onClick={generate} disabled={gen} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10">
-          {gen ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}Re-draw
-        </button>
+        {social ? (
+          <span className="text-xs text-zinc-500">
+            {lastRun ? <>Last run {when(lastRun.startedAt)} · <span className={lastRun.status === 'failed' ? 'text-rose-600 dark:text-rose-400' : lastRun.status === 'done' ? 'text-emerald-600 dark:text-emerald-400' : ''}>{lastRun.status}</span> — each step shows what it did</> : 'Not run yet — after a run, each step shows what it did'}
+          </span>
+        ) : (
+          <button onClick={generate} disabled={gen || drawing} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10">
+            {gen || drawing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}Re-draw
+          </button>
+        )}
         <button onClick={() => setShowCanvas((v) => !v)} className="rounded-lg border border-zinc-300 px-2 py-1 text-xs hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 sm:hidden">{showCanvas ? 'Show steps' : 'Open canvas'}</button>
       </div>
-      {showCanvas ? (
+      {!hasNodes && drawing ? (
+        <div className="flex h-40 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-sm text-zinc-500 dark:border-zinc-700"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Drawing…</div>
+      ) : showCanvas ? (
         <div className="h-[68vh] overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800">
           <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading editor…</div>}>
-            <FlowEditor key={flow.updatedAt || flow.id} flowId={flow.id} embedded />
+            <FlowEditor key={flow.updatedAt || flow.id} flowId={flow.id} embedded readOnly={social} runResults={runResults} />
           </Suspense>
         </div>
       ) : (
         <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
           {process ? <FlowProcess process={process} prompt={prompt} /> : <p className="text-sm text-zinc-500">No steps yet.</p>}
-          <p className="mt-2 text-xs text-zinc-400">Tap “Open canvas” above to edit the flow visually (best on a larger screen).</p>
+          <p className="mt-2 text-xs text-zinc-400">{social ? 'Tap “Open canvas” above to see the picture.' : 'Tap “Open canvas” above to edit the flow visually (best on a larger screen).'}</p>
         </div>
       )}
     </div>

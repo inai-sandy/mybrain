@@ -3,13 +3,26 @@ import { Response } from 'express';
 import { sendJson } from '../common/send-json';
 import { FlowsService } from './flows.service';
 import { FlowRunnerService } from './flows-runner.service';
+import { AgentFlowSyncService } from './agent-flow-sync.service';
 
 @Controller('flows')
 export class FlowsController {
   constructor(
     private readonly flows: FlowsService,
     private readonly runner: FlowRunnerService,
+    private readonly sync?: AgentFlowSyncService, // optional + LAST — spec files construct positionally
   ) {}
+
+  /**
+   * Draw / re-draw an agent's flow picture on request (BEA-1366) — one road for both kinds: a
+   * Social agent is rebuilt from its settings (no AI), any other agent is (re)planned in the
+   * background and answers `drawStatus:'drawing'`. `flow:null` = nothing to draw from yet.
+   */
+  @Post('agents/:agentId/draw')
+  async draw(@Param('agentId') agentId: string) {
+    if (!this.sync) throw new BadRequestException('Drawing is not available on this server.');
+    return { flow: await this.sync.drawFor(agentId) };
+  }
 
   @Get()
   async list(@Query('agentId') agentId?: string) {

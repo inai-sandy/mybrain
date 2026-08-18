@@ -172,7 +172,7 @@ export class EmoResearchService {
         defaultDepth: 'deep',
         origin: 'voice',
         tools,
-      } as any);
+      } as any, { drawFlow: false }); // this path links + plans its own flow just below (BEA-1366)
 
       const jobLink = { kind: 'agent', id: job.id, label: `Open the job: ${topic}` };
       const madeNote = madeAgent ? 'I set up a Research Agent for you and filed this under it.' : 'Filed under your Research Agent.';
@@ -242,7 +242,7 @@ export class EmoResearchService {
     try {
       const { id: areaId } = await this.areas.ensureResearchAgent();
       const topic = base.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').slice(0, 60).trim() || 'Research';
-      const job: any = await this.agent.createAgent({ areaId, name: topic.slice(0, 120), icon: '🔬', description: 'Asked for by voice', prompt: base, defaultDepth: 'deep', origin: 'voice' } as any);
+      const job: any = await this.agent.createAgent({ areaId, name: topic.slice(0, 120), icon: '🔬', description: 'Asked for by voice', prompt: base, defaultDepth: 'deep', origin: 'voice' } as any, { drawFlow: false }); // createResearchFlow draws it (BEA-1366)
       return job?.id || null;
     } catch { return null; }
   }

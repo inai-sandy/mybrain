@@ -16,6 +16,15 @@ export type AskInput = {
 const FINISHED = ['done', 'failed', 'cancelled'];
 
 /**
+ * The flow-picture drawer (BEA-1366). Every agent shows its flow without a button: a Social agent's
+ * picture is BUILT from its settings on every save, any other agent's is planned on save. The drawer
+ * lives in FlowsModule (`AgentFlowSyncService`) and registers itself here at boot — AgentModule
+ * cannot import FlowsModule (FlowsModule imports AgentModule), so this is a seam, not an import.
+ * A drawer that throws must never break a save; the caller swallows.
+ */
+export type AgentFlowSync = { afterSave(agent: any, ctx: { created: boolean; changed: string[] }): Promise<void> };
+
+/**
  * AgentService — the DURABLE human-in-the-loop engine (BEA-619).
  *
  * This is the piece Hermes does NOT give us: a run can pause on a structured question,
@@ -26,8 +35,14 @@ const FINISHED = ['done', 'failed', 'cancelled'];
 @Injectable()
 export class AgentService implements OnModuleInit, OnModuleDestroy {
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private flowSync: AgentFlowSync | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Register the flow-picture drawer (BEA-1366). Called once by `AgentFlowSyncService.onModuleInit`. */
+  setFlowSync(sync: AgentFlowSync | null) {
+    this.flowSync = sync;
+  }
 
   onModuleInit() {
     // A run's driver lives in this process's memory. If the process restarts (deploy/crash/reboot)
@@ -262,7 +277,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown }) {
+  async createAgent(
+    input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown },
+    // `drawFlow:false` — the caller draws (and plans) the picture itself, e.g. the voice research
+    // job, which links its own flow so it can plan inside the toolbox in one pass (BEA-1366).
+    opts: { drawFlow?: boolean } = {},
+  ) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
@@ -322,7 +342,10 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         (a as any).areaId = area.id;
       } catch { /* area creation must never block agent creation */ }
     }
-    return this.shapeAgent(a);
+    const shaped = this.shapeAgent(a);
+    // Every agent shows its flow (BEA-1366): drawn from the settings (Social) or planned (others).
+    if (opts.drawFlow !== false) await this.flowSync?.afterSave?.(shaped, { created: true, changed: [] }).catch(() => undefined);
+    return shaped;
   }
 
   /** Clamp a depth value to the allowed set (default 'standard'). */
@@ -454,7 +477,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (p.alertCondition !== undefined) data.alertCondition = this.cleanCondition(p.alertCondition);
     if (p.threshold !== undefined) data.threshold = this.cleanThreshold(p.threshold);
     const updated = await this.prisma.agent.update({ where: { id }, data });
-    return this.shapeAgent(updated);
+    const shaped = this.shapeAgent(updated);
+    // The picture follows the settings (BEA-1366): the drawer decides from `changed` whether this
+    // save touches what runs (sources, task, output, mode…) — a rename or a pause does not re-draw.
+    const changed = Object.keys(data);
+    if (changed.length) await this.flowSync?.afterSave?.(shaped, { created: false, changed }).catch(() => undefined);
+    return shaped;
   }
 
   /** Append messages to a job's persisted chat history (BEA-1097). Server-side only. */
@@ -542,7 +570,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Append a step to the run's plain-English step log (mirror of Hermes events). */
-  async appendStep(runId: string, step: { label: string; status?: string; detail?: string; kind?: string }) {
+  async appendStep(runId: string, step: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) {
     const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException('Run not found');
     const log = this.parse(run.stepLog, [] as any[]);

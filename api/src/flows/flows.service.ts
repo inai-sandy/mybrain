@@ -134,6 +134,9 @@ export class FlowsService {
     // A node can carry extra guidance the user typed/picked (e.g. deep-research at "Level 2") — surface it.
     const guidance = (node?.data?.guidance ?? '').toString().trim();
     const withGuidance = (s: string) => (s && guidance ? `${s} (${guidance})` : s);
+    // A machine-drawn node carries its own plain-English line (BEA-1366, `social-flow.ts`) — it says
+    // exactly what the runner does, so it wins over the kind/refId guesses below.
+    if (node?.data?.say) return withGuidance(String(node.data.say).trim());
     if (k === 'text') { const t = (node?.data?.text || node?.data?.sub || '').toString().trim(); return t ? `Use this input: "${t.slice(0, 200)}"` : ''; }
     if (k === 'ask_ai') return 'Write up a clear, well-structured answer for this part.';
     if (k === 'skill') return withGuidance(`Use the "${label}" skill — read its SKILL.md and follow it.`);
@@ -161,7 +164,7 @@ export class FlowsService {
   }
 
   /** Walk the graph into the real execution plan: Task → branches[{question, steps}] → merge → output. */
-  private describeFlow(f: any): { task: string; parallel: boolean; branches: { title: string; question: string; steps: string[] }[]; merge: string; finishing: string[]; hasAskUser: boolean } {
+  private describeFlow(f: any): { task: string; parallel: boolean; branches: { title: string; question: string; steps: string[] }[]; merge: string; mergeText?: string; finishing: string[]; hasAskUser: boolean } {
     const g = this.parse(f.graph);
     const nodes = new Map<string, any>((g.nodes || []).map((n: any) => [n.id, n]));
     const out = new Map<string, string[]>();
@@ -214,11 +217,11 @@ export class FlowsService {
       }
     }
 
-    return { task, parallel: branches.length > 1, branches, merge: mergeNode?.data?.mode || 'ai', finishing, hasAskUser };
+    return { task, parallel: branches.length > 1, branches, merge: mergeNode?.data?.mode || 'ai', ...(mergeNode?.data?.say ? { mergeText: String(mergeNode.data.say) } : {}), finishing, hasAskUser };
   }
 
   /** Render the Claude-Code copy-prompt from the same plan (so it mirrors the process exactly). */
-  private buildPrompt(p: { task: string; parallel: boolean; branches: { question: string; steps: string[] }[]; merge: string; finishing?: string[]; hasAskUser: boolean }): string {
+  private buildPrompt(p: { task: string; parallel: boolean; branches: { question: string; steps: string[] }[]; merge: string; mergeText?: string; finishing?: string[]; hasAskUser: boolean }): string {
     const lines: string[] = [`Task: ${p.task || '(describe the task)'}`, ''];
     if (!p.branches.length) {
       lines.push('Do this and give a clear, well-structured answer. Use your tools (web search, reading pages, etc.) as needed.');
@@ -231,7 +234,7 @@ export class FlowsService {
       else lines.push('   1. Work this part out and write it up.');
       lines.push('');
     });
-    lines.push(p.merge === 'raw'
+    lines.push(p.mergeText ? `Finally, ${p.mergeText.charAt(0).toLowerCase()}${p.mergeText.slice(1)}` : p.merge === 'raw'
       ? 'Finally, present each part one after another, each under its own heading.'
       : 'Finally, combine all the parts into one clear, well-structured answer with no repetition.');
     if (p.finishing && p.finishing.length) {
@@ -304,9 +307,42 @@ export class FlowsService {
     const allowed = (f as any).agentId
       ? (await this.agentSvc?.allowedTools?.((f as any).agentId).catch(() => null))?.ids || null
       : null;
-    const graph = await this.planFlow(f.question || f.name || '', allowed);
-    const updated = await this.prisma.flow.update({ where: { id }, data: { graph: JSON.stringify(graph) } });
+    // While it plans, the flow says so — the job page shows "drawing…" instead of a blank (BEA-1366).
+    await this.prisma.flow.update({ where: { id }, data: { drawStatus: 'drawing', drawNote: null } as any }).catch(() => undefined);
+    let graph: { nodes: any[]; edges: any[] } | null = null;
+    try { graph = await this.planFlow(f.question || f.name || '', allowed); } catch { graph = null; }
+    // The planner could not plan (BEA-1366): a picture that exists is KEPT and the failure is said
+    // on the flow, instead of overwriting the last good steps with a bare Ask-AI stand-in.
+    const planFailed = !graph || !!graph.nodes?.find((n: any) => n.id === 'question')?.data?.planFailed;
+    const oldNodes: any[] = this.parse(f.graph).nodes || [];
+    const hadPicture = oldNodes.length > 0 && !oldNodes.find((n: any) => n.id === 'question')?.data?.planFailed;
+    if (planFailed && hadPicture) {
+      const kept = await this.prisma.flow.update({ where: { id }, data: { drawStatus: 'failed', drawNote: FlowsService.REDRAW_FAILED_NOTE } as any });
+      return this.shape(kept);
+    }
+    const updated = await this.prisma.flow.update({
+      where: { id },
+      data: { graph: JSON.stringify(graph || { nodes: [], edges: [] }), drawnBy: 'planner', drawStatus: planFailed ? 'failed' : null, drawNote: planFailed ? FlowsService.REDRAW_FAILED_NOTE : null } as any,
+    });
     return this.shape(updated);
+  }
+
+  /** Said on the flow when a re-draw could not plan and the last picture was kept (BEA-1366). */
+  static readonly REDRAW_FAILED_NOTE = 'Could not re-draw the flow — the last picture is kept. Try again.';
+
+  /**
+   * Save a MACHINE-DRAWN picture (BEA-1366) — a Social agent's flow built from its settings. Writes
+   * straight through, because the flow is locked (the canvas may not edit what the runner never reads)
+   * and this is the one writer allowed past the lock. Creates the flow when the agent has none.
+   */
+  async saveDrawn(input: { flowId?: string | null; agentId: string; name: string; question: string; graph: unknown; drawnBy: string }) {
+    const data: any = { name: input.name.trim().slice(0, 120) || 'Untitled flow', question: input.question?.trim() || null, graph: JSON.stringify(input.graph), drawnBy: input.drawnBy, locked: true, drawStatus: null, drawNote: null };
+    if (input.flowId) {
+      const f = await this.prisma.flow.update({ where: { id: input.flowId }, data }).catch(() => null);
+      if (f) return this.shape(f);
+    }
+    const f = await this.prisma.flow.create({ data: { ...data, agentId: input.agentId } });
+    return this.shape(f);
   }
 
   /**

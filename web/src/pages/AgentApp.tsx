@@ -147,7 +147,9 @@ export function AgentApp() {
   }
   async function patch(body: any) {
     const r = await fetch(`/api/agent/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (r.ok) { const d = await r.json(); setA(d); return d; }
+    // Every save may re-draw the picture on the server (BEA-1366: a Social job's from its settings,
+    // any other job's task change re-plans in the background) — pick up the new state right away.
+    if (r.ok) { const d = await r.json(); setA(d); loadFlow(); return d; }
     toast('error', 'Could not save'); return null;
   }
   async function saveCfg() { setSavingCfg(true); await patch({ prompt: task, rubric }); dirtyRef.current = false; setSavingCfg(false); toast('success', 'Saved'); }
@@ -178,12 +180,9 @@ export function AgentApp() {
       const d = await patch(proposal.patch);
       if (!d) throw new Error();
       dirtyRef.current = false; setTask(d.prompt || ''); setRubric(d.rubric || '');
-      if (flow && proposal.patch.prompt) {
-        await fetch(`/api/flows/${flow.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: d.prompt || '' }) }).catch(() => undefined);
-        await fetch(`/api/flows/${flow.id}/plan`, { method: 'POST' }).catch(() => undefined);
-        loadFlow();
-        toast('success', 'Changed — and the flow was re-drawn to match');
-      } else { toast('success', 'Changed'); }
+      // A task change re-draws the flow on the server (BEA-1366) — the Flow tab shows "re-drawing…" and polls.
+      if (proposal.patch.prompt) { loadFlow(); toast('success', 'Changed — the flow is being re-drawn to match'); }
+      else { toast('success', 'Changed'); }
       setSpec(null); load(); // the run screen may need to re-fit; reload spec
       setChatLog((p) => [...p, { who: 'ai', text: 'Applied ✓' }]);
       fetch(`/api/agent/agents/${id}/chat-log`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Applied ✓' }) }).catch(() => undefined);
@@ -364,7 +363,7 @@ export function AgentApp() {
           );
         })()}
         {/* The picture of the steps — this is the map you approve, and where you edit it. */}
-        <FlowPanel id={id!} flow={flow} onChanged={loadFlow} goChat={() => setMode('chat')} />
+        <FlowPanel id={id!} flow={flow} onChanged={loadFlow} goChat={() => setMode('chat')} lastRun={runs?.[0]} />
       </>)}
 
       {/* ===================== CHECKS ===================== */}
@@ -399,7 +398,7 @@ export function AgentApp() {
                 ))}
                 {(proposal.changes || []).length === 0 && <li className="text-sm text-zinc-600 dark:text-zinc-300">A small update to this agent.</li>}
               </ul>
-              {proposal.patch?.prompt && flow && <p className="mt-1.5 text-[11px] text-violet-600 dark:text-violet-300">The flow will be re-drawn to match.</p>}
+              {proposal.patch?.prompt && <p className="mt-1.5 text-[11px] text-violet-600 dark:text-violet-300">The flow will be re-drawn to match.</p>}
               <div className="mt-2 flex gap-2">
                 <button onClick={applyProposal} disabled={chatBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Apply change</button>
                 <button onClick={() => { setProposal(null); setChatLog((p) => [...p, { who: 'ai', text: 'Okay, left as it was.' }]); fetch(`/api/agent/agents/${id}/chat-log`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Okay, left as it was.' }) }).catch(() => undefined); }} disabled={chatBusy} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">Not this</button>
