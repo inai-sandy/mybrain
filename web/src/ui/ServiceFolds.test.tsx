@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { ServiceFolds, groupByService, splitName } from './ServiceFolds';
+import { RetiredTag, ServiceFolds, groupByService, liveFirst, splitName } from './ServiceFolds';
 
 /**
  * Every action of every connected service is in the catalog now (BEA-1354). The pickers must stay
@@ -56,5 +56,48 @@ describe('ServiceFolds', () => {
     draw('send email');
     expect(screen.getByText('Send email')).toBeTruthy(); // Gmail opened by the page's search
     expect(screen.queryByText('GitHub')).toBeNull(); // nothing in GitHub matches, so it is not drawn
+  });
+
+  /**
+   * Retired actions are IN the list (BEA-1365 — nothing skipped): tagged, after the live ones,
+   * still found by search — and "retired" itself is a search word.
+   */
+  it('lists retired actions after the live ones, tagged, and search still finds them', () => {
+    const items = [
+      { id: 'svc:github.old_star', name: 'GitHub: Old star', description: 'Star a repository (old)', service: 'github', retired: true },
+      { id: 'svc:github.create_issue', name: 'GitHub: Create issue', description: 'Open an issue', service: 'github' },
+      { id: 'svc:github.star_repo', name: 'GitHub: Star repository', description: 'Star a repository', service: 'github' },
+    ];
+    expect(liveFirst(items).map((i) => i.id)).toEqual(['svc:github.create_issue', 'svc:github.star_repo', 'svc:github.old_star']);
+    render(
+      <ServiceFolds
+        items={items}
+        renderItem={(t, label) => (
+          <button key={t.id} data-testid="row">
+            {label}
+            {t.retired && <RetiredTag />}
+          </button>
+        )}
+      />,
+    );
+    expect(screen.getByText(/1 retired/)).toBeTruthy(); // the closed fold says how many
+    fireEvent.click(screen.getByText('GitHub'));
+    const rows = screen.getAllByTestId('row').map((b) => b.textContent);
+    expect(rows).toEqual(['Create issue', 'Star repository', 'Old starretired']); // live first, then the tagged retired one
+    expect(screen.getAllByText('retired').length).toBe(1);
+  });
+
+  it('a page-level search finds a retired action too — and the word "retired" lists exactly those', () => {
+    const items = [
+      { id: 'svc:github.old_star', name: 'GitHub: Old star', description: 'Star a repository (old)', service: 'github', retired: true },
+      { id: 'svc:github.create_issue', name: 'GitHub: Create issue', description: 'Open an issue', service: 'github' },
+    ];
+    const { unmount } = render(<ServiceFolds items={items} query="old star" renderItem={(t, label) => <button key={t.id}>{label}</button>} />);
+    expect(screen.getByText('Old star')).toBeTruthy();
+    expect(screen.queryByText('Create issue')).toBeNull();
+    unmount();
+    render(<ServiceFolds items={items} query="retired" renderItem={(t, label) => <button key={t.id}>{label}</button>} />);
+    expect(screen.getByText('Old star')).toBeTruthy();
+    expect(screen.queryByText('Create issue')).toBeNull();
   });
 });

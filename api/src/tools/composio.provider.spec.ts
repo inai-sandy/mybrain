@@ -215,6 +215,9 @@ describe('ComposioProvider', () => {
     const actions = await p.listActions('github');
     expect(actions.map((a) => a.id)).toEqual(['svc:github.create_issue', 'svc:github.delete_a_repository', 'svc:github.old_thing']);
     expect(actions.every((a) => !/composio/i.test(a.id))).toBe(true);
+    // The vendor's `is_deprecated` rides along as `retired: true` — kept, never dropped (BEA-1365).
+    expect(actions.find((a) => a.id === 'svc:github.old_thing')!.retired).toBe(true);
+    expect(actions.find((a) => a.id === 'svc:github.create_issue')!.retired).toBeUndefined();
     expect(actions.find((a) => a.id === 'svc:github.delete_a_repository')!.risky).toBe(true);
     expect(actions.find((a) => a.id === 'svc:github.create_issue')!.risky).toBe(false);
     expect(actions[0].schema.properties.title.type).toBe('string');
@@ -229,6 +232,8 @@ describe('ComposioProvider', () => {
     const big = Array.from({ length: 2300 }, (_, i) => ({
       slug: `GITHUB_ACTION_${i}`, name: `Action ${i}`, description: '', input_parameters: {},
       tags: i % 100 === 0 ? ['openWorldHint', 'important'] : ['openWorldHint'],
+      // Every 50th is one the vendor retired — 46 of them; the API's `total_items` counts them too.
+      ...(i % 50 === 0 ? { is_deprecated: true } : {}),
     }));
     const calls: URL[] = [];
     global.fetch = (async (url: string) => {
@@ -247,7 +252,8 @@ describe('ComposioProvider', () => {
     }) as any;
     const p = new ComposioProvider(connectors('k'), prisma());
     const actions = await p.listActions('github');
-    expect(actions.length).toBe(2300); // all of them — no 60, no 1000
+    expect(actions.length).toBe(2300); // all of them — no 60, no 1000, and the retired ones stay in (BEA-1365)
+    expect(actions.filter((a) => a.retired).length).toBe(46); // == the API's deprecated count, each tagged
     const toolCalls = calls.filter((u) => u.pathname.endsWith('/tools'));
     expect(toolCalls.length).toBe(3); // 1000-a-page walk, every page taken
     for (const u of toolCalls) expect(u.searchParams.get('important')).toBeNull(); // the shortlist is never asked for

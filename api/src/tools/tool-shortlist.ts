@@ -18,6 +18,8 @@ export type ShortlistTool = {
   description?: string;
   service?: string;
   important?: boolean;
+  /** The vendor retired it (BEA-1365) — still offered, but ranked after every live action. */
+  retired?: boolean;
 };
 
 /** How many actions of one service a prompt is shown when nothing narrower was asked for. */
@@ -57,14 +59,16 @@ export function matchScore(tool: ShortlistTool, words: string[]): number {
 }
 
 /**
- * ONE service's actions, best match first: by keyword score, then the vendor's mark, then the
- * order they came in. Stable, so two equal actions never swap places between calls.
+ * ONE service's actions, best match first: live before retired (a retired action is never offered
+ * ahead of a live one, however well its name matches — BEA-1365), then by keyword score, then the
+ * vendor's mark, then the order they came in. Stable, so two equal actions never swap places
+ * between calls.
  */
 export function rankActions<T extends ShortlistTool>(actions: T[], text: string): T[] {
   const words = keywords(text);
   return actions
     .map((t, i) => ({ t, i, s: matchScore(t, words) }))
-    .sort((a, b) => b.s - a.s || Number(!!b.t.important) - Number(!!a.t.important) || a.i - b.i)
+    .sort((a, b) => Number(!!a.t.retired) - Number(!!b.t.retired) || b.s - a.s || Number(!!b.t.important) - Number(!!a.t.important) || a.i - b.i)
     .map((x) => x.t);
 }
 

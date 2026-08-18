@@ -154,7 +154,7 @@ describe('ToolCatalogService', () => {
       listActions: async () => [
         { id: 'svc:github.create_issue', name: 'Create issue', description: 'Open an issue', schema: {}, risky: false, service: 'github' },
         { id: 'svc:github.delete_a_repository', name: 'Delete repository', description: 'Gone for good', schema: {}, risky: true, service: 'github' },
-        { id: 'svc:github.old_thing', name: 'Old', description: '', schema: {}, risky: false, service: 'github', deprecated: true },
+        { id: 'svc:github.old_thing', name: 'Old', description: '', schema: {}, risky: false, service: 'github', retired: true },
       ],
       ...over,
     }) as any;
@@ -181,9 +181,12 @@ describe('ToolCatalogService', () => {
         expect(t.id).toMatch(SERVICE_TOOL_ID_RE);
         expect(t.id).not.toMatch(/composio/i); // the vendor name may never reach an id
       }
-      expect(services.tools.map((t) => t.id)).toEqual(['svc:github.create_issue', 'svc:github.delete_a_repository']); // deprecated dropped
+      // The retired one is IN, tagged, and after the live ones (BEA-1365) — nothing skipped.
+      expect(services.tools.map((t) => t.id)).toEqual(['svc:github.create_issue', 'svc:github.delete_a_repository', 'svc:github.old_thing']);
       expect(services.tools[0].name).toBe('GitHub: Create issue');
       expect(services.tools[1].risky).toBe(true);
+      expect(services.tools[2].retired).toBe(true);
+      expect(services.tools[0].retired).toBeUndefined();
       expect(tools.find((t) => t.id === 'search_brain')).toBeTruthy(); // built-ins untouched
     });
 
@@ -206,26 +209,40 @@ describe('ToolCatalogService', () => {
 
     /**
      * EVERY action, no cap (BEA-1354). The catalog used to ask for the vendor's shortlist and stop
-     * at 60 — GitHub showed 36 of 871. Now whatever `listActions()` hands back is in, minus only
-     * the deprecated ones, and the provider is asked for the plain full list.
+     * at 60 — GitHub showed 36 of 871. Now whatever `listActions()` hands back is in — since
+     * BEA-1365 INCLUDING what the vendor retired (823 on GitHub = the API's `total_items`, 42 of
+     * them retired) — and the provider is asked for the plain full list.
      */
-    it('puts every action of a connected service in the catalog — no important filter, no cap', async () => {
+    it('puts every action of a connected service in the catalog — no important filter, no cap, retired ones tagged and last', async () => {
       const asked: any[] = [];
-      const many = Array.from({ length: 871 }, (_, i) => ({
+      const many = Array.from({ length: 823 }, (_, i) => ({
         id: `svc:github.action_${i}`, name: `Action ${i}`, description: `Does thing ${i}`, schema: {}, risky: i % 50 === 0, service: 'github',
         ...(i % 100 === 0 ? { important: true } : {}),
+        // 42 retired, scattered through the list — the first 42 odd-numbered ones.
+        ...(i % 2 === 1 && i < 84 ? { retired: true } : {}),
       }));
       const svc = new ToolCatalogService(connectors([]), skills([]), undefined, provider({
         listActions: async (_slug: string, opts: any) => { asked.push(opts); return many; },
       }));
       const { tools } = await svc.catalog();
       const github = tools.filter((t) => t.id.startsWith('svc:github.'));
-      expect(github.length).toBe(871);
+      expect(github.length).toBe(823); // == the API's total_items — the retired ones are in
       expect(asked[0]?.important).toBeUndefined(); // the vendor's shortlist is not what was asked for
       expect(asked[0]?.limit).toBeUndefined(); // and nothing capped the walk
-      expect(github.filter((t) => t.risky).length).toBe(18); // gates are computed over the full set
+      expect(github.filter((t) => t.risky).length).toBe(17); // gates are computed over the full set
       expect(github.filter((t) => t.important).length).toBe(9); // the mark rides along as a hint
-      expect(github.find((t) => t.id === 'svc:github.action_1')!.important).toBeUndefined();
+      expect(github.find((t) => t.id === 'svc:github.action_2')!.important).toBeUndefined();
+      // Retired: 42 of them, each tagged, and every one after the last live one (BEA-1365).
+      const retired = github.filter((t) => t.retired);
+      expect(retired.length).toBe(42);
+      expect(github.find((t) => t.id === 'svc:github.action_1')!.retired).toBe(true);
+      expect(github.find((t) => t.id === 'svc:github.action_2')!.retired).toBeUndefined();
+      const firstRetired = github.findIndex((t) => t.retired);
+      expect(firstRetired).toBe(823 - 42);
+      expect(github.slice(firstRetired).every((t) => t.retired)).toBe(true);
+      // The live ones keep their order among themselves.
+      expect(github[0].id).toBe('svc:github.action_0');
+      expect(github[1].id).toBe('svc:github.action_2');
     });
 
     /**

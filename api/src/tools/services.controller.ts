@@ -108,14 +108,25 @@ export class ServicesController {
     const service = await this.services.getService(String(slug || ''));
     if (!service) return { service: null, message: `We could not find a service called "${slug}".` };
     // For a connected service, the number the sheet shows is the number of actions the owner's
-    // agents can really pick (BEA-1354: the whole list, minus what the vendor has retired) — read
-    // from the same cached walk the catalog is built from, so it cannot disagree with the picker.
+    // agents can really pick (BEA-1354: the whole list — and since BEA-1365 that INCLUDES what the
+    // vendor has retired, tagged; `retiredActionCount` says how many) — read from the same cached
+    // walk the catalog is built from, so it cannot disagree with the picker.
     let availableActionCount: number | undefined;
+    let retiredActionCount: number | undefined;
     if (service.connected) {
       const actions = await this.services.listActions(service.slug).catch(() => []);
-      if (actions.length) availableActionCount = actions.filter((a) => !a.deprecated).length;
+      if (actions.length) {
+        availableActionCount = actions.length;
+        retiredActionCount = actions.filter((a) => a.retired).length;
+      }
     }
-    return { service: { ...service, category: tidy(service.category), ...(availableActionCount !== undefined ? { availableActionCount } : {}) } };
+    return {
+      service: {
+        ...service,
+        category: tidy(service.category),
+        ...(availableActionCount !== undefined ? { availableActionCount, retiredActionCount } : {}),
+      },
+    };
   }
 
   /**

@@ -231,7 +231,7 @@ export function generateFromSpec(spec: any): Generated {
       schema,
       risky: false, // every ScrapeCreators endpoint is a read; nothing here is ever gated
       service: o.platform,
-      deprecated: !!o.op.deprecated,
+      ...(o.op.deprecated ? { retired: true } : {}),
       method: o.method.toUpperCase(),
       path: o.path,
       tags,

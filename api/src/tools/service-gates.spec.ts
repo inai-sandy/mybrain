@@ -324,4 +324,19 @@ describe('a gated action stops BEFORE the provider is called (BEA-1348)', () => 
     expect(asked[0]?.limit).toBeUndefined();
     expect(list.actions.length).toBe(80); // every risky one across all 800, well past the old 60 cap
   });
+
+  /** A retired risky action can still be picked, so it can still pause — listed, tagged, after the live ones (BEA-1365). */
+  it('lists retired gated actions too, tagged and after the live ones', async () => {
+    const { gates, provider } = harness();
+    provider.listActions = async () => [
+      { ...DELETE_ACTION, id: 'svc:github.a_old_delete', name: 'A old delete', risky: true, retired: true },
+      DELETE_ACTION,
+      SAFE_ACTION,
+      { ...DELETE_ACTION, id: 'svc:github.merge_a_pull_request', name: 'Merge a pull request', risky: true },
+    ];
+    const list = await gates.listForService('github');
+    expect(list.actions.map((a) => a.id)).toEqual(['svc:github.delete_a_repository', 'svc:github.merge_a_pull_request', 'svc:github.a_old_delete']);
+    expect(list.actions[2].retired).toBe(true);
+    expect(list.actions[0].retired).toBeUndefined();
+  });
 });

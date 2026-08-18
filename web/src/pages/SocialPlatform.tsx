@@ -264,7 +264,7 @@ function EndpointCard({ e, platform, open, onToggle, noKey, topUpUrl, onRan }: {
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="min-w-0 font-semibold leading-snug break-words">{e.name}</h3>
             {e.method && e.method !== 'GET' && <span className={CHIP + ' bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'}>{e.method}</span>}
-            {e.deprecated && <span className={CHIP + ' bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'}>Old</span>}
+            {e.retired && <span className={CHIP + ' bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'} title="The vendor has retired this endpoint. It is still listed so nothing is skipped.">retired</span>}
           </div>
           {e.description && !open && <p className="mt-1 line-clamp-2 break-words text-sm text-zinc-500 dark:text-zinc-400">{e.description}</p>}
           <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">

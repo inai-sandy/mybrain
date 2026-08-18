@@ -323,7 +323,7 @@ export class FlowsService {
     }
     const tools = cat.tools
       .filter((t) => t.kind === 'tool')
-      .map((t) => ({ type: 'tool', id: t.id, name: t.name, group: t.group, description: t.description, connected: t.connected, connectHint: t.connectHint, connectPath: t.connectPath, ...(t.service ? { service: t.service } : {}) }));
+      .map((t) => ({ type: 'tool', id: t.id, name: t.name, group: t.group, description: t.description, connected: t.connected, connectHint: t.connectHint, connectPath: t.connectPath, ...(t.service ? { service: t.service } : {}), ...(t.retired ? { retired: true } : {}) }));
     const skills = cat.tools
       .filter((t) => t.kind === 'skill')
       .map((t) => ({ type: 'skill', id: t.id, name: t.name, description: t.description, connected: t.connected }));

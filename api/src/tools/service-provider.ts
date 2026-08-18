@@ -84,7 +84,13 @@ export type ServiceAction = {
   /** Matches the "can't be undone" rules — the gate in BEA-1348 acts on this. */
   risky: boolean;
   service: string;
-  deprecated?: boolean;
+  /**
+   * The vendor has retired this action (Composio's `is_deprecated`, an OpenAPI `deprecated`). It is
+   * STILL in the catalog — the owner's rule is "do not skip any action from providers" (BEA-1365) —
+   * shown with a muted "retired" tag, sorted after the live ones, and ranked last in prompt
+   * shortlists. Nothing filters on it.
+   */
+  retired?: boolean;
   /**
    * The vendor's own "most used" mark, when it gives one (BEA-1354). It no longer decides what the
    * catalog holds — every action is in it — but it is a fair tie-break when a PROMPT can only carry

@@ -44,7 +44,8 @@ export type Endpoint = {
   path?: string;
   tags?: string[];
   costHint?: string;
-  deprecated?: boolean;
+  /** The spec marks it deprecated — still listed, tagged (BEA-1365). */
+  retired?: boolean;
 };
 
 export type RunResult = {

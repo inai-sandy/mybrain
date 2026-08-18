@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Column, DataTable, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { RetiredTag } from '../ui/ServiceFolds';
 import { Sheet } from '../ui/Sheet';
 import { Skeleton } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
@@ -37,6 +38,8 @@ type Service = {
   actionCount?: number;
   /** Connected services only — the actions the owner's agents can really pick (BEA-1354: all of them). */
   availableActionCount?: number;
+  /** How many of those the vendor has retired — still listed, tagged (BEA-1365). */
+  retiredActionCount?: number;
   triggerCount?: number;
   managedAuth?: boolean;
   noAuth?: boolean;
@@ -46,7 +49,7 @@ type Service = {
 };
 type CredField = { name: string; label: string; description?: string; required?: boolean; secret?: boolean };
 /** One action that cannot be undone, and whether the owner has let it run without asking (BEA-1348). */
-type Gate = { id: string; name: string; description?: string; released: boolean };
+type Gate = { id: string; name: string; description?: string; released: boolean; retired?: boolean };
 type FullService = Service & { needs?: CredField[]; needsAuthConfig?: CredField[]; needsAccount?: CredField[]; authMode?: string };
 type Status = { configured: boolean; reachable: boolean; message?: string; serviceCount?: number };
 type Payload = { status: Status; services: Service[]; categories: { id: string; label: string; count: number }[]; connectedCount: number };
@@ -394,7 +397,7 @@ function Gates({ slug, name }: { slug: string; name: string }) {
         {shown.map((g) => (
           <li key={g.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{g.name}</p>
+              <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium"><span className="truncate">{g.name}</span>{g.retired && <RetiredTag />}</p>
               <p className="truncate text-[11px] text-zinc-400">{g.released ? 'Runs without asking' : 'Asks you first'}</p>
             </div>
             <button
@@ -1093,7 +1096,7 @@ function ServiceSheet({ slug, onClose, onChanged }: { slug: string; onClose: () 
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-lg font-bold">{svc?.name || slug}</h3>
                   <p className="mt-0.5 truncate text-xs text-zinc-400">
-                    {svc ? `${svc.category} · ${plural(num(svc.availableActionCount ?? svc.actionCount), 'action')}${num(svc.triggerCount) ? ` · ${plural(num(svc.triggerCount), 'event')}` : ''}` : 'Loading…'}
+                    {svc ? `${svc.category} · ${plural(num(svc.availableActionCount ?? svc.actionCount), 'action')}${num(svc.retiredActionCount) ? ` (${num(svc.retiredActionCount)} retired)` : ''}${num(svc.triggerCount) ? ` · ${plural(num(svc.triggerCount), 'event')}` : ''}` : 'Loading…'}
                   </p>
                 </div>
                 <button onClick={close} aria-label="Close" className="shrink-0 rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200">
