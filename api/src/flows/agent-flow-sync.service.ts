@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/com
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService, AgentFlowSync } from '../agent/agent.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
+import { planActionIds, planFromAgent } from '../social/plan';
 import { buildSocialFlow, isDirectFetchAgent, SocialFlowNames } from '../social/social-flow';
 import { FlowsService } from './flows.service';
 
@@ -96,7 +97,8 @@ export class AgentFlowSyncService implements OnModuleInit, AgentFlowSync {
   private readonly socialChain = new Map<string, Promise<any>>();
 
   private async drawSocialNow(agent: any): Promise<any | null> {
-    const tools: string[] = Array.isArray(agent.tools) ? agent.tools : [];
+    // Every action the plan calls — sources, and a creators-first block's finder + per-creator action (BEA-1369).
+    const tools: string[] = planActionIds(planFromAgent(agent));
     const [names, costs] = await Promise.all([this.namesFor(tools), this.costsFor(tools)]);
     const built = buildSocialFlow(agent, { names, costs });
     const existing = (await this.flows.list(agent.id))[0] || null;

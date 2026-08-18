@@ -6,8 +6,10 @@ import { AlertsService } from '../push/alerts.service';
 import { whatsappStepLabel } from '../contacts/owner-alert';
 import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
-import { Diff, Threshold, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
-import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
+import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
+import { Diff, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
+import { findList, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
+import { AgentPlan, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pagingOf, planFromAgent, thresholdOf } from './plan';
 import { BudgetCheck, SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
 import { KEEP_AS_FETCHED, isDirectFetchAgent, wantsShaping } from './social-flow';
@@ -44,6 +46,8 @@ import { KEEP_AS_FETCHED, isDirectFetchAgent, wantsShaping } from './social-flow
 
 /** The task text the builder pre-fills — lives in `social-flow.ts` with the picture builder (BEA-1366); re-exported so imports keep working. */
 export { KEEP_AS_FETCHED };
+/** `Agent.threshold` → a Threshold — lives in `plan.ts` since BEA-1369; re-exported so imports keep working. */
+export { thresholdOf };
 
 /** How many items one shaping call is shown, and how many calls a run may make. */
 const SHAPE_BATCH = 60;
@@ -76,6 +80,7 @@ export class SocialAgentRunService {
     private readonly push?: PushService,
     private readonly budget?: SocialBudgetService, // the daily credit ceiling (BEA-1358)
     private readonly watches?: SocialWatchStore, // what a Watch/Alert saw last time (BEA-1358)
+    private readonly knowledge?: ToolKnowledgeService, // the know-how cards: how an action pages, which field is the date (BEA-1369)
   ) {}
 
   /**
@@ -94,7 +99,17 @@ export class SocialAgentRunService {
 
   /** Run one Social agent job to the end. Never throws — every road finishes the run honestly. */
   async run(runId: string, agent: any, opts: { title?: string } = {}): Promise<void> {
-    const title = opts.title || agent?.name || 'Social agent';
+    return this.runPlan(runId, agent, planFromAgent(agent), opts);
+  }
+
+  /**
+   * Execute a plan (BEA-1369) — the same steps `run()` always did, read off the plan JSON instead
+   * of the raw fields: every source block (a paged source, or find-creators-then-their-posts),
+   * merge, shape, watch/alert, write, notify. `run()` is `runPlan(planFromAgent(agent))`, and the
+   * flow picture is drawn from the same plan.
+   */
+  async runPlan(runId: string, agent: any, plan: AgentPlan, opts: { title?: string } = {}): Promise<void> {
+    const title = opts.title || plan.name || agent?.name || 'Social agent';
     // `nodeId` names the step's node on the job's drawn flow (BEA-1366: `social-flow.ts` ids —
     // `src:<svc id>`, `merge`, `shape`, `watch`, `write`, `notify`) so the picture can badge what happened.
     const step = (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => this.agent.appendStep(runId, s).catch(() => undefined);
@@ -107,44 +122,43 @@ export class SocialAgentRunService {
 
     try {
       await step({ label: 'Fetching directly — no engine turn for this', status: 'done', kind: 'log' });
-      const tools: string[] = agent.tools;
-      const args: Record<string, any> = agent.toolArgs;
+      const tools: string[] = plan.sources.map((s) => s.id);
+      // The arguments each source is remembered by (a Watch keys its baseline on them): the plain
+      // args of a source (`_pages` left out, so more pages does not forget the baseline), the whole
+      // block of a creators-first source.
+      const args: Record<string, any> = Object.fromEntries(plan.sources.map((s) => [s.id, s.kind === 'source' ? s.args : { kind: 'creators', find: s.find, then: s.then }]));
 
-      // ---- 1. fetch — every tool, direct, pinned arguments, credits recorded --------------------
+      // ---- 1. fetch — every source, direct, pinned arguments, credits recorded --------------------
       const fetched: { id: string; r: ServiceRunResult }[] = [];
       // Searches the vendor answered "not_found" for (BEA-1359) — empty sources, said on the run,
       // never a failed run: a two-source digest still completes when one search has nothing.
       const empties: string[] = [];
       let credits = 0;
-      for (const id of tools) {
-        // The daily credit ceiling (BEA-1358): would THIS call pass it? Then it is not made — the
-        // job pauses itself, says why on the run and on its row, and the owner is told.
+      // The daily credit ceiling (BEA-1358): would THIS call pass it? Then it is not made — the
+      // job pauses itself, says why on the run and on its row, and the owner is told. Checked
+      // before EVERY call: each page, the finder, each creator.
+      const guard = async (actionId: string): Promise<string | null> => {
         let b: BudgetCheck | null = null;
         if (this.budget?.check) {
-          try { b = await this.budget.check(id); } catch (e: any) {
+          try { b = await this.budget.check(actionId); } catch (e: any) {
             // Fail CLOSED: a guard that cannot answer must not let the call through.
-            return fail(`Could not check the daily Social credit ceiling (${String(e?.message || e).slice(0, 120)}) — the call was not made. Try again in a minute.`);
+            return `Could not check the daily Social credit ceiling (${String(e?.message || e).slice(0, 120)}) — the call was not made. Try again in a minute.`;
           }
         }
         if (b && !b.ok) {
           await this.budget!.pauseAgent(agent, b.reason!, runId).catch(() => undefined);
-          return fail(b.reason!);
+          return b.reason!;
         }
-        const r = await this.actions.runDetailed(id, '', { runId, runKind: 'agent', agentId: agent.id, args: args[id], argsPinned: true, label: id });
-        if (!r.ok && isEmptySearch(id, r)) {
-          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300), nodeId: `src:${id}` });
-          empties.push(id);
-          continue;
-        }
-        if (!r.ok) {
-          const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
-          await step({ label: `Could not fetch ${r.serviceName || id}: ${why}`, status: 'failed', nodeId: `src:${id}` });
-          return fail(`Could not fetch ${r.serviceName || id}: ${why}`);
-        }
-        credits += Number(r.credits) || 0;
-        const t = tableOf(r.data);
-        await step({ label: `Fetched ${r.serviceName || ''}${r.actionName ? ` · ${r.actionName}` : ''} — ${t.itemCount} item${t.itemCount === 1 ? '' : 's'} · ${Number(r.credits) || 0} credit${Number(r.credits) === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300), nodeId: `src:${id}` });
-        fetched.push({ id, r });
+        return null;
+      };
+      const ctx = (id: string, a: Record<string, any>) => ({ runId, runKind: 'agent', agentId: agent.id, args: a, argsPinned: true, label: id });
+
+      for (const src of plan.sources) {
+        const out = src.kind === 'creators' ? await this.fetchCreators(src, guard, ctx, step) : await this.fetchSource(src, guard, ctx, step);
+        if (out.stop) return fail(out.stop);
+        credits += out.credits;
+        if (out.empty) { empties.push(src.id); continue; }
+        fetched.push({ id: src.id, r: out.r! });
       }
 
       // Every source empty (BEA-1359): the run finishes honestly — 0 found, nothing to write, no
@@ -153,13 +167,14 @@ export class SocialAgentRunService {
         const n = empties.length;
         const label = `0 ${nounOf(tools[0])} found — nothing to write, no sheet made${n > 1 ? ` (all ${n} sources answered not_found)` : ''}`;
         await step({ label, status: 'done' });
-        await this.agent.finishRun(runId, { status: 'done', resultText: `**${label}.**\n\nThe vendor answered not_found for ${n === 1 ? 'the search' : `every one of the ${n} searches`} — nothing to write, no sheet made, nothing sent${agent.notifyWhatsApp ? ' (WhatsApp skipped — nothing to send)' : ''}. ${credits} credit${credits === 1 ? '' : 's'}.` });
+        const why = plan.sources.some((s) => s.kind === 'creators') ? `${n === 1 ? 'The source' : `Every one of the ${n} sources`} came back empty (the vendor answered not_found, or no creator's fetch succeeded)` : `The vendor answered not_found for ${n === 1 ? 'the search' : `every one of the ${n} searches`}`;
+        await this.agent.finishRun(runId, { status: 'done', resultText: `**${label}.**\n\n${why} — nothing to write, no sheet made, nothing sent${plan.notify.whatsapp ? ' (WhatsApp skipped — nothing to send)' : ''}. ${credits} credit${credits === 1 ? '' : 's'}.` });
       };
       if (!fetched.length) return await nothingFound();
 
       // A Watch / Alert (BEA-1358) says only what changed since last time, then stores the new result.
-      const mode = String(agent.mode || 'run');
-      if (mode === 'watch' || mode === 'alert') return await this.watch(runId, agent, title, mode, fetched, credits, step, fail);
+      const mode = plan.mode;
+      if (mode === 'watch' || mode === 'alert') return await this.watch(runId, agent, title, mode, fetched, credits, step, fail, args);
 
       // ---- 2. rows — as fetched, or shaped the way the owner asked ----------------------------
       const tables = fetched.map((f) => ({ id: f.id, table: tableOf(f.r.data) }));
@@ -171,17 +186,17 @@ export class SocialAgentRunService {
       }
 
       // Append mode reads the sheet FIRST, so the shaping step can be told the columns it must fit.
-      const dest = String(agent.outputDest || 'document');
+      const dest = plan.output.kind;
       let existing: { count: number; header: string[] } | null = null;
-      if (dest === 'sheet' && agent.sheetId) {
-        const read = await this.readSheet(runId, agent, agent.sheetId);
+      if (dest === 'sheet' && plan.output.sheetId) {
+        const read = await this.readSheet(runId, agent, plan.output.sheetId);
         if (!read.ok) return fail(read.error!);
         existing = { count: read.count!, header: read.header! };
       }
 
-      if (this.wantsShaping(agent.prompt)) {
+      if (plan.shape) {
         await step({ label: 'Shaping the rows the way you asked', status: 'running', kind: 'log', nodeId: 'shape' });
-        const shaped = await this.shape(agent.prompt, table, existing?.header?.length ? existing.header : null);
+        const shaped = await this.shape(plan.shape.prompt, table, existing?.header?.length ? existing.header : null);
         if (!shaped.ok) { await step({ label: `Could not shape the rows: ${shaped.error}`, status: 'failed', nodeId: 'shape' }); return fail(`Could not shape the rows: ${shaped.error}`); }
         table = { columns: shaped.columns!, rows: shaped.rows!, itemCount: table.itemCount };
         await step({ label: `Shaped ${shaped.rows!.length} row${shaped.rows!.length === 1 ? '' : 's'} into ${shaped.columns!.length} columns${shaped.note ? ` · ${shaped.note}` : ''}`, status: 'done', nodeId: 'shape' });
@@ -222,7 +237,7 @@ export class SocialAgentRunService {
       await this.agent.finishRun(runId, { status: 'done', resultText, outputUrl, outputDocId });
 
       // ---- 4. WhatsApp — the link, through the one path; silence is never an option ------------
-      if (agent.notifyWhatsApp) {
+      if (plan.notify.whatsapp) {
         const r = await this.alerts?.runFinished?.(title, headline, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
         await step({ ...whatsappStepLabel(r), nodeId: 'notify' }); // "WhatsApp sent (template)" / "WhatsApp failed: <reason>" (BEA-1362)
       }
@@ -230,6 +245,216 @@ export class SocialAgentRunService {
       this.log.error(`social run ${runId} crashed: ${e?.message || e}`);
       await fail(String(e?.message || e || 'the run hit a problem'));
     }
+  }
+
+  // ---- the source blocks (BEA-1369) ----------------------------------------------------------
+
+  /**
+   * One source, up to `pages` pages (BEA-1369): page 1 exactly as before; then the vendor's cursor
+   * (or the next page number) with the same arguments, one `ToolCall` per page with its credits,
+   * items de-duped on the stable id (`itemKey`), and an early stop when a page is empty, repeats,
+   * or the vendor says there is no more. The credit ceiling is checked before EVERY page. A page-1
+   * failure is what it always was (empty search → empty source; anything else → the run fails); a
+   * later page that fails also fails the run — a run may never say done past a failed step.
+   */
+  private async fetchSource(
+    src: PlanSource,
+    guard: (actionId: string) => Promise<string | null>,
+    ctx: (id: string, args: Record<string, any>) => any,
+    step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
+  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; stop?: string }> {
+    const id = src.actionId;
+    const nodeId = `src:${src.id}`;
+    const card = src.pages > 1 ? await this.knowledge?.card?.(id).catch(() => null) : null;
+    const seen = new Set<string>();
+    const items: any[] = [];
+    let listKey = '';
+    let credits = 0;
+    let first: ServiceRunResult | null = null;
+    let pagesFetched = 0;
+    let stopNote = '';
+    let paging: { param: string; how: 'cursor' | 'page' } | null = null;
+    let cursor: any = null;
+    for (let p = 1; p <= src.pages; p++) {
+      const stop = await guard(id);
+      if (stop) return { credits, stop };
+      const a = p === 1 ? src.args : { ...src.args, [paging!.param]: cursor };
+      const r = await this.actions.runDetailed(id, '', ctx(id, a));
+      if (!r.ok && p === 1) {
+        if (isEmptySearch(id, r)) {
+          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
+          return { credits, empty: true };
+        }
+        const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
+        await step({ label: `Could not fetch ${r.serviceName || id}: ${why}`, status: 'failed', nodeId });
+        return { credits, stop: `Could not fetch ${r.serviceName || id}: ${why}` };
+      }
+      if (!r.ok) {
+        // A later page the vendor answers not_found for is the end of the list, not a failure —
+        // on ANY paged endpoint (page 1 already proved the thing exists), not only a search.
+        if (r.notFound) { stopNote = `page ${p} was empty`; break; }
+        const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
+        await step({ label: `Could not fetch page ${p} of ${r.serviceName || id}: ${why}`, status: 'failed', nodeId });
+        return { credits, stop: `Could not fetch page ${p} of ${r.serviceName || id}: ${why} (${items.length} item${items.length === 1 ? '' : 's'} from ${p - 1} page${p - 1 === 1 ? '' : 's'} were not written — nothing is written on a failed run)` };
+      }
+      credits += Number(r.credits) || 0;
+      pagesFetched = p;
+      if (p === 1) first = r;
+      const list = findList(r.data);
+      if (!list) {
+        // Not a list (a profile, a transcript): there is nothing to page. Page 1 is the answer.
+        if (p > 1) stopNote = `page ${p} had no list`;
+        break;
+      }
+      if (p === 1) listKey = list.key.split('.').pop() || 'items';
+      let fresh = 0;
+      for (const it of list.rows) { const k = dedupeKey(it); if (seen.has(k)) continue; seen.add(k); items.push(it); fresh++; }
+      if (p > 1 && fresh === 0) { stopNote = `page ${p} repeated what page ${p - 1} had`; break; }
+      if (p === src.pages) break;
+      if (p === 1) {
+        paging = pagingOf(card?.paging, src.args, r.data);
+        if (!paging) { stopNote = 'this endpoint does not page'; break; }
+      }
+      if (paging.how === 'cursor') {
+        const next = nextCursorOf(r.data);
+        if (!next) { stopNote = `that was everything after ${p} page${p === 1 ? '' : 's'}`; break; }
+        cursor = next.value;
+      } else {
+        cursor = (Number(a[paging.param]) || 1) + 1;
+      }
+    }
+    const single = pagesFetched <= 1;
+    const count = single ? tableOf(first!.data).itemCount : items.length;
+    const over = single ? '' : ` over ${pagesFetched} page${pagesFetched === 1 ? '' : 's'}`;
+    // Why fewer pages than asked, in plain words: the vendor does not page this one · that was
+    // everything · an empty / repeated page. Nothing when every page asked for was fetched.
+    const note = !stopNote || pagesFetched >= src.pages ? '' : /does not page/.test(stopNote) ? ` · ${stopNote} (${src.pages} pages asked)` : /everything/.test(stopNote) ? ` · ${stopNote}` : ` · stopped early: ${stopNote}`;
+    await step({ label: `Fetched ${first!.serviceName || ''}${first!.actionName ? ` · ${first!.actionName}` : ''} — ${count} item${count === 1 ? '' : 's'}${over} · ${credits} credit${credits === 1 ? '' : 's'}${note}`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
+    // One page: the vendor's whole answer, as always (a profile stays a profile). Several: the
+    // de-duped items under the list's own key — the same shape the rows, watch and shaping read.
+    const r: ServiceRunResult = single ? first! : { ...first!, data: { [listKey || 'items']: items }, credits };
+    return { r, credits };
+  }
+
+  /**
+   * Find creators, then their posts (BEA-1369): the finder once, the first N creators, then the
+   * per-creator action once per creator (`argsFrom` maps a creator field into the argument), items
+   * newer than `keepDays` kept when the items carry a date (the know-how card says which field; else
+   * the usual names; else everything is kept AND the step says so), merged under a `creator` column,
+   * de-duped by id. The ceiling is checked before every call. A creator that fails is said and
+   * skipped — one bad handle must not fail 40 good ones; no creator succeeded → the source is empty,
+   * with the reasons.
+   */
+  private async fetchCreators(
+    src: PlanCreators,
+    guard: (actionId: string) => Promise<string | null>,
+    ctx: (id: string, args: Record<string, any>) => any,
+    step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
+  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; stop?: string }> {
+    const nodeId = `src:${src.id}`;
+    const findId = src.find.actionId;
+    const thenId = src.then.actionId;
+    let credits = 0;
+    if (!thenId) return { credits, stop: 'This creators-first source has no per-creator action — pick one in the job\'s Settings ("then, for each creator").' };
+    const mapping = Object.entries(src.then.argsFrom);
+    if (!mapping.length) return { credits, stop: 'This creators-first source does not say which creator field fills the per-creator call (for example handle ← username) — set it in the job\'s Settings.' };
+
+    // ---- 1. the finder, once
+    const stop = await guard(findId);
+    if (stop) return { credits, stop };
+    const f = await this.actions.runDetailed(findId, '', ctx(findId, src.find.args));
+    if (!f.ok) {
+      if (isEmptySearch(findId, f)) {
+        await step({ label: `${f.serviceName || 'Search'} · ${f.actionName || findId} — no creators found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
+        return { credits, empty: true };
+      }
+      const why = f.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : f.error || 'the fetch failed';
+      await step({ label: `Could not find creators (${f.serviceName || findId}): ${why}`, status: 'failed', nodeId });
+      return { credits, stop: `Could not find creators (${f.serviceName || findId}): ${why}` };
+    }
+    credits += Number(f.credits) || 0;
+    const found = findList(f.data)?.rows || [];
+    if (!found.length) {
+      await step({ label: `${f.serviceName || ''}${f.actionName ? ` · ${f.actionName}` : ''} — 0 creators found · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
+      return { credits, empty: true };
+    }
+    // The first N distinct creators (by the field the per-creator call needs).
+    const creators: { c: any; args: Record<string, any>; who: string }[] = [];
+    const seenWho = new Set<string>();
+    const skippedNoField: string[] = [];
+    for (const c of found) {
+      if (creators.length >= src.find.take) break;
+      const a: Record<string, any> = { ...(src.then.args || {}) };
+      let who = '';
+      let missing = '';
+      for (const [param, field] of mapping) {
+        const v = creatorField(c, field);
+        if (v === undefined || v === null || v === '') { missing = field; break; }
+        a[param] = v;
+        if (!who) who = String(v);
+      }
+      if (missing) { skippedNoField.push(missing); continue; }
+      if (seenWho.has(who)) continue;
+      seenWho.add(who);
+      creators.push({ c, args: a, who });
+    }
+    await step({ label: `${found.length} creator${found.length === 1 ? '' : 's'} found${creators.length < found.length ? ` · taking the first ${creators.length}` : ''}${skippedNoField.length ? ` (${skippedNoField.length} had no ${skippedNoField[0]})` : ''} · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', kind: 'log', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
+    if (!creators.length) {
+      await step({ label: `No creator carried the field the per-creator call needs (${mapping.map(([, fld]) => fld).join(', ')}) — nothing to fetch`, status: 'done', nodeId });
+      return { credits, empty: true };
+    }
+
+    // ---- 2. per creator
+    const card = await this.knowledge?.card?.(thenId).catch(() => null);
+    const items: any[] = [];
+    const seen = new Set<string>();
+    const failures: string[] = [];
+    let okCount = 0;
+    let rawCount = 0;
+    let dateField: string | null | undefined; // undefined = not decided yet
+    let thenName = '';
+    let serviceName = f.serviceName || '';
+    const keepDays = src.then.keepDays;
+    const cutoff = keepDays ? Date.now() - keepDays * 24 * 60 * 60 * 1000 : null;
+    for (const cr of creators) {
+      const stop2 = await guard(thenId);
+      if (stop2) return { credits, stop: stop2 };
+      const r = await this.actions.runDetailed(thenId, '', ctx(thenId, cr.args));
+      credits += Number(r.credits) || 0;
+      if (!r.ok) { failures.push(`${cr.who}: ${(r.error || 'the fetch failed').slice(0, 120)}`); continue; }
+      okCount++;
+      thenName = r.actionName || thenName;
+      serviceName = r.serviceName || serviceName;
+      const list = findList(r.data);
+      // A list answer → its items; an answer whose list is EMPTY (`{items: []}`) → nothing, not
+      // one row of envelope; a plain object (a profile) → one row.
+      const rows = list ? list.rows : hasEmptyList(r.data) ? [] : r.data && typeof r.data === 'object' ? [r.data] : [];
+      rawCount += rows.length;
+      // Which field is the date — decided on the first creator that returned items (an empty first answer must not decide "no date" for everyone).
+      if (dateField === undefined && cutoff !== null && rows.length) dateField = dateFieldOf(rows, card?.fields);
+      for (const it of rows) {
+        if (cutoff !== null && dateField) { const d = itemDate(it, dateField); if (d !== null && d < cutoff) continue; }
+        const k = dedupeKey(it);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        items.push({ creator: cr.who, ...it });
+      }
+    }
+    const kept = items.length;
+    const keepNote = cutoff === null || rawCount === 0
+      ? `${kept} item${kept === 1 ? '' : 's'}`
+      : dateField
+        ? `${kept} kept from the last ${keepDays} day${keepDays === 1 ? '' : 's'} (of ${rawCount})`
+        : `${kept} item${kept === 1 ? '' : 's'} — these carry no date, so all were kept (last ${keepDays} days could not be applied)`;
+    const failNote = failures.length ? ` · ${failures.length} failed and ${failures.length === 1 ? 'was' : 'were'} skipped` : '';
+    const label = `${creators.length} creator${creators.length === 1 ? '' : 's'} · fetched ${thenName ? thenName.toLowerCase() : 'items'} for ${okCount}${failNote} · ${keepNote} · ${credits} credit${credits === 1 ? '' : 's'}`;
+    if (!okCount) {
+      await step({ label: `${label} — no creator's fetch succeeded`, status: 'done', detail: failures.join('\n').slice(0, 1200), nodeId });
+      return { credits, empty: true };
+    }
+    await step({ label, status: 'done', detail: failures.length ? failures.join('\n').slice(0, 1200) : JSON.stringify(src.find.args).slice(0, 300), nodeId });
+    const r: ServiceRunResult = { ok: true, data: { items }, credits, serviceName, actionName: `${f.actionName || 'Find creators'} → ${thenName || 'their posts'}` };
+    return { r, credits };
   }
 
   /**
@@ -273,9 +498,9 @@ export class SocialAgentRunService {
     credits: number,
     step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
     fail: (error: string) => Promise<void>,
+    args: Record<string, any> = agent.toolArgs || {},
   ): Promise<void> {
     if (!this.watches) return fail('Watching is not available on this server (no watch store).');
-    const args: Record<string, any> = agent.toolArgs || {};
     const threshold = thresholdOf(agent.threshold);
     const condition = String(agent.alertCondition || '').trim();
 
@@ -570,6 +795,12 @@ export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
   return /search/.test(endpoint);
 }
 
+/** `{ items: [], next_max_id: null }` — an answer shaped like a list with nothing in it. */
+export function hasEmptyList(data: any): boolean {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return Array.isArray(data) && data.length === 0;
+  return Object.values(data).some((v) => Array.isArray(v) && v.length === 0) && !Object.values(data).some((v) => Array.isArray(v) && v.length > 0);
+}
+
 /** What a search finds, for the run's own words: posts · reels · videos · results. */
 export function nounOf(id: string): string {
   const endpoint = String(id || '').replace(/^svc:/, '').split('.')[1] || '';
@@ -589,16 +820,6 @@ export function mergeTables(tables: { id: string; table: { columns: string[]; ro
     for (const r of t.rows) rows.push(columns.map((c) => { if (c === 'source') return source; const i = t.columns.indexOf(c); return i === -1 ? '' : r[i]; }));
   }
   return { columns, rows: rows.slice(0, MAX_ROWS), itemCount: tables.reduce((n, x) => n + x.table.itemCount, 0) };
-}
-
-/** `Agent.threshold` as stored (JSON text) or as shaped (object) → a Threshold, or null when there is none. */
-export function thresholdOf(raw: any): Threshold | null {
-  let t: any = raw;
-  if (typeof raw === 'string') { try { t = JSON.parse(raw); } catch { t = null; } }
-  if (!t || typeof t !== 'object') return null;
-  const value = Number(t.value);
-  if (!Number.isFinite(value)) return null;
-  return { field: t.field ? String(t.field).trim() || undefined : undefined, dir: t.dir === 'below' ? 'below' : 'above', value };
 }
 
 /** "12 items" · "followers 37,570" — what the baseline holds, in a few words. */
