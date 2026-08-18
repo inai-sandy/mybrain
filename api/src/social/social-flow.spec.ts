@@ -1,4 +1,5 @@
-import { KEEP_AS_FETCHED, SOCIAL_FLOW_NOTE, argsLine, buildSocialFlow, isDirectFetchAgent, namesFromId, wantsShaping } from './social-flow';
+import { KEEP_AS_FETCHED, SOCIAL_FLOW_NOTE, argsLine, buildPlanFlow, buildSocialFlow, isDirectFetchAgent, namesFromId, wantsShaping } from './social-flow';
+import { planFromAgent } from './plan';
 
 /**
  * BEA-1366 — a Social agent's flow picture is BUILT from its settings, no AI. The node list must be
@@ -129,5 +130,38 @@ describe('the shared Social facts (moved here from the runner)', () => {
     expect(namesFromId('svc:instagram.search_hashtag')).toEqual({ service: 'Instagram', action: 'Search hashtag' });
     expect(namesFromId('svc:googlesheets.create_google_sheet1').action).toBe('Create google sheet');
     expect(argsLine({ hashtag: 'x', empty: '', n: 3 })).toBe('hashtag: x · n: 3');
+  });
+
+  // ---- BEA-1369: the picture is drawn from the plan ---------------------------------------------
+  it('a paged source says "× N pages" and its cost per run; the picture is the plan\'s picture', () => {
+    const paged = { ...twoSources, toolArgs: { ...twoSources.toolArgs, 'svc:instagram.search_hashtag': { hashtag: 'smarthomeindia', date_posted: 'last-month', _pages: 8 } } };
+    const { graph } = buildSocialFlow(paged, { costs: { 'svc:instagram.search_hashtag': 1 } });
+    const src = byId(graph, 'src:svc:instagram.search_hashtag').data;
+    expect(src.label).toBe('Instagram · Search hashtag × 8 pages');
+    expect(src.sub).toBe('hashtag: smarthomeindia · date posted: last-month — about 8 credits per run (8 pages × 1)');
+    expect(src.args).toEqual({ hashtag: 'smarthomeindia', date_posted: 'last-month', _pages: 8 });
+    expect(src.say).toContain('up to 8 pages');
+    // no cost history → says so, still names the pages
+    expect(buildSocialFlow(paged).graph.nodes.find((n: any) => n.id === 'src:svc:instagram.search_hashtag').data.sub).toContain('credits per page: not known yet (8 pages)');
+    // the same graph from the plan directly
+    expect(buildPlanFlow(planFromAgent(paged), { costs: { 'svc:instagram.search_hashtag': 1 } })).toEqual(buildSocialFlow(paged, { costs: { 'svc:instagram.search_hashtag': 1 } }));
+  });
+
+  it('a creators-first block is ONE node, "Find creators → their posts", with the finder, N, the per-creator action and the days', () => {
+    const agent = {
+      id: 'ag3', name: 'India creators', prompt: KEEP_AS_FETCHED, outputDest: 'document', mode: 'run',
+      tools: ['svc:instagram.search_profiles'],
+      toolArgs: { 'svc:instagram.search_profiles': { kind: 'creators', find: { actionId: 'svc:instagram.search_profiles', args: { query: 'smart home india' }, take: 5 }, then: { actionId: 'svc:instagram.user_posts', argsFrom: { handle: 'username' }, keepDays: 30 } } },
+    };
+    const { graph } = buildSocialFlow(agent, { names: { 'svc:instagram.search_profiles': { service: 'Instagram', action: 'Search Instagram Profiles' }, 'svc:instagram.user_posts': { service: 'Instagram', action: 'Posts' } }, costs: { 'svc:instagram.search_profiles': 1, 'svc:instagram.user_posts': 1 } });
+    expect(ids(graph)).toEqual(['question', 'src:svc:instagram.search_profiles', 'write', 'end']);
+    const n = byId(graph, 'src:svc:instagram.search_profiles').data;
+    expect(n.kind).toBe('tool');
+    expect(n.refId).toBe('svc:instagram.search_profiles');
+    expect(n.label).toBe('Find creators → their posts');
+    expect(n.sub).toBe('Search Instagram Profiles (query: smart home india) → first 5 → Posts each · last 30 days — about 6 credits per run (1 + 5 × 1)');
+    expect(n.say).toContain('handle ← username');
+    expect(n.say).toContain('a creator that fails is said and skipped');
+    expect(byId(graph, 'question').data.sub).toBe('1 Instagram source → rows as fetched → saved to Documents');
   });
 });

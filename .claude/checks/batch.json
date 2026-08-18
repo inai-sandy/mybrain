@@ -1,12 +1,37 @@
 {
   "startedAt": "2026-08-18T12:16:00Z",
-  "note": "Thinking-builder batch. Design: specs/THINKING-BUILDER.md (approved 2026-08-18 'go'). BEA-1373 = acceptance, blocked behind 1368-1372. Order: 1368 → 1369 → 1370 → 1371 → 1372 → 1373. Owner rules: no cheaper models (Sonnet 5 for design), no fixed interview script, honest runs, UI 1180+390 light+dark.",
+  "note": "Thinking-builder batch. Design: specs/THINKING-BUILDER.md (approved 2026-08-18 'go'). BEA-1373 = acceptance, blocked behind 1368-1372. Order: 1368 \u2192 1369 \u2192 1370 \u2192 1371 \u2192 1372 \u2192 1373. Owner rules: no cheaper models (Sonnet 5 for design), no fixed interview script, honest runs, UI 1180+390 light+dark.",
   "issues": [
-    { "id": "BEA-1368", "title": "Know-how layer: ToolKnowledge cards", "status": "in_progress" },
-    { "id": "BEA-1369", "title": "Planning blocks: pages per source, creators-first, plan JSON", "status": "pending" },
-    { "id": "BEA-1370", "title": "Sample calls for the builder (capped)", "status": "pending" },
-    { "id": "BEA-1371", "title": "The builder itself (Sonnet 5, facts, plan-with-cost)", "status": "pending" },
-    { "id": "BEA-1372", "title": "Screens: plan card, samples in chat, entry points", "status": "pending" },
-    { "id": "BEA-1373", "title": "Acceptance: owner's example through the builder", "status": "pending" }
+    {
+      "id": "BEA-1368",
+      "title": "Know-how layer: ToolKnowledge cards",
+      "status": "done",
+      "sha": "dd14789"
+    },
+    {
+      "id": "BEA-1369",
+      "title": "Planning blocks: pages per source, creators-first, plan JSON",
+      "status": "in_progress"
+    },
+    {
+      "id": "BEA-1370",
+      "title": "Sample calls for the builder (capped)",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1371",
+      "title": "The builder itself (Sonnet 5, facts, plan-with-cost)",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1372",
+      "title": "Screens: plan card, samples in chat, entry points",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1373",
+      "title": "Acceptance: owner's example through the builder",
+      "status": "pending"
+    }
   ]
 }

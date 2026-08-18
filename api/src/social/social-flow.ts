@@ -1,4 +1,4 @@
-import { isServiceToolId } from '../tools/service-provider';
+import { AgentPlan, KEEP_AS_FETCHED, PlanCreators, PlanSource, isDirectFetchAgent, planFromAgent, wantsShaping } from './plan';
 
 /**
  * A Social agent's flow picture, drawn from its settings — no AI (BEA-1366).
@@ -18,27 +18,8 @@ import { isServiceToolId } from '../tools/service-provider';
  * edit here would silently fork from what actually runs.
  */
 
-/** The task text the builder pre-fills. Anything else means "shape the rows as I say". */
-export const KEEP_AS_FETCHED = 'Keep every result as fetched.';
-
-const norm = (s: string) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-
-/**
- * Is this job a direct fetch? Every tool is a `svc:` id AND each has pinned arguments. A job with
- * a bare `svc:` id and no arguments is not one — the engine cannot call it either, but that is
- * the toolbox's problem to say, not ours to guess at.
- */
-export function isDirectFetchAgent(agent: any): boolean {
-  const tools: string[] = Array.isArray(agent?.tools) ? agent.tools : [];
-  const args = agent?.toolArgs && typeof agent.toolArgs === 'object' ? agent.toolArgs : null;
-  return tools.length > 0 && !!args && tools.every((t) => isServiceToolId(t) && args[t] && typeof args[t] === 'object');
-}
-
-/** Does the task text ask for anything beyond the rows as fetched? */
-export function wantsShaping(prompt?: string | null): boolean {
-  const p = norm(prompt || '');
-  return !!p && p.replace(/[.!]$/, '') !== norm(KEEP_AS_FETCHED).replace(/[.!]$/, '');
-}
+/** `KEEP_AS_FETCHED`, `isDirectFetchAgent`, `wantsShaping` live in `plan.ts` since BEA-1369 (the plan owns the vocabulary); re-exported so imports keep working. */
+export { KEEP_AS_FETCHED, isDirectFetchAgent, wantsShaping };
 
 export type SocialFlowNames = Record<string, { service?: string; action?: string }>;
 export type SocialFlowOpts = {
@@ -92,31 +73,75 @@ function thresholdText(t: any): string {
   return `${field} ${th.dir === 'below' ? 'falls below' : 'goes above'} ${Number(th.value).toLocaleString('en-US')}`;
 }
 
+/** A plain source's node: "Instagram · Popular Search × 5 pages — query: … — about 5 credits per run". */
+function sourceNode(src: PlanSource, nm: { service: string; action: string }, lastCost?: number) {
+  const line = argsLine(src.args);
+  const pages = src.pages > 1 ? ` × ${src.pages} pages` : '';
+  const per = lastCost !== undefined && lastCost !== null && Number.isFinite(Number(lastCost)) ? Number(lastCost) : null;
+  const cost = per === null
+    ? (src.pages > 1 ? `credits per page: not known yet (${src.pages} pages)` : 'credits per fetch: not known yet')
+    : src.pages > 1 ? `about ${per * src.pages} credit${per * src.pages === 1 ? '' : 's'} per run (${src.pages} pages × ${per})` : creditsHint(per);
+  const paging = src.pages > 1 ? ` — follows the vendor's cursor for up to ${src.pages} pages, de-duped by id, stops early on an empty or repeated page` : '';
+  return {
+    kind: 'tool', refId: src.actionId, label: `${nm.service} · ${nm.action}${pages}`,
+    sub: [line, cost].filter(Boolean).join(' — '),
+    args: src.pages > 1 ? { ...src.args, _pages: src.pages } : src.args,
+    say: `Fetch ${nm.service} · ${nm.action}${line ? ` (${line})` : ''} directly through your Tools${paging} — ${cost}, no engine turn.`,
+  };
+}
+
+/** A creators-first block's node: "Find creators → their posts". */
+function creatorsNode(src: PlanCreators, nameOf: (id: string) => { service: string; action: string }, costs?: Record<string, number>) {
+  const f = nameOf(src.find.actionId);
+  const t = src.then.actionId ? nameOf(src.then.actionId) : { service: f.service, action: 'their posts' };
+  const line = argsLine(src.find.args, 60);
+  const days = src.then.keepDays ? ` · last ${src.then.keepDays} days` : '';
+  const perF = Number.isFinite(Number(costs?.[src.find.actionId])) ? Number(costs![src.find.actionId]) : null;
+  const perT = src.then.actionId && Number.isFinite(Number(costs?.[src.then.actionId])) ? Number(costs![src.then.actionId]) : null;
+  const cost = perF !== null && perT !== null ? `about ${perF + src.find.take * perT} credits per run (1 + ${src.find.take} × ${perT})` : `about ${1 + src.find.take} credits per run (1 + ${src.find.take}), when each call is 1 credit`;
+  const from = Object.entries(src.then.argsFrom).map(([p, fld]) => `${p} ← ${fld}`).join(', ');
+  return {
+    kind: 'tool', refId: src.find.actionId, label: `Find creators → their posts`,
+    sub: `${f.action}${line ? ` (${line})` : ''} → first ${src.find.take} → ${t.action} each${days} — ${cost}`,
+    args: { kind: 'creators', find: src.find, then: src.then },
+    say: `Find creators with ${f.service} · ${f.action}${line ? ` (${line})` : ''}, take the first ${src.find.take}, then fetch ${t.action} for each one (${from || 'handle from the creator'})${src.then.keepDays ? `, keeping items from the last ${src.then.keepDays} days when they carry a date` : ''} — ${cost}; a creator that fails is said and skipped.`,
+  };
+}
+
 /**
  * Build the picture. Returns the flow's name, question (the task in the owner's words) and the
  * React-Flow graph the canvas renders. Pure: same agent + same opts → same graph.
  */
 export function buildSocialFlow(agent: any, opts: SocialFlowOpts = {}): { name: string; question: string; graph: { nodes: any[]; edges: any[]; drawnBy: 'social'; note: string } } {
-  const tools: string[] = Array.isArray(agent?.tools) ? agent.tools : [];
-  const args: Record<string, any> = agent?.toolArgs && typeof agent.toolArgs === 'object' ? agent.toolArgs : {};
-  const mode = ['watch', 'alert'].includes(String(agent?.mode)) ? String(agent.mode) : 'run';
-  const dest = String(agent?.outputDest || 'document');
-  const sheet = dest === 'sheet';
-  const append = sheet && !!agent?.sheetId;
-  const shaping = mode === 'run' && wantsShaping(agent?.prompt);
-  const whatsapp = !!agent?.notifyWhatsApp;
-  const prompt = String(agent?.prompt || '').trim();
-  const name = String(agent?.name || 'Social agent').trim();
+  return buildPlanFlow(planFromAgent(agent), opts);
+}
+
+/**
+ * The picture of a plan (BEA-1369) — `buildSocialFlow()` is `buildPlanFlow(planFromAgent(agent))`,
+ * so the drawer and the runner read the SAME plan. A paged source says "× 8 pages"; a creators-first
+ * block is one node, "Find creators → their posts".
+ */
+export function buildPlanFlow(plan: AgentPlan, opts: SocialFlowOpts = {}): { name: string; question: string; graph: { nodes: any[]; edges: any[]; drawnBy: 'social'; note: string } } {
+  const sources = plan.sources;
+  const mode = plan.mode;
+  const sheet = plan.output.kind === 'sheet';
+  const append = plan.output.append;
+  const shaping = !!plan.shape;
+  const whatsapp = plan.notify.whatsapp;
+  const prompt = plan.prompt === KEEP_AS_FETCHED ? '' : String(plan.prompt || '').trim();
+  const name = plan.name || 'Social agent';
+  const sheetId = plan.output.sheetId || '';
 
   const nodes: any[] = [];
   const edges: any[] = [];
   const edge = (a: string, b: string) => edges.push({ id: `e_${a}_${b}`, source: a, target: b, animated: true });
+  const nameOf = (id: string) => ({ ...namesFromId(id), ...(opts.names?.[id] || {}) });
 
   // ---- the question: what this job is, in one line -------------------------------------------
-  const srcNames = tools.map((id) => opts.names?.[id]?.service || namesFromId(id).service);
+  const srcNames = sources.map((s) => nameOf(s.kind === 'source' ? s.actionId : s.find.actionId).service);
   const platforms = Array.from(new Set(srcNames));
   const summary = [
-    `${tools.length} ${platforms.join(' + ') || 'Social'} source${tools.length === 1 ? '' : 's'}`,
+    `${sources.length} ${platforms.join(' + ') || 'Social'} source${sources.length === 1 ? '' : 's'}`,
     mode === 'watch' ? 'only what changed' : mode === 'alert' ? 'alert when it happens' : shaping ? 'rows shaped your way' : 'rows as fetched',
     sheet ? (append ? 'appended to your Google Sheet' : 'a new Google Sheet each run') : 'saved to Documents',
     whatsapp ? 'link on WhatsApp' : '',
@@ -124,22 +149,16 @@ export function buildSocialFlow(agent: any, opts: SocialFlowOpts = {}): { name: 
   nodes.push({ id: 'question', type: 'box', position: { x: CX, y: 0 }, data: { kind: 'question', label: name, sub: summary, say: prompt || KEEP_AS_FETCHED } });
 
   // ---- one node per source ----------------------------------------------------------------------
-  const startX = tools.length > 1 ? CX - ((tools.length - 1) * COL) / 2 : CX;
+  const startX = sources.length > 1 ? CX - ((sources.length - 1) * COL) / 2 : CX;
   const srcIds: string[] = [];
-  tools.forEach((id, i) => {
-    const nm = { ...namesFromId(id), ...(opts.names?.[id] || {}) };
-    const nid = `src:${id}`;
-    const line = argsLine(args[id]);
-    const cost = creditsHint(opts.costs?.[id]);
-    nodes.push({
-      id: nid, type: 'box', position: { x: startX + i * COL, y: ROW },
-      data: {
-        kind: 'tool', refId: id, label: `${nm.service} · ${nm.action}`,
-        sub: [line, cost].filter(Boolean).join(' — '),
-        args: args[id] || {},
-        say: `Fetch ${nm.service} · ${nm.action}${line ? ` (${line})` : ''} directly through your Tools — ${cost}, no engine turn.`,
-      },
-    });
+  sources.forEach((src, i) => {
+    const nid = `src:${src.id}`;
+    const position = { x: startX + i * COL, y: ROW };
+    if (src.kind === 'creators') {
+      nodes.push({ id: nid, type: 'box', position, data: creatorsNode(src, nameOf, opts.costs) });
+    } else {
+      nodes.push({ id: nid, type: 'box', position, data: sourceNode(src, nameOf(src.actionId), opts.costs?.[src.actionId]) });
+    }
     edge('question', nid);
     srcIds.push(nid);
   });
@@ -158,8 +177,8 @@ export function buildSocialFlow(agent: any, opts: SocialFlowOpts = {}): { name: 
   // ---- merge when there is more than one source ------------------------------------------------
   // The merge is a plain union (`mergeTables()`): every row from every source under a "source"
   // column. It does NOT de-duplicate — only the shaping step does, and only when the task says so.
-  if (tools.length > 1) {
-    chain({ id: 'merge', data: { kind: 'merge', mode: 'raw', modeText: 'Union', label: 'Merge the sources', sub: `One table with a "source" column — every row from every source${shaping ? '; the shaping step below applies your task to it' : ' (a post found by two searches appears twice)'}`, say: `Merge the ${tools.length} sources into one table under a "source" column — every row from every source${shaping ? '' : ', as fetched'}.` } });
+  if (sources.length > 1) {
+    chain({ id: 'merge', data: { kind: 'merge', mode: 'raw', modeText: 'Union', label: 'Merge the sources', sub: `One table with a "source" column — every row from every source${shaping ? '; the shaping step below applies your task to it' : ' (a post found by two searches appears twice)'}`, say: `Merge the ${sources.length} sources into one table under a "source" column — every row from every source${shaping ? '' : ', as fetched'}.` } });
   }
 
   // ---- shaping — only when the task says more than "as fetched" (mode run only) ------------------
@@ -171,15 +190,15 @@ export function buildSocialFlow(agent: any, opts: SocialFlowOpts = {}): { name: 
   if (mode === 'watch') {
     chain({ id: 'watch', data: { kind: 'filter', label: 'Only what changed', sub: 'Compared with what it saw last time — new items, numbers that moved. First run stores the baseline.', say: 'Compare with what it saw last time and keep only what changed (new items by id, numbers that moved); the first run only stores the baseline.' } });
   } else if (mode === 'alert') {
-    const th = thresholdText(agent?.threshold);
-    const cond = String(agent?.alertCondition || '').trim();
+    const th = thresholdText(plan.watch?.threshold);
+    const cond = String(plan.watch?.condition || '').trim();
     const when = [th ? `when ${th}` : '', cond ? `when “${cond.slice(0, 90)}${cond.length > 90 ? '…' : ''}”` : ''].filter(Boolean).join(' or ') || 'on any change';
     chain({ id: 'watch', data: { kind: 'if', label: 'Alert ' + when, sub: 'Compared with last time; a number that stays over the line alerts once' + (cond ? ' · the condition is judged by one model call over the change' : ''), say: `Compare with last time and alert ${when} (a number that stays over the line alerts once${cond ? '; the plain-English condition is judged by one model call over the change only' : ''}).` } });
   }
 
   // ---- the writer ----------------------------------------------------------------------------------
   if (sheet && append) {
-    chain({ id: 'write', data: { kind: 'tool', refId: 'svc:googlesheets.batch_update', label: 'Google Sheet — append to yours', sub: `Rows go under your sheet's own columns · ${String(agent.sheetId).slice(0, 18)}…`, say: 'Read your Google Sheet’s columns and row count, then append the rows under its own columns.' } });
+    chain({ id: 'write', data: { kind: 'tool', refId: 'svc:googlesheets.batch_update', label: 'Google Sheet — append to yours', sub: `Rows go under your sheet's own columns · ${sheetId.slice(0, 18)}…`, say: 'Read your Google Sheet’s columns and row count, then append the rows under its own columns.' } });
   } else if (sheet) {
     chain({ id: 'write', data: { kind: 'tool', refId: 'svc:googlesheets.create_google_sheet1', label: 'Google Sheet — new each run', sub: `Titled "${name} — <date>", header + rows at A1`, say: `Create a new Google Sheet titled "${name} — <date>" and write the header and rows at A1.` } });
   } else {

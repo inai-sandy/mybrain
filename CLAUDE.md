@@ -330,6 +330,39 @@ catalog's path. UI: `web/src/ui/ToolFacts.tsx` — the small "Facts" fold on the
 sheet's action rows (the gate rows are the only per-action rows that sheet has); it fetches only when opened. Trap: the
 recorder keeps 2000 chars of pretty JSON, so an observed page size exists only for short answers — the note fills it.
 
+**A Social agent runs a PLAN, and the plan has blocks (BEA-1369, `specs/THINKING-BUILDER.md` §C).** `api/src/social/plan.ts`:
+`planFromAgent(agent)` (pure) → `AgentPlan { sources:[source|creators], merge, shape?, watch?, output, notify, schedule, ceilingNote, prompt, mode }`;
+`SocialAgentRunService.run()` is `runPlan(planFromAgent(agent))` and `buildSocialFlow()` is `buildPlanFlow(planFromAgent(agent))` — one plan,
+the runner executes it and the picture draws it, so they cannot disagree (`KEEP_AS_FETCHED`/`isDirectFetchAgent`/`wantsShaping` now live in
+`plan.ts`, re-exported from `social-flow.ts`). Two blocks are new, both stored INSIDE `Agent.toolArgs` as data (no schema change):
+**pages** — `toolArgs[svc id]._pages` (1..11, default 1; `plainArgs()` strips `_`-keys before the vendor sees them): `fetchSource()` sends
+page 1 as always, then the vendor's cursor (`nextCursorOf`: cursor · next_max_id · end_cursor…) or the next page number under the param the
+know-how card's `paging.field` names (else inferred from the answer's cursor key, else a `page` already in the args, else "does not page"),
+ONE `ToolCall` per page with its credits, items de-duped on `dedupeKey()` (`itemKey` id fields, never position), early stop on no cursor /
+an empty (not_found) or repeated page, and `SocialBudgetService.check()` before EVERY page; a later page that fails for any other reason
+FAILS the run (nothing written). One page = the raw answer as before (a profile stays a profile); several = `{[listKey]: items}`. Step:
+"Fetched Instagram · Popular Search — 96 items over 8 pages · 8 credits · stopped early: page 9 was empty". A Watch keys its baseline on
+the plain args, so more pages never forgets a baseline. **creators-first** — `toolArgs[<finder svc id>] = { kind:'creators', find:{actionId,
+args, take≤50}, then:{actionId, argsFrom:{ handle:'username' }, args?, keepDays?} }`: `fetchCreators()` runs the finder once, takes the
+first N distinct creators (`creatorField()` reads flat · dotted · one level down), runs the per-creator action once each (`argsFrom` maps a
+creator field into the argument, `then.args` are fixed extras like `trim:true`), keeps items newer than `keepDays` when the items carry a
+date (`dateFieldOf()`: the card's `fields[].kind==='date'` inside the list, e.g. `items[].taken_at` epoch seconds — verified live on
+`svc:instagram.user_posts` — else the usual names; else EVERYTHING is kept and the step says so), merges under a `creator` column
+(`{items:[{creator,…}]}`), de-duped by id; ceiling before every call; a failing creator is said + skipped (≥1 success, else the source
+is empty-with-reason, like a not_found search); no `then.actionId` → the run fails plainly. Step: "5 creators · fetched posts for 5 · 24 kept
+from the last 30 days (of 60) · 6 credits". `estimatePlanCost(plan, cards)` → `{credits, aiTokens, items, how}` (pages × the card's
+`cost.credits.typical` else 1; creators = finder + take × per-call; items = pages × `paging.pageSize` else 12; shaping ≈ items × 300 tokens,
+0 on a Watch) — `GET /api/social/plan/:agentId` answers `{plan, cost}` and the job page header shows "≈ N credits per run" (`data-testid=
+plan-cost`, the arithmetic as its title; the "What it fetches" note repeats it). UI: `PlainSourceEditor` (a "pages" field, shown while the
+card is unknown or says it pages, hidden when `paging.how==='none'`, `pagesCostHint`), `CreatorsSourceEditor` (finder args · N · then-action
+picker from `/api/social/platforms/:slug` · argument ← creator field · days) — `ToolArgsEditor` picks by `isCreatorsArgs(args)`; `AddSourcePanel`
+has a **Creators first** switch (`creatorParamOf(schema)` guesses `handle`/`user_id`, `creatorFieldFor` → `username`/`id`). The flow node for a
+paged source is "Instagram · Popular Search × 8 pages — … about 8 credits per run (8 pages × 1)"; a creators block is ONE node
+"Find creators → their posts" (`refId` = the finder, `args` = the block); `AgentFlowSyncService` names/costs every id in `planActionIds()`.
+Traps: `SocialAgentRunService`'s constructor gained `knowledge?: ToolKnowledgeService` LAST (positional harnesses); the finder id doubles as
+the block's key, so one job holds one creators block per finder action; `_pages` on an action that does not page costs one call and the step
+says "this endpoint does not page (5 pages asked)".
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

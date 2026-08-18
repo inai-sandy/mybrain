@@ -48,6 +48,7 @@ export function AgentApp() {
   const [flow, setFlow] = useState<any>(null);
   const [pickingTools, setPickingTools] = useState(false); // this job's own toolbox (BEA-1168)
   const [addingSource, setAddingSource] = useState(false); // another Social source on a direct-fetch job (BEA-1359)
+  const [planCost, setPlanCost] = useState<{ credits: number; aiTokens: number; how: string } | null>(null); // ≈ what one run costs (BEA-1369)
   const catalog = useCatalog();
   const toolNames: Record<string, string> = Object.fromEntries((catalog?.tools || []).map((t: any) => [t.id, t.name]));
   const [allSkills, setAllSkills] = useState<any[] | null>(null);
@@ -90,6 +91,16 @@ export function AgentApp() {
     if (!live && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
   function loadFlow() { fetch(`/api/flows?agentId=${id}`).then((r) => r.json()).then((d) => setFlow((d.flows || [])[0] || null)).catch(() => undefined); }
+  // ≈ credits per run for a direct-fetch (Social) job — from the plan + the know-how cards (BEA-1369). Re-read whenever the sources change.
+  const isDirectFetch = !!(a?.toolArgs && typeof a.toolArgs === 'object' && Object.keys(a.toolArgs).length);
+  const toolArgsKey = isDirectFetch ? JSON.stringify(a.toolArgs) : '';
+  useEffect(() => {
+    if (!isDirectFetch) { setPlanCost(null); return; }
+    let live = true;
+    fetch(`/api/social/plan/${id}`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live) setPlanCost(d?.cost && Number.isFinite(Number(d.cost.credits)) ? d.cost : null); }).catch(() => { if (live) setPlanCost(null); });
+    return () => { live = false; };
+    /* eslint-disable-next-line */
+  }, [id, toolArgsKey]);
   useEffect(() => {
     load(); loadFlow();
     fetch('/api/skills').then((r) => r.json()).then((d) => setAllSkills(d.skills || [])).catch(() => setAllSkills([]));
@@ -220,6 +231,9 @@ export function AgentApp() {
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-bold">{a.name}</h1>
           <p className="truncate text-sm text-zinc-500">{a.description || a.scheduleText || 'Your agent'}</p>
+          {planCost && (
+            <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>≈ {planCost.credits.toLocaleString()} credit{planCost.credits === 1 ? '' : 's'} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>
+          )}
         </div>
         <button onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings" className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><GearIcon className="h-5 w-5" /></button>
       </header>
@@ -491,7 +505,7 @@ export function AgentApp() {
                   onAdd={async (x) => { const toolArgs = { ...a.toolArgs, [x.tool]: x.args }; const d = await patch({ tools: Object.keys(toolArgs), toolArgs }); if (d) { toast('success', `Added ${x.label || x.tool}`); setAddingSource(false); } }}
                   onCancel={() => setAddingSource(false)} />
               )}
-              <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.{Object.keys(a.toolArgs).length > 1 ? ' Several sources are fetched one after the other and merged into one table.' : ''}</p>
+              <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.{Object.keys(a.toolArgs).length > 1 ? ' Several sources are fetched one after the other and merged into one table.' : ''}{planCost ? ` ${planCost.how}` : ''}</p>
               {/* Watch / Alert (BEA-1358): the same picker as the builder, so the two can never disagree. */}
               {modeDraft && (
                 <div className="space-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">

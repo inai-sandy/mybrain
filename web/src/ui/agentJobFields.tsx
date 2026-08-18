@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -48,9 +49,85 @@ export function OutputDestPicker({ dest, sheetId, onChange, onCommitSheetId, com
   );
 }
 
-/** A tool's pinned arguments, editable one field at a time. Keys are the endpoint's own field names. */
+// ---- planning blocks (BEA-1369) ----------------------------------------------------------------
+
+/** The Social page's page cap — their Google-indexed searches stop at 11. */
+export const MAX_PAGES = 11;
+export const MAX_TAKE = 50;
+
+/** What the pages field and the creators editor read off a know-how card (BEA-1368). Null = not loaded / not known. */
+export type ActionCard = { paging?: { how?: string; field?: string; pageSize?: number }; cost?: { credits?: { typical?: number } }; params?: { name: string; required?: boolean; type?: string }[]; fields?: { path: string; kind: string }[]; hasDateField?: boolean } | null;
+
+/** One know-how card, fetched once per id (a small in-memory cache — the server caches 10 min too). Never throws; unknown → null. */
+const cardCache = new Map<string, Promise<ActionCard>>();
+export function fetchActionCard(id: string): Promise<ActionCard> {
+  if (!id || !/^svc:/.test(id)) return Promise.resolve(null);
+  let p = cardCache.get(id);
+  if (!p) {
+    p = Promise.resolve()
+      .then(() => fetch(`/api/tools/knowledge/${encodeURIComponent(id)}`))
+      .then((r: any) => (r && r.ok ? r.json() : null))
+      .then((d: any) => (d && typeof d === 'object' && d.actionId ? d : null))
+      .catch(() => null);
+    cardCache.set(id, p);
+  }
+  return p;
+}
+export function useActionCard(id: string): ActionCard {
+  const [card, setCard] = useState<ActionCard>(null);
+  useEffect(() => {
+    let live = true;
+    setCard(null);
+    fetchActionCard(id).then((c) => { if (live) setCard(c); });
+    return () => { live = false; };
+  }, [id]);
+  return card;
+}
+
+/** Credits one call of this action usually costs — the card's typical, else 1 (and the hint says it is a default). */
+export function creditsPerCall(card: ActionCard): { n: number; known: boolean } {
+  const n = Number(card?.cost?.credits?.typical);
+  return Number.isFinite(n) && n > 0 ? { n, known: true } : { n: 1, known: false };
+}
+
+/** 1..11 — anything else is 1 (or the cap). */
+export function clampPages(v: any): number {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(n, MAX_PAGES);
+}
+
+/** Is this `toolArgs` value a creators-first source (BEA-1369)? */
+export function isCreatorsArgs(a: any): boolean {
+  return !!a && typeof a === 'object' && a.kind === 'creators' && !!a.find && typeof a.find === 'object' && !!a.then && typeof a.then === 'object';
+}
+
+/** ≈ credits for one source per run: pages × per page. Plain words, and honest when the per-page cost is a default. */
+export function pagesCostHint(pages: number, per: { n: number; known: boolean }): string {
+  const total = pages * per.n;
+  return `≈ ${total} credit${total === 1 ? '' : 's'} per run${pages > 1 ? ` (${pages} pages × ${per.n})` : ''}${per.known ? '' : ' — about 1 a page until a run shows the real cost'}`;
+}
+
+/** ≈ credits for a creators-first source per run: the finder once + one call per creator. */
+export function creatorsCostHint(take: number, finder: { n: number; known: boolean }, then: { n: number; known: boolean }): string {
+  const total = finder.n + take * then.n;
+  return `≈ ${total} credit${total === 1 ? '' : 's'} per run (1 finder call + ${take} × ${then.n})${finder.known && then.known ? '' : ' — about 1 a call until a run shows the real cost'}`;
+}
+
+/** A tool's pinned arguments, editable one field at a time. Keys are the endpoint's own field names. A creators-first source (BEA-1369) draws its own editor. */
 export function ToolArgsEditor({ tool, args, onChange, toolName, onRemove }: { tool: string; args: Record<string, any>; onChange: (next: Record<string, any>) => void; toolName?: string; /** Shown as a Remove link when a job has more than one source (BEA-1359). */ onRemove?: () => void }) {
-  const keys = Object.keys(args || {});
+  if (isCreatorsArgs(args)) return <CreatorsSourceEditor tool={tool} args={args} onChange={onChange} toolName={toolName} onRemove={onRemove} />;
+  return <PlainSourceEditor tool={tool} args={args} onChange={onChange} toolName={toolName} onRemove={onRemove} />;
+}
+
+function PlainSourceEditor({ tool, args, onChange, toolName, onRemove }: { tool: string; args: Record<string, any>; onChange: (next: Record<string, any>) => void; toolName?: string; onRemove?: () => void }) {
+  // `_pages` (BEA-1369) is a planning key, not an argument — drawn as its own field, never sent to the vendor.
+  const keys = Object.keys(args || {}).filter((k) => !k.startsWith('_'));
+  const card = useActionCard(tool);
+  const pages = clampPages(args?._pages);
+  // The pages field shows when the action pages (the card says cursor/page), or until the card has answered.
+  const canPage = !card || (card.paging?.how && card.paging.how !== 'none');
+  const per = creditsPerCall(card);
   return (
     <div className="space-y-1.5 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700" data-testid="tool-args">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -60,7 +137,7 @@ export function ToolArgsEditor({ tool, args, onChange, toolName, onRemove }: { t
           <button type="button" onClick={onRemove} aria-label={`Remove source ${toolName || tool}`} title="Remove this source" className="ml-auto rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10">Remove</button>
         )}
       </div>
-      {keys.length === 0 ? (
+      {keys.length === 0 && !canPage ? (
         <p className="text-[11px] text-zinc-400">This endpoint takes no inputs — it runs as is.</p>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -70,9 +147,120 @@ export function ToolArgsEditor({ tool, args, onChange, toolName, onRemove }: { t
               <input value={args[k] === null || args[k] === undefined ? '' : Array.isArray(args[k]) ? args[k].join(', ') : String(args[k])} onChange={(e) => onChange({ ...args, [k]: coerce(args[k], e.target.value) })} aria-label={k} className={inp + ' mt-0.5'} />
             </label>
           ))}
+          {canPage && (
+            <label className="block min-w-0 text-xs text-zinc-500" data-testid="pages-field">
+              <span className="block truncate font-medium">pages <span className="font-normal text-zinc-400">· 1–{MAX_PAGES}, follows the vendor's cursor</span></span>
+              <input type="number" inputMode="numeric" min={1} max={MAX_PAGES} value={pages} onChange={(e) => { const n = clampPages(e.target.value); const next = { ...args }; if (n > 1) next._pages = n; else delete next._pages; onChange(next); }} aria-label="pages" className={inp + ' mt-0.5'} />
+            </label>
+          )}
         </div>
       )}
-      <p className="text-[11px] text-zinc-400">These exact values are sent every run — no AI fills them in.</p>
+      <p className="text-[11px] text-zinc-400">These exact values are sent every run — no AI fills them in.{canPage ? ` ${pagesCostHint(pages, per)}${pages > 1 ? '; items are de-duped by id and it stops early on an empty page.' : '.'}` : ''}</p>
+    </div>
+  );
+}
+
+/** A platform's endpoints, from `/api/social/platforms/:slug` — for the creators editor's "then" picker. */
+export function usePlatformActions(slug: string): { id: string; name: string; schema?: any; tags?: string[] }[] | null {
+  const [list, setList] = useState<{ id: string; name: string; schema?: any; tags?: string[] }[] | null>(null);
+  useEffect(() => {
+    if (!slug) { setList([]); return; }
+    let live = true;
+    setList(null);
+    Promise.resolve()
+      .then(() => fetch(`/api/social/platforms/${encodeURIComponent(slug)}`))
+      .then((r: any) => (r && r.ok ? r.json() : null))
+      .then((d: any) => { if (live) setList(Array.isArray(d?.actions) ? d.actions : []); })
+      .catch(() => { if (live) setList([]); });
+    return () => { live = false; };
+  }, [slug]);
+  return list;
+}
+
+/** The argument of a per-creator action that names the creator — handle, username, user_id… the first that fits, else its first required one. */
+export function creatorParamOf(schema: any): string {
+  const props = Object.keys(schema?.properties || {});
+  const required: string[] = Array.isArray(schema?.required) ? schema.required : [];
+  const hit = props.find((p) => /^(handle|username|user_name|screen_name|user_id|userid|user|profile|channel|creator|account|id)$/i.test(p)) || props.find((p) => /handle|user|name|id/i.test(p));
+  return hit || required[0] || props[0] || 'handle';
+}
+
+/** The creator field the finder's items usually carry for that argument. */
+export function creatorFieldFor(param: string): string {
+  return /id/i.test(param) && !/handle|name/i.test(param) ? 'id' : 'username';
+}
+
+/**
+ * The creators-first source (BEA-1369): find creators once, then run one action per creator.
+ * Stored as `{ kind:'creators', find:{ actionId, args, take }, then:{ actionId, argsFrom:{ <param>: <creator field> }, keepDays } }`.
+ */
+export function CreatorsSourceEditor({ tool, args, onChange, toolName, onRemove }: { tool: string; args: Record<string, any>; onChange: (next: Record<string, any>) => void; toolName?: string; onRemove?: () => void }) {
+  const find = args.find || {};
+  const then = args.then || {};
+  const platform = String(find.actionId || tool).replace(/^svc:/, '').split('.')[0];
+  const actions = usePlatformActions(platform);
+  const finderCard = useActionCard(String(find.actionId || tool));
+  const thenCard = useActionCard(String(then.actionId || ''));
+  const take = Math.min(MAX_TAKE, Math.max(1, Math.floor(Number(find.take)) || 10));
+  const findArgs: Record<string, any> = find.args && typeof find.args === 'object' ? find.args : {};
+  const argsFrom: Record<string, string> = then.argsFrom && typeof then.argsFrom === 'object' ? then.argsFrom : {};
+  const [param, field] = Object.entries(argsFrom)[0] || ['', ''];
+  const thenAction = (actions || []).find((a) => a.id === then.actionId) || null;
+  const thenParams = useMemo(() => Object.keys(thenAction?.schema?.properties || {}), [thenAction]);
+  const setFind = (patch: any) => onChange({ ...args, find: { ...find, ...patch } });
+  const setThen = (patch: any) => onChange({ ...args, then: { ...then, ...patch } });
+  const hasDate = thenCard ? !!thenCard.hasDateField : null;
+  return (
+    <div className="space-y-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700" data-testid="creators-source">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="rounded-full bg-pink-50 px-2 py-0.5 font-semibold text-pink-700 dark:bg-pink-500/10 dark:text-pink-300">📣 {toolName || 'Find creators → their posts'}</span>
+        <code className="min-w-0 truncate text-[11px] text-zinc-400">{String(find.actionId || tool)} → {String(then.actionId || '?')}</code>
+        {onRemove && (
+          <button type="button" onClick={onRemove} aria-label={`Remove source ${toolName || tool}`} title="Remove this source" className="ml-auto rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10">Remove</button>
+        )}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {Object.keys(findArgs).map((k) => (
+          <label key={k} className="block min-w-0 text-xs text-zinc-500">
+            <span className="block truncate font-medium">find creators · {k}</span>
+            <input value={findArgs[k] === null || findArgs[k] === undefined ? '' : String(findArgs[k])} onChange={(e) => setFind({ args: { ...findArgs, [k]: coerce(findArgs[k], e.target.value) } })} aria-label={`find ${k}`} className={inp + ' mt-0.5'} />
+          </label>
+        ))}
+        <label className="block min-w-0 text-xs text-zinc-500">
+          <span className="block truncate font-medium">how many creators <span className="font-normal text-zinc-400">· first N found, up to {MAX_TAKE}</span></span>
+          <input type="number" inputMode="numeric" min={1} max={MAX_TAKE} value={take} onChange={(e) => setFind({ take: Math.min(MAX_TAKE, Math.max(1, Math.floor(Number(e.target.value)) || 1)) })} aria-label="how many creators" className={inp + ' mt-0.5'} />
+        </label>
+        <label className="block min-w-0 text-xs text-zinc-500">
+          <span className="block truncate font-medium">then, for each creator</span>
+          <select value={String(then.actionId || '')} onChange={(e) => { const a = (actions || []).find((x) => x.id === e.target.value); const p = a ? creatorParamOf(a.schema) : param; setThen({ actionId: e.target.value, argsFrom: { [p]: field || creatorFieldFor(p) } }); }} aria-label="then, for each creator" className={inp + ' mt-0.5'} disabled={actions === null}>
+            <option value="">{actions === null ? 'Loading…' : 'Pick one…'}</option>
+            {(actions || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </label>
+        <label className="block min-w-0 text-xs text-zinc-500">
+          <span className="block truncate font-medium">its argument <span className="font-normal text-zinc-400">← creator field</span></span>
+          <div className="mt-0.5 flex items-center gap-1">
+            {thenParams.length ? (
+              <select value={param} onChange={(e) => setThen({ argsFrom: { [e.target.value]: field || creatorFieldFor(e.target.value) } })} aria-label="per-creator argument" className={inp}>
+                {!thenParams.includes(param) && param && <option value={param}>{param}</option>}
+                {thenParams.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            ) : (
+              <input value={param} onChange={(e) => setThen({ argsFrom: { [e.target.value]: field } })} placeholder="handle" aria-label="per-creator argument" className={inp} />
+            )}
+            <span className="shrink-0 text-zinc-400">←</span>
+            <input value={field} onChange={(e) => setThen({ argsFrom: { [param || 'handle']: e.target.value } })} placeholder="username" aria-label="creator field" className={inp} />
+          </div>
+        </label>
+        <label className="block min-w-0 text-xs text-zinc-500">
+          <span className="block truncate font-medium">keep the last <span className="font-normal text-zinc-400">days · blank = keep all</span></span>
+          <input type="number" inputMode="numeric" min={1} value={then.keepDays === undefined || then.keepDays === null ? '' : String(then.keepDays)} onChange={(e) => { const n = Math.floor(Number(e.target.value)); const next = { ...then }; if (e.target.value.trim() === '' || !Number.isFinite(n) || n < 1) delete next.keepDays; else next.keepDays = n; onChange({ ...args, then: next }); }} placeholder="30" aria-label="keep the last days" className={inp + ' mt-0.5'} />
+        </label>
+      </div>
+      <p className="text-[11px] text-zinc-400">
+        Finds creators once, takes the first {take}, then fetches each one directly — {creatorsCostHint(take, creditsPerCall(finderCard), creditsPerCall(thenCard))}. A creator that fails is said and skipped.
+        {then.keepDays ? (hasDate === false ? ` These items carry no date, so "last ${then.keepDays} days" cannot be applied — every item is kept and the run says so.` : ` Only items from the last ${then.keepDays} days are kept${hasDate === null ? ' (when the items carry a date)' : ''}.`) : ''}
+      </p>
     </div>
   );
 }

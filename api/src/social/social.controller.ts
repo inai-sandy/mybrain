@@ -1,4 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { AgentService } from '../agent/agent.service';
+import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
+import { AgentPlan, PlanCost, estimatePlanCost, planActionIds, planFromAgent } from './plan';
 import { SocialWatchStore } from './social-watch.store';
 import { SocialService } from './social.service';
 
@@ -12,7 +15,25 @@ export class SocialController {
   constructor(
     private readonly social: SocialService,
     private readonly watches: SocialWatchStore,
+    // Optional + LAST — spec files build this positionally with fewer args.
+    private readonly agents?: AgentService,
+    private readonly knowledge?: ToolKnowledgeService,
   ) {}
+
+  /**
+   * The plan a Social job runs and ≈ what one run costs (BEA-1369): `planFromAgent()` over the saved
+   * job, credits from the know-how cards when they say (pages × credits per page; creators-first =
+   * finder + one per creator), AI tokens for the shaping step. The job page shows "≈ N credits per run".
+   */
+  @Get('plan/:agentId')
+  async plan(@Param('agentId') agentId: string): Promise<{ plan: AgentPlan; cost: PlanCost }> {
+    const agent = await this.agents?.getAgent?.(String(agentId || ''));
+    if (!agent) throw new NotFoundException('No such agent');
+    const plan = planFromAgent(agent);
+    const cards = await this.knowledge?.lookup?.(planActionIds(plan)).catch(() => []);
+    const knowledge = Object.fromEntries((cards || []).map((c) => [c.actionId, { cost: c.cost, paging: c.paging }]));
+    return { plan, cost: estimatePlanCost(plan, knowledge) };
+  }
 
   /** The grid page in one answer: key state, balance, today's spend, the ceiling, every platform. */
   @Get()
