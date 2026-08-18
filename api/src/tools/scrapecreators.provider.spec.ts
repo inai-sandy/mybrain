@@ -425,3 +425,20 @@ describe('the run path: routed by exact id, and the ToolCall row carries the cre
     expect(rows[0].credits).toBeNull();
   });
 });
+
+describe('normaliseSearchArgs — a capital letter can never empty a source (BEA-1359)', () => {
+  const { normaliseSearchArgs } = require('./scrapecreators.provider');
+  it('lowercases the popular-search query and tidies spaces', () => {
+    expect(normaliseSearchArgs('/v1/instagram/search/popular', { query: '  Home   automation ' })).toEqual({ query: 'home automation' });
+  });
+  it('leaves other queries as typed apart from spacing', () => {
+    expect(normaliseSearchArgs('/v2/instagram/reels/search', { query: 'smart home India', date_posted: 'last-month' })).toEqual({ query: 'smart home India', date_posted: 'last-month' });
+  });
+  it('drops a leading # and lowercases hashtags everywhere', () => {
+    expect(normaliseSearchArgs('/v1/instagram/search/hashtag', { hashtag: '#SmartHomeIndia', date_posted: 'last-month' })).toEqual({ hashtag: 'smarthomeindia', date_posted: 'last-month' });
+    expect(normaliseSearchArgs('/v1/tiktok/search/hashtag', { hashtag: 'SmartHome' })).toEqual({ hashtag: 'smarthome' });
+  });
+  it('never touches ids or other fields', () => {
+    expect(normaliseSearchArgs('/v1/instagram/post', { url: 'https://www.instagram.com/reel/DO_b2nVjB5O/', region: 'IN' })).toEqual({ url: 'https://www.instagram.com/reel/DO_b2nVjB5O/', region: 'IN' });
+  });
+});
