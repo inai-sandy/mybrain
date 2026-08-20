@@ -23,7 +23,9 @@ export const LIST_KEYS = ['posts', 'items', 'results', 'videos', 'reels', 'comme
 // `caption_text` / `user_username` / `code`: the flattened names of Instagram's own post shape (`caption:{text}`,
 // `user:{username}`, `code` = the shortcode) — a v2 post has ~140 flat keys and the caption sat at #75, past
 // the 40-column cap, so 82 live rows had blank captions (BEA-1373).
-const PREFERRED = ['title', 'name', 'username', 'owner_username', 'user_username', 'full_name', 'owner_full_name', 'user_full_name', 'handle', 'nickname', 'display_name', 'caption', 'caption_text', 'text', 'description', 'desc', 'body', 'url', 'link', 'permalink', 'shortcode', 'code', 'like_count', 'likes', 'diggCount', 'comment_count', 'comments', 'commentCount', 'view_count', 'views', 'playCount', 'play_count', 'ig_play_count', 'video_view_count', 'video_play_count', 'share_count', 'shareCount', 'follower_count', 'owner_follower_count', 'followers', 'followerCount', 'subscriber_count', 'taken_at', 'created_at', 'createTime', 'date', 'published_at', 'publishedAt', 'timestamp', 'location', 'location_name', 'is_paid_partnership', 'is_ad', 'id'];
+// `biography`: an Instagram profile's bio — a creators-first enrich run (BEA-1377) writes one
+// profile per row, and a profile has ~100 flat keys, so the bio must be ranked or it falls off the cap.
+const PREFERRED = ['title', 'name', 'username', 'owner_username', 'user_username', 'full_name', 'owner_full_name', 'user_full_name', 'handle', 'nickname', 'display_name', 'caption', 'caption_text', 'text', 'description', 'desc', 'biography', 'body', 'url', 'link', 'permalink', 'shortcode', 'code', 'like_count', 'likes', 'diggCount', 'comment_count', 'comments', 'commentCount', 'view_count', 'views', 'playCount', 'play_count', 'ig_play_count', 'video_view_count', 'video_play_count', 'share_count', 'shareCount', 'follower_count', 'owner_follower_count', 'followers', 'followerCount', 'subscriber_count', 'taken_at', 'created_at', 'createTime', 'date', 'published_at', 'publishedAt', 'timestamp', 'location', 'location_name', 'is_paid_partnership', 'is_ad', 'id'];
 
 export const MAX_COLUMNS = 40;
 export const MAX_ROWS = 1000;

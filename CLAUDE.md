@@ -363,8 +363,10 @@ paged source is "Instagram · Popular Search × 8 pages — … about 8 credits 
 12k-token ceiling and the run failed honestly — so `SHAPE_BATCH` is 30 items, `SHAPE_MAX_TOKENS` 32k, and a reply that is still cut
 mid-row is salvaged to its complete rows (`salvageRowsJson`, exported + tested) instead of "not the JSON asked for".
 A per-creator answer goes through `itemsOf()`: a list → its items; a LIST-SHAPED answer with nothing in it (`{items: null, user, more_available:
-false}` — what a private/empty account answers, seen live) → 0 items, never one row of envelope; only a plain object with no list key (a
-profile lookup as the per-creator action) is one row — and the date field is decided over EVERY creator's items together, or the first
+false}` — what a private/empty account answers, seen live) → 0 items, never one row of envelope; a single-object answer is ONE row via the same
+`unwrap` plain sources use — `{success, data:{user:{…}}}` IS the profile (BEA-1377: `data` is also a LIST_KEY and the old name-only check counted
+101 succeeded profile calls as "0 items"; the step now reads "N profiles fetched · N rows", and the tripwire `unrecognisedAnswer` makes the step say
+"fetched N answers but recognised 0 rows — this is a My Brain bug, not the vendor" whenever data arrived that no shape here could read) — and the date field is decided over EVERY creator's items together, or the first
 empty account switched "last 30 days" off for everyone (found on the first live creators run).
 Traps: `SocialAgentRunService`'s constructor gained `knowledge?: ToolKnowledgeService` LAST (positional harnesses); the finder id doubles as
 the block's key, so one job holds one creators block per finder action; `_pages` on an action that does not page costs one call and the step
