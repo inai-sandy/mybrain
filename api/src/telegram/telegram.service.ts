@@ -12,6 +12,7 @@ import { ItemsService } from '../items/items.service';
 import { VoiceService } from '../voice/voice.service';
 import { AgentService } from '../agent/agent.service';
 import { clampTitle } from '../common/clamp-title';
+import { setOwnerAlertTelegram } from '../contacts/owner-alert';
 
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
@@ -155,6 +156,22 @@ export class TelegramService implements OnModuleInit {
   }
 
   /**
+   * Meta refused an owner WhatsApp alert after accepting it (engagement pacing, BEA-1379) — the
+   * SAME alert lands here instead, and says why it came this way. Answers whether Telegram
+   * accepted it, so the run step can say "sent on Telegram instead" only when it was.
+   */
+  async notifyWhatsAppRefused(args: { headline: string; detail?: string; url?: string }): Promise<{ sent: boolean; why?: string }> {
+    const owner = await this.ownerChatId();
+    if (!owner) return { sent: false, why: 'no Telegram chat is linked in Settings' };
+    const parts = [`🤖 <b>${this.esc(args.headline)}</b>`];
+    if (args.detail) parts.push(this.esc(String(args.detail).slice(0, 900)));
+    if (args.url) parts.push(this.esc(args.url));
+    parts.push('<i>WhatsApp refused this message (Meta engagement pacing), so it came here instead.</i>');
+    const r = await this.send(owner, parts.join('\n\n'));
+    return r?.ok ? { sent: true } : { sent: false, why: r?.description || 'Telegram did not accept the message' };
+  }
+
+  /**
    * An Alert job's condition came true (BEA-1358) — the diff, in one message, with the run link.
    * Answers whether Telegram accepted it, so the run can say "sent" only when it was.
    */
@@ -174,6 +191,9 @@ export class TelegramService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    // The refused-by-Meta fallback road (BEA-1379): owner-alert.ts is plain functions, so handing
+    // ourselves over here creates no module cycle — PushModule/ContactsModule never import Telegram.
+    setOwnerAlertTelegram(this);
     // If a token is already configured, make sure the webhook + command menu are registered.
     if (await this.token()) this.setup().catch((e) => this.log.warn(`setup on boot failed: ${e?.message}`));
     // Outbound nudges: morning dump, evening story, task reminders, mid-day motivation, nightly summary.

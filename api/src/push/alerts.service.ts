@@ -42,13 +42,15 @@ export class AlertsService {
    */
   private async ownerAlert(
     msg: { headline: string; detail?: string; path: string; longBody?: string },
-    opts: { gate?: 'whatsapp.outputs' | 'alerts.onFailure'; log: string } ,
+    opts: { gate?: 'whatsapp.outputs' | 'alerts.onFailure'; log: string; telegramCarried?: boolean } ,
   ): Promise<AlertResult> {
     const [enabled, to] = await Promise.all([opts.gate ? this.setting(opts.gate) : Promise.resolve(null), this.setting('alerts.whatsappNumber')]);
     if (opts.gate && enabled === 'false') return { sent: false, why: 'off' };
     if (!to) return { sent: false, why: 'no number' };
     if (!this.postbox.isConfigured()) return { sent: false, why: 'postbox not configured' };
-    const r = await sendOwnerAlert(this.postbox, to, { ...msg, firstName: await ownerFirstName(this.prisma) });
+    // telegramCarried: a Watch/Alert push already sent this on Telegram — a Meta refusal must not
+    // send it there a second time (BEA-1379).
+    const r = await sendOwnerAlert(this.postbox, to, { ...msg, firstName: await ownerFirstName(this.prisma) }, { telegramCarried: opts.telegramCarried });
     if (!r.sent) this.log.warn(`${opts.log} not delivered: ${r.error || 'unknown reason'}`);
     else if (r.note) this.log.warn(`${opts.log}: ${r.note}`);
     return r.sent ? { ...r, sent: true } : { ...r, sent: false, why: r.error || 'the message could not be delivered' };
@@ -65,7 +67,7 @@ export class AlertsService {
     const what = clean(headline).slice(0, 600) || 'The result is ready.';
     return this.ownerAlert(
       { headline: line, detail: opts.detail ? `${what} · ${clean(opts.detail)}` : what, path },
-      { gate: 'whatsapp.outputs', log: 'finished alert' },
+      { gate: 'whatsapp.outputs', log: 'finished alert', telegramCarried: opts.kind === 'alert' },
     );
   }
 
