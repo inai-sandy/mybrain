@@ -42,8 +42,9 @@ export const TURN_TIMEOUT_MS = 180_000;
 /** Sample rounds per owner message: model asks → sampler → re-prompt, at most this many times. */
 export const SAMPLE_LOOPS_PER_MESSAGE = 3;
 /** Model calls per owner message, all in: the first answer + the sample rounds + one fix round each for an
- *  invalid plan, a plan with no healthy source, and an unsampled finder (BEA-1375). Over it, what we have is shown. */
-export const MAX_ASKS_PER_MESSAGE = SAMPLE_LOOPS_PER_MESSAGE + 4;
+ *  invalid plan, a plan with no healthy source, an unsampled finder (BEA-1375), and an expensive plan with
+ *  no goal established (BEA-1378). Over it, what we have is shown. */
+export const MAX_ASKS_PER_MESSAGE = SAMPLE_LOOPS_PER_MESSAGE + 5;
 /** Cards shown to the model — the shortlist cut to the most relevant; the lookup's own cap is 50. */
 export const MAX_CARDS = 50;
 /** The whole facts section stays under this many characters (≈ 15k tokens); one card under its share. */
@@ -207,6 +208,10 @@ export const SAMPLE_TEXT = `LOOK FOR YOURSELF — the "sample" tool: when a real
 
 /** The rules, in plain words — the owner's principles, made instructions. */
 export const RULES_TEXT = `RULES:
+- Before planning ANYTHING, understand what the result is FOR: what will the owner do with it, and what does a good result let them do next? If the ask does not say, ask that FIRST — ONE plain question with an example answer ("What will you use this for? For example: to learn how these accounts get reach, or to build a list to contact"). Never plan on the literal words alone while the purpose is unknown. And never re-ask a goal already stated — when the first message or an earlier turn says what it is for, use it; the interview is for what is missing, never a form.
+- The goal decides the SHAPE of the result: the unit (posts vs profiles vs companies vs a written report vs a watch/alert), the columns and the cadence come from the GOAL, not from the literal noun in the ask — and you choose sources for that shape. "All the smart home profiles" with the goal "understand how they post to get reach" needs POSTS (with play counts, which ones outperform), not a profile list.
+- When the literal ask and the goal point at DIFFERENT shapes, say so before planning and propose the goal's shape ("you asked for profiles, but for 'how do they get reach' the thing to study is their posts and which ones outperform — shall I plan that instead?"). The owner may still insist on the literal ask — then build exactly that.
+- Whenever the owner has said what the result is for, repeat it in the "goal" JSON field (their words, short) in EVERY answer — it is remembered and shown on the plan.
 - Questions come from what THIS ask leaves open AFTER you read the facts above — never a fixed list. Two different asks must get different questions. Ask ONE thing at a time, in plain words, and always say the default you would take if the owner does not care.
 - Facts before questions: read the cards; when a sample answers it, sample instead of asking. A card whose health says FAILING today IS the answer — do not spend a sample checking it again (the first live run did, three times, and had none left for the finder). Samples are for what the cards leave open — are a finder's accounts real? do the items carry dates? — and you have only 3 per conversation, so keep one for the finder of any creators block you may plan.
 - A first message is almost never complete. Before you propose a plan, the owner must have settled the ONE thing that most changes the result — what "all" or "everything" means in volume, which sources, dated-only or undated too, what counts as X, which repos/accounts/terms. Only an ask that is already fully specified gets a plan on the first turn. When a plan is ready, say so and STOP asking.
@@ -462,6 +467,53 @@ export function unhealthySources(plan: AgentPlan | null | undefined, cards: Reco
 export function noHealthySourceText(plan: AgentPlan, cards: Record<string, ToolKnowledge | undefined>): string {
   const names = unhealthySources(plan, cards).map((c) => c.name).join(', ');
   return `Your "plan" was NOT shown to the owner: every source in it is failing at the vendor today (${names}) — nothing in it can produce rows today. Add a working source beside them (a card whose health says working or has no verdict — for example a creators block on a working finder), or say plainly that nothing can produce rows today and ask the owner how to go on. Send the whole JSON again, or a "sample" if you must look first.`;
+}
+
+// ---- the goal interview: an expensive plan waits for what the result is FOR (BEA-1378) --------------
+
+/**
+ * The stakes gate's thresholds: a plan at or over EITHER figure is "expensive" — it must not be shown
+ * until the owner has said what the result is for. The incident that made this a rule: 202 credits went
+ * into a literal profile list when the goal ("understand how they post to get reach") needed posts.
+ */
+export const GOAL_STAKES = { credits: 50, aiTokens: 100_000 } as const;
+
+/** Is this plan wide/expensive by the SERVER's own estimate? (≥ 50 credits or ≥ 100k AI tokens.) */
+export function isExpensivePlan(cost: PlanCost | null | undefined): boolean {
+  if (!cost) return false;
+  return Number(cost.credits) >= GOAL_STAKES.credits || Number(cost.aiTokens) >= GOAL_STAKES.aiTokens;
+}
+
+/** The model's `goal` field — the owner's words, trimmed and capped — or null when it said none. */
+export function goalOf(g: any): string | null {
+  const s = typeof g?.goal === 'string' ? g.goal.trim() : '';
+  return s ? s.slice(0, 300) : null;
+}
+
+/** The reason handed back to the model when its expensive plan has no goal established (BEA-1378). */
+export function noGoalText(cost: PlanCost): string {
+  return `Your "plan" was NOT shown to the owner: it is a big run (${costLineText(cost)}) and the owner has not said what the result is FOR. What they will do with it decides the SHAPE — posts vs profiles vs a report, the columns, the cadence — and a big run in the wrong shape is money into the wrong list. If the conversation already states the goal, put it in the "goal" field (their words) and send the plan again. If it does not, drop the plan and ask ONE plain question about what they will do with the result, with an example answer.`;
+}
+
+/**
+ * The plain note under a reply whose expensive plan was stripped because no goal is established — the
+ * owner must know why no plan card came (the same honesty as the healthy-source note, BEA-1375/1378).
+ */
+export function goalMissingNote(cost: PlanCost): string {
+  return `Note: I have a plan sketched, but it is a big run (${costLineText(cost)}) and I have not shown it yet — I first need to know what the result is FOR, because that decides whether these are even the right rows. Tell me what you will do with it and I will show the plan, or reshape it.`;
+}
+
+/**
+ * "For: <goal>" onto an agent's description — the smallest honest carrier (BEA-1378). Prefix when there
+ * is no description; in front of one otherwise; untouched when the description already carries the goal.
+ */
+export function withGoal(description: string | null | undefined, goal: string | null | undefined): string | undefined {
+  const g = String(goal || '').trim();
+  const d = String(description || '').trim();
+  if (!g) return d || undefined;
+  if (d.toLowerCase().includes(g.toLowerCase())) return d;
+  const line = `For: ${g}`;
+  return d ? `${line} — ${d}` : line;
 }
 
 // ---- a finder is sampled before it is trusted (BEA-1375) --------------------------------------------

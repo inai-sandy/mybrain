@@ -110,6 +110,23 @@ describe('PlanCard (BEA-1372)', () => {
     expect((screen.getByTestId('plan-change') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('the goal is the first line — "For: <goal>" (BEA-1378) — and absent when none is established yet', () => {
+    render(<PlanCard plan={PLAN} cost={COST} goal="understand how they are posting content to get the maximum reach" onCreate={() => undefined} />);
+    const row = screen.getByTestId('plan-goal');
+    expect(row.textContent).toContain('For');
+    expect(row.textContent).toContain('understand how they are posting content to get the maximum reach');
+    // it is the FIRST row of the plan's body — before Fetches
+    const card = screen.getByTestId('builder-plan');
+    const body = card.textContent || '';
+    expect(body.indexOf('For')).toBeLessThan(body.indexOf('Fetches'));
+    cleanup();
+    render(<PlanCard plan={PLAN} cost={COST} onCreate={() => undefined} />);
+    expect(screen.queryByTestId('plan-goal')).toBeNull();
+    cleanup();
+    render(<PlanCard plan={PLAN} cost={COST} goal={null} onCreate={() => undefined} />);
+    expect(screen.queryByTestId('plan-goal')).toBeNull();
+  });
+
   it('sourceLine: the argument values ride along, `_`-keys do not, a lone page count is left out', () => {
     expect(sourceLine({ kind: 'source', actionId: 'svc:instagram.search_popular', args: { query: 'home automation', _pages: 3 }, pages: 1 })).toBe('Instagram · search popular (query: home automation)');
     expect(sourceLine({ kind: 'source', actionId: 'svc:instagram.search_popular', args: { query: 'home automation' }, pages: 3 })).toBe('Instagram · search popular (query: home automation) × 3 pages');

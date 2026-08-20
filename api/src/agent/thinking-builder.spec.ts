@@ -4,8 +4,8 @@ import type { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { LlmService } from '../llm/llm.service';
 import {
-  BLOCKS_TEXT, DESIGN_BUDGET, MAX_ASKS_PER_MESSAGE, PLAN_SHAPE_TEXT, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, costReplyLine, factsSection, fillTemplate, healthNote, indexSection, namedService, noHealthySourceText, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
-  sampleFinderText, sampleViewText, sampledActionIds, unsampledFinderNote, unsampledFinders, validatePlan, seedLine, seedText, unhealthySources,
+  BLOCKS_TEXT, DESIGN_BUDGET, GOAL_STAKES, MAX_ASKS_PER_MESSAGE, PLAN_SHAPE_TEXT, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, costReplyLine, factsSection, fillTemplate, goalOf, healthNote, indexSection, isExpensivePlan, namedService, noHealthySourceText, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
+  sampleFinderText, sampleViewText, sampledActionIds, unsampledFinderNote, unsampledFinders, validatePlan, seedLine, seedText, unhealthySources, withGoal,
 } from './thinking-builder';
 import { costLineText, creditsText, planHasHealthySource } from '../social/plan';
 
@@ -331,7 +331,8 @@ describe('the plan validates and round-trips into an Agent (BEA-1371 ↔ BEA-136
 
   it('a bad plan is sent back to the model ONCE with the reasons; the fixed one is kept', async () => {
     const bad = { ...SOCIAL_PLAN, sources: [{ kind: 'source', actionId: 'svc:instagram.search_location', args: { q: 'India' } }] };
-    const { svc, prompts, state } = harness({ answer: (prompt) => (/did not validate/.test(prompt) ? { reply: 'Fixed — here is the plan. Press Create when happy.', plan: SOCIAL_PLAN } : { reply: 'Here is the plan.', plan: bad }) });
+    // `goal` is stated so the BEA-1378 stakes gate lets this (expensive) plan through — the goal interview has its own tests below.
+    const { svc, prompts, state } = harness({ answer: (prompt) => (/did not validate/.test(prompt) ? { reply: 'Fixed — here is the plan. Press Create when happy.', goal: 'track smart home content', plan: SOCIAL_PLAN } : { reply: 'Here is the plan.', goal: 'track smart home content', plan: bad }) });
     const r = await svc.builderChat('only dated posts, yes');
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain('not one of the actions you were shown');
@@ -381,7 +382,7 @@ describe('the plan validates and round-trips into an Agent (BEA-1371 ↔ BEA-136
 
   it('an ordinary spec still works beside it, and a plan replaces a spec (one proposal at a time)', async () => {
     const spec = { area: { name: 'Daily News', icon: '📰' }, jobs: [{ name: 'Tech', task: 'get news' }] };
-    const { svc, state } = harness({ answer: (_p, n) => (n === 1 ? { reply: 'Plan for the area.', spec } : { reply: 'Direct plan instead.', plan: SOCIAL_PLAN }) });
+    const { svc, state } = harness({ answer: (_p, n) => (n === 1 ? { reply: 'Plan for the area.', spec } : { reply: 'Direct plan instead.', goal: 'track smart home content', plan: SOCIAL_PLAN }) });
     const r1 = await svc.builderChat('a daily news agent');
     expect(r1.spec.area.name).toBe('Daily News');
     expect(r1.plan).toBeNull();
@@ -515,7 +516,7 @@ describe('an unhealthy source is said (BEA-1371)', () => {
   });
 
   it('the reply the owner reads carries the note when the model forgot it', async () => {
-    const { svc } = harness({ answer: () => ({ reply: 'Here is the plan — press Create when happy.', plan: SOCIAL_PLAN }) });
+    const { svc } = harness({ answer: () => ({ reply: 'Here is the plan — press Create when happy.', goal: 'track smart home content', plan: SOCIAL_PLAN }) });
     const r = await svc.builderChat('yes');
     expect(r.reply).toMatch(/Note: Instagram · Hashtag Search is failing at the vendor right now/);
   });
@@ -550,13 +551,15 @@ describe('the pieces (BEA-1371)', () => {
     expect(parseBuilderJson('{"reply":"Here is the plan.\\nIt fetches a lot","plan":{"name":"x","sources":[{"kind":"sou')).toEqual({ reply: 'Here is the plan.\nIt fetches a lot', cutOff: true });
   });
 
-  it('both prompt defaults carry the facts, blocks, sample, budget and rules slots and the plan shape', async () => {
+  it('both prompt defaults carry the facts, blocks, sample, budget and rules slots, the plan shape and the goal field (BEA-1378)', async () => {
     const prisma: any = { setting: { findUnique: async () => null } };
     for (const key of ['agent.builder', 'agent.jobBuilder'] as const) {
       const tpl = await new PromptsService(prisma).get(key);
       for (const slot of ['{{conversation}}', '{{facts}}', '{{tools}}', '{{blocks}}', '{{sample}}', '{{budget}}', '{{rules}}']) expect(tpl).toContain(slot);
       expect(tpl).toContain('"plan": null while something important is still open');
       expect(tpl).toContain('"kind":"creators"');
+      // The goal field (BEA-1378): the model repeats the owner's goal in every answer once known.
+      expect(tpl).toContain('"goal": null until the owner has said what the result is FOR');
     }
   });
 });
@@ -574,7 +577,7 @@ describe('the plan card reads the failing sources and the ₹ (BEA-1372)', () =>
   });
 
   it('a chat turn hands the card `cost.unhealthy` beside the arithmetic and ≈ ₹ — the UI marks the source from that, not from the reply text', async () => {
-    const { svc, state } = harness({ answer: () => ({ reply: 'Hashtag search is down at the vendor right now — kept so it fills in later.', plan: SOCIAL_PLAN }) });
+    const { svc, state } = harness({ answer: () => ({ reply: 'Hashtag search is down at the vendor right now — kept so it fills in later.', goal: 'track smart home content', plan: SOCIAL_PLAN }) });
     const r = await svc.builderChat('yes');
     expect(r.cost?.unhealthy?.map((u) => u.actionId)).toEqual(['svc:instagram.search_hashtag']);
     expect(r.cost?.aiRupees).toBeGreaterThan(0);
@@ -827,5 +830,150 @@ describe('when it runs and where it goes are settled before the plan; the cost i
     const { svc, prompts } = harness({ state: { log: [], spec: null, plan, cost }, answer: () => ({ reply: 'ok', plan: null }) });
     await svc.builderChat('what does it cost?');
     expect(prompts[0]).toContain(`Server cost of that plan (quote these, not your own): ${costLineText(cost)}`);
+  });
+});
+
+// ---- BEA-1378: the goal interview — what is the result FOR ------------------------------------------------
+
+/**
+ * The incident that made this a rule: "all smart home profiles on Instagram" was planned literally
+ * (202 credits into a profile list) when the goal — "understand how they post content to get maximum
+ * reach" — needed POSTS. The builder now settles the goal before planning; an expensive plan with no
+ * goal established is stripped to reply-only, the same mechanism as the healthy-source rule.
+ */
+describe('the goal interview — understand what the result is FOR (BEA-1378)', () => {
+  // Expensive AND healthy — only the goal gate can hold it back: 29 credits, ≈ 100,800 AI tokens (≥ 100k).
+  const EXPENSIVE = {
+    name: 'Smart home outliers',
+    sources: [
+      { kind: 'source', actionId: 'svc:instagram.search_popular', args: { query: 'smart home india' }, pages: 8 },
+      { kind: 'creators', find: { actionId: 'svc:instagram.search_profiles', args: { query: 'smart home india' }, take: 20 }, then: { actionId: 'svc:instagram.user_posts', argsFrom: { handle: 'username' }, args: { trim: true }, keepDays: 30 } },
+    ],
+    task: 'Columns: creator, date, plays, likes, caption, link.',
+    mode: 'run', output: { kind: 'sheet', sheetId: null }, notify: { whatsapp: true }, schedule: null,
+  };
+  // The literal ask, cheap: one profile-search page, rows as fetched — 1 credit, no AI.
+  const CHEAP_PROFILES = {
+    name: 'Smart home profiles',
+    sources: [{ kind: 'source', actionId: 'svc:instagram.search_profiles', args: { query: 'smart home' }, pages: 1 }],
+    task: KEEP_AS_FETCHED, mode: 'run', output: { kind: 'document' }, notify: { whatsapp: false }, schedule: null,
+  };
+  const GOAL = 'understand how they are posting content to get the maximum reach';
+
+  it('the rules teach it: FOR before planning (one plain question with an example), the goal decides the shape, a mismatch is SAID and the owner may insist, a stated goal is never re-asked', () => {
+    expect(RULES_TEXT).toMatch(/Before planning ANYTHING, understand what the result is FOR/);
+    expect(RULES_TEXT).toMatch(/ONE plain question with an example answer/);
+    expect(RULES_TEXT).toMatch(/The goal decides the SHAPE of the result/);
+    expect(RULES_TEXT).toMatch(/not from the literal noun in the ask/);
+    expect(RULES_TEXT).toMatch(/literal ask and the goal point at DIFFERENT shapes, say so before planning and propose the goal's shape/);
+    expect(RULES_TEXT).toMatch(/shall I plan that instead/);
+    expect(RULES_TEXT).toMatch(/The owner may still insist on the literal ask — then build exactly that/);
+    expect(RULES_TEXT).toMatch(/never re-ask a goal already stated/);
+    expect(RULES_TEXT).toMatch(/"goal" JSON field/);
+    // the pieces
+    expect(GOAL_STAKES).toEqual({ credits: 50, aiTokens: 100_000 });
+    expect(isExpensivePlan({ credits: 50, aiTokens: 0 } as any)).toBe(true);
+    expect(isExpensivePlan({ credits: 3, aiTokens: 100_000 } as any)).toBe(true);
+    expect(isExpensivePlan({ credits: 49, aiTokens: 99_999 } as any)).toBe(false);
+    expect(isExpensivePlan(null)).toBe(false);
+    expect(goalOf({ goal: `  ${GOAL}  ` })).toBe(GOAL);
+    expect(goalOf({ goal: '' })).toBeNull();
+    expect(goalOf({})).toBeNull();
+    // "For: <goal>" onto a description — prefix, in front of an existing one, never doubled.
+    expect(withGoal(null, GOAL)).toBe(`For: ${GOAL}`);
+    expect(withGoal('Weekly digest', GOAL)).toBe(`For: ${GOAL} — Weekly digest`);
+    expect(withGoal(`For: ${GOAL}`, GOAL)).toBe(`For: ${GOAL}`);
+    expect(withGoal('Weekly digest', null)).toBe('Weekly digest');
+    expect(withGoal(null, null)).toBeUndefined();
+  });
+
+  it('no goal stated → an expensive plan is held: sent back ONCE, and when the model then asks the question, the first reply asks what it is for and contains NO plan', async () => {
+    const { svc, prompts, state } = harness({ answer: (prompt) => (/has not said what the result is FOR/.test(prompt)
+      ? { reply: 'What will you use this result for? For example: to learn how these accounts get reach.', plan: null }
+      : { reply: 'Here is the plan.', plan: EXPENSIVE }) });
+    const r = await svc.builderChat('Get me all the smart home profiles on Instagram');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('it is a big run');
+    expect(prompts[1]).toContain('has not said what the result is FOR');
+    expect(r.plan).toBeNull();
+    expect(r.goal).toBeNull();
+    expect(r.reply).toMatch(/What will you use this result for\?/);
+    expect(r.reply).toContain('I first need to know what the result is FOR'); // why no plan card came
+    expect(state().plan).toBeNull();
+    expect(state().goal).toBeUndefined();
+  });
+
+  it('a model that STILL sends the expensive plan with no goal → the plan is stripped, reply-only — the same mechanism as the healthy-source rule', async () => {
+    const { svc, prompts, state } = harness({ answer: () => ({ reply: 'Here is the plan.', plan: EXPENSIVE }) });
+    const r = await svc.builderChat('Get me all the smart home profiles on Instagram');
+    expect(prompts).toHaveLength(2); // nudged once, then cut off
+    expect(r.plan).toBeNull();
+    expect(r.cost).toBeNull();
+    expect(r.reply).toContain('I first need to know what the result is FOR');
+    expect(state().plan).toBeNull();
+  });
+
+  it('the goal stated → NO goal question: the plan comes through with `goal` beside plan/cost, it is remembered, and the next turn is told not to re-ask', async () => {
+    const { svc, prompts, state } = harness({ answer: (_p, n) => (n === 1
+      ? { reply: 'Plan for outliers. Press Create when happy.', goal: GOAL, plan: EXPENSIVE }
+      : { reply: 'ok', goal: GOAL, plan: null }) });
+    const r = await svc.builderChat(`Get me all the smart home profiles on Instagram — I want to ${GOAL}`);
+    expect(prompts).toHaveLength(1); // no nudge, no question round
+    expect(r.plan!.name).toBe('Smart home outliers');
+    expect(r.goal).toBe(GOAL);
+    expect(r.cost!.aiTokens).toBeGreaterThanOrEqual(100_000);
+    expect(state().goal).toBe(GOAL);
+    // the next turn's prompt carries the goal so it is never re-asked
+    await svc.builderChat('make it weekly');
+    expect(prompts[1]).toContain('What the result is FOR (the owner already said — do not ask again');
+    expect(prompts[1]).toContain(GOAL);
+  });
+
+  it('a cheap plan passes the gate without a goal — so when the owner insists on the literal shape, the literal (cheap) plan is shown', async () => {
+    // No goal at all: a small ask must not be interrogated by the server (the rules still tell the model to ask).
+    const { svc: svc1, prompts: p1 } = harness({ answer: () => ({ reply: 'Here it is. Press Create when happy.', plan: CHEAP_PROFILES }) });
+    const r1 = await svc1.builderChat('list smart home profiles');
+    expect(p1).toHaveLength(1);
+    expect(r1.plan!.name).toBe('Smart home profiles');
+    // The owner insisted on the literal ask after the mismatch was said: goal known, literal plan → shown.
+    const { svc: svc2, state } = harness({ state: { log: [], spec: null, plan: null, cost: null, goal: GOAL }, answer: () => ({ reply: 'All right — the literal profile list. Press Create when happy.', goal: GOAL, plan: CHEAP_PROFILES }) });
+    const r2 = await svc2.builderChat('no, just give me the profiles list');
+    expect(r2.plan!.name).toBe('Smart home profiles');
+    expect(r2.goal).toBe(GOAL);
+    expect(state().goal).toBe(GOAL);
+  });
+
+  it('a plan that fixed its health but waits for the goal carries ONLY the goal note — the earlier "every source is failing" note does not leak (review fix)', async () => {
+    // Round 1: only-failing-sources plan → health nudge. Round 2: a HEALTHY but expensive plan, still
+    // no goal → held for the goal. Round 3: the model asks the question. The reply must explain the
+    // hold with the goal note alone — the stale health refusal belongs to a plan that no longer exists.
+    const FAILING_ONLY = { ...EXPENSIVE, sources: [{ kind: 'source', actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'smarthome' }, pages: 8 }] };
+    const { svc, prompts } = harness({ answer: (prompt) => (
+      /has not said what the result is FOR/.test(prompt) ? { reply: 'What will you use this result for? For example: to learn how these accounts get reach.', plan: null }
+        : /every source in it is failing at the vendor today/.test(prompt) ? { reply: 'Here is a working plan instead.', plan: EXPENSIVE }
+          : { reply: 'Here is the plan.', plan: FAILING_ONLY }) });
+    const r = await svc.builderChat('Get me all the smart home profiles on Instagram');
+    expect(prompts).toHaveLength(3); // health nudge, then goal nudge, then the question
+    expect(r.plan).toBeNull();
+    expect(r.reply).toContain('I first need to know what the result is FOR');
+    expect(r.reply).not.toContain('Nothing in this plan can produce rows today'); // the stale note must not leak
+  });
+
+  it('the goal lands on the created agent: builderCreate and jobBuilderCreate write "For: <goal>" onto the description; reset drops the goal', async () => {
+    const { plan } = validatePlan(EXPENSIVE, Object.keys(CARDS));
+    const { svc, created, state } = harness({ answer: () => ({}), state: { log: [], spec: null, plan, cost: estimatePlanCost(plan!, CARDS), goal: GOAL } });
+    const r = await svc.builderCreate();
+    expect(r.ok).toBe(true);
+    expect(created[0].description).toBe(`For: ${GOAL}`);
+    expect(state().goal).toBeUndefined(); // dropped with the plan — the next design starts fresh
+    // the job builder, inside its area
+    const { svc: jb, created: jcreated, settings } = harness({ answer: () => ({}) });
+    settings.set('agent.jobBuilder.ar1', JSON.stringify({ log: [], job: null, plan, cost: null, goal: GOAL }));
+    await jb.jobBuilderCreate('ar1');
+    expect(jcreated[0].description).toBe(`For: ${GOAL}`);
+    // reset drops it
+    const { svc: rs, state: rstate } = harness({ answer: () => ({}), state: { log: [], spec: null, plan: null, cost: null, goal: GOAL } });
+    await rs.builderReset();
+    expect(rstate().goal).toBeUndefined();
   });
 });

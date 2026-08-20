@@ -1184,6 +1184,7 @@ Other tools you may name in an ordinary (engine-run) job — use the exact id:
 Reply with ONLY JSON, no prose:
 {
  "reply": "<what you say next — ONE question with its default, or the plan in words (the server writes the ≈ cost line under it), ending 'press Create when happy'>",
+ "goal": null until the owner has said what the result is FOR, then their goal in their own words (short) — repeat it in every answer once known,
  "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
  ${PLAN_SHAPE_TEXT},
  "job": null, or (ORDINARY jobs only) the COMPLETE job:
@@ -1227,6 +1228,7 @@ Other tools you may name in an ordinary (engine-run) agent — use the exact id:
 Reply with ONLY JSON, no prose:
 {
  "reply": "<what you say next — ONE question with its default, or the plan in words (the server writes the ≈ cost line under it), ending 'press Create when happy'>",
+ "goal": null until the owner has said what the result is FOR, then their goal in their own words (short) — repeat it in every answer once known,
  "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
  ${PLAN_SHAPE_TEXT},
  "spec": null, or (ORDINARY agents only) the COMPLETE spec:
