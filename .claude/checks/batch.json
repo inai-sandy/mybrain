@@ -1,57 +1,9 @@
 {
-  "startedAt": "2026-08-18T12:16:00Z",
-  "note": "Thinking-builder batch. Design: specs/THINKING-BUILDER.md (approved 2026-08-18 'go'). BEA-1373 = acceptance, blocked behind 1368-1372. Order: 1368 \u2192 1369 \u2192 1370 \u2192 1371 \u2192 1372 \u2192 1373. Owner rules: no cheaper models (Sonnet 5 for design), no fixed interview script, honest runs, UI 1180+390 light+dark.",
+  "startedAt": "2026-08-20T21:30:00Z",
+  "note": "Overnight batch (owner asleep, 'finish properly without hold'): BEA-1379 WhatsApp verdict+Telegram fallback (in build, incl. mybrain_result_v1 template preference) -> BEA-1380 folders -> BEA-1381 Settings redesign (mockup approved, specs/mockups/agent-settings.html). Known flake BEA-1376 may fail one ship test run - rerun ship.sh once. Owner will message the WhatsApp number tomorrow.",
   "issues": [
-    {
-      "id": "BEA-1368",
-      "title": "Know-how layer: ToolKnowledge cards",
-      "status": "done",
-      "sha": "dd14789"
-    },
-    {
-      "id": "BEA-1369",
-      "title": "Planning blocks: pages per source, creators-first, plan JSON",
-      "status": "done",
-      "sha": "c10d442"
-    },
-    {
-      "id": "BEA-1370",
-      "title": "Sample calls for the builder (capped)",
-      "status": "done",
-      "sha": "89a3f11"
-    },
-    {
-      "id": "BEA-1371",
-      "title": "The builder itself (Sonnet 5, facts, plan-with-cost)",
-      "status": "done",
-      "sha": "f749870"
-    },
-    {
-      "id": "BEA-1374",
-      "title": "Several sources on the same action + keep-adding=append (found in 1371 check)",
-      "status": "done",
-      "sha": "fc53ac8"
-    },
-    {
-      "id": "BEA-1372",
-      "title": "Screens: plan card, samples in chat, entry points",
-      "status": "done",
-      "sha": "60cd250"
-    },
-    {
-      "id": "BEA-1373",
-      "title": "Acceptance: owner's example through the builder",
-      "status": "done",
-      "note": "Done 18:45Z \u2014 86 rows sheet + WhatsApp delivered via builder-made agent",
-      "sha": "278bf63"
-    },
-    {
-      "id": "BEA-1375",
-      "title": "Builder lessons from the acceptance run (healthy source first, sample finder, settle when, cost while-down)",
-      "status": "done",
-      "sha": "fd1ce6c"
-    }
-  ],
-  "status": "complete",
-  "finishedAt": "2026-08-18T18:48:00Z"
+    { "id": "BEA-1379", "title": "WhatsApp verdict check + Telegram fallback (2 repos)", "status": "in_progress" },
+    { "id": "BEA-1380", "title": "Agent folders", "status": "pending" },
+    { "id": "BEA-1381", "title": "Agent Settings redesign (approved mockup)", "status": "pending" }
+  ]
 }

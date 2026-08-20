@@ -18,6 +18,12 @@
 
 /** The template's name — one place, env-overridable so a v2 needs no code change. */
 export const OWNER_TEMPLATE = process.env.POSTBOX_OWNER_TEMPLATE || 'mybrain_update_v1';
+/**
+ * The cleaner, strictly-transactional template (2 variables: name + one-line result, URL button
+ * "Open result") — tried FIRST once Meta approves it; while it is pending, Postbox answers
+ * "not approved" and the send falls through to `mybrain_update_v1` (BEA-1379).
+ */
+export const OWNER_RESULT_TEMPLATE = process.env.POSTBOX_OWNER_RESULT_TEMPLATE || 'mybrain_result_v1';
 /** Its language — its own setting, so a change to the contact-reminder language never touches it. */
 export const OWNER_TEMPLATE_LANG = process.env.POSTBOX_OWNER_LANG || 'en';
 export const APP_URL = 'https://mybrain.1site.ai';
@@ -26,13 +32,46 @@ export const DETAIL_MAX = 600;
 export const OWNER_DEFAULT_NAME = 'Sandy';
 export const NOT_APPROVED_NOTE = 'template not approved yet — free text may not deliver outside 24h';
 
-export type SendVerdict = { wamid?: string | null; status?: string; error?: string | null };
+export type SendVerdict = { wamid?: string | null; status?: string; error?: string | null; id?: string | null };
+
+/**
+ * How the delivery check paces itself — the ONE place these numbers live (BEA-1379). Meta's real
+ * verdict (delivered / read / failed) lands on the Postbox row 2–7 seconds after a send that
+ * Postbox already answered `sent` for — so we wait, ask once, and retry once while it still says
+ * `sent`. Tests set `waitMs` to 0.
+ */
+export const VERDICT = { waitMs: 8_000, retries: 1 };
+
+/** The honest step wording when Meta refused the template and Telegram carried the alert instead. */
+export const REFUSED_ON_TELEGRAM = 'WhatsApp refused by Meta (engagement pacing) — sent on Telegram instead.';
 
 /** The two Postbox calls this needs — the real `PostboxService` and every spec stub satisfy it. */
 export type OwnerAlertSender = {
   isConfigured?: () => boolean;
   sendTemplate: (to: string, name: string, variables: string[], opts?: { language?: string; buttonUrl?: string }) => Promise<SendVerdict>;
   sendText: (to: string, body: string) => Promise<SendVerdict>;
+  /** Meta's real verdict for a sent message (BEA-1379); `null` = the route could not be reached. */
+  messageStatus?: (id: string) => Promise<{ status?: string; error?: string | null } | null>;
+};
+
+/**
+ * The Telegram road for the refused-by-Meta fallback (BEA-1379). `TelegramService` registers
+ * itself here at boot (the `setFlowSync` pattern — this file is plain functions, so the import
+ * creates no module cycle and PushModule/ContactsModule never import TelegramModule).
+ */
+export type OwnerAlertTelegram = {
+  notifyWhatsAppRefused?: (args: { headline: string; detail?: string; url?: string }) => Promise<{ sent: boolean; why?: string }>;
+};
+let defaultTelegram: OwnerAlertTelegram | null = null;
+export function setOwnerAlertTelegram(t: OwnerAlertTelegram | null): void {
+  defaultTelegram = t;
+}
+
+export type OwnerAlertOpts = {
+  /** Overrides the registered Telegram road (tests); `null` = no Telegram on this server. */
+  telegram?: OwnerAlertTelegram | null;
+  /** True when this alert ALREADY went out on Telegram (a Watch/Alert push) — never send it twice. */
+  telegramCarried?: boolean;
 };
 
 export type OwnerAlertMessage = {
@@ -49,10 +88,10 @@ export type OwnerAlertMessage = {
 };
 
 export type OwnerAlertResult = {
-  /** True only when Postbox accepted the message that went out (template, or free text when the template is unusable). */
+  /** True only when the alert reached a road that carried it (template, text, or the Telegram fallback). */
   sent: boolean;
-  /** Which message carried it. */
-  via?: 'template' | 'text';
+  /** Which message carried it. `telegram` = Meta refused the template and Telegram carried the same alert (BEA-1379). */
+  via?: 'template' | 'text' | 'telegram';
   wamid?: string | null;
   /** Postbox's / Meta's reason when it failed. */
   error?: string | null;
@@ -60,6 +99,14 @@ export type OwnerAlertResult = {
   note?: string;
   /** What happened to the optional free-text follow-up, when one was attempted. */
   followUp?: 'sent' | 'failed';
+  /** Which template name Postbox accepted (the chain tries `mybrain_result_v1` then `mybrain_update_v1`). */
+  template?: string;
+  /** Meta's real verdict, when it was checked (BEA-1379). Absent = Meta said nothing within ~16 s. */
+  delivery?: 'delivered' | 'refused' | 'unconfirmed';
+  /** The Telegram leg after a refusal: sent | failed | already (the caller had already pushed it there). */
+  telegram?: 'sent' | 'failed' | 'already';
+  /** Why the Telegram leg failed, when it did. */
+  telegramWhy?: string;
 };
 
 /**
@@ -124,10 +171,47 @@ export function ownerAlertText(msg: OwnerAlertMessage): string {
 }
 
 /**
+ * The owner templates, tried in order (BEA-1379): the strictly-transactional `mybrain_result_v1`
+ * first (2 variables: name + one-line result — the detail folds into the result line), then the
+ * original `mybrain_update_v1` (3 variables). A Postbox answer of "not approved" / "does not
+ * exist" for one name falls through to the next; any other verdict stops the chain.
+ */
+export function ownerTemplates(): { name: string; vars: (p: { firstName: string; headline: string; detail: string }) => string[] }[] {
+  return [
+    { name: OWNER_RESULT_TEMPLATE, vars: (p) => [p.firstName, flat([p.headline, p.detail].filter(Boolean).join(' · '), DETAIL_MAX)] },
+    { name: OWNER_TEMPLATE, vars: (p) => [p.firstName, p.headline, p.detail] },
+  ];
+}
+
+/**
+ * Ask Postbox what Meta REALLY did with the message (BEA-1379): wait ~8 s, ask, retry once at
+ * +8 s while the row still says `sent`. `null` = nothing to check (no id / old stub) or Meta said
+ * nothing within the window — the synchronous verdict stands. `unconfirmed` = the status route
+ * could not be reached, and the caller must SAY so rather than report a clean success.
+ */
+async function metaVerdict(postbox: OwnerAlertSender, id?: string | null): Promise<{ verdict: 'delivered' | 'refused' | 'unconfirmed'; error?: string | null } | null> {
+  if (!id || typeof postbox.messageStatus !== 'function') return null;
+  for (let i = 0; i <= VERDICT.retries; i++) {
+    if (VERDICT.waitMs > 0) await new Promise((r) => setTimeout(r, VERDICT.waitMs));
+    const s = await postbox.messageStatus(id).catch(() => null);
+    if (!s?.status) return { verdict: 'unconfirmed' };
+    if (s.status === 'failed') return { verdict: 'refused', error: s.error ?? null };
+    if (s.status === 'delivered' || s.status === 'read') return { verdict: 'delivered' };
+    // still `sent` → one more look
+  }
+  return null; // Meta raised no failure within ~16 s — nothing to correct
+}
+
+/**
  * Template first, then (only if it is long) the free-text body as a second message. Never text
  * alone — except when Postbox says the template is not approved, and then the result SAYS so.
+ *
+ * Since BEA-1379 the template's synchronous `sent` is no longer taken at face value: Meta's real
+ * verdict is polled from Postbox, and a refusal ("This message was not delivered to maintain
+ * healthy ecosystem engagement") sends the SAME alert on Telegram — said honestly on the result.
+ * Never a silent success.
  */
-export async function sendOwnerAlert(postbox: OwnerAlertSender, to: string, msg: OwnerAlertMessage): Promise<OwnerAlertResult> {
+export async function sendOwnerAlert(postbox: OwnerAlertSender, to: string, msg: OwnerAlertMessage, opts: OwnerAlertOpts = {}): Promise<OwnerAlertResult> {
   if (postbox.isConfigured && !postbox.isConfigured()) return { sent: false, error: 'Postbox not configured.' };
   const firstName = flat(msg.firstName || OWNER_DEFAULT_NAME, 40) || OWNER_DEFAULT_NAME;
   const h = withoutLinks(msg.headline);
@@ -136,27 +220,54 @@ export async function sendOwnerAlert(postbox: OwnerAlertSender, to: string, msg:
   const linkNote = h.hadLink || d.hadLink ? 'The link is behind the button below.' : '';
   const detail = flat([d.text, linkNote].filter(Boolean).join(' · '), DETAIL_MAX) || 'Open My Brain for the details.';
   const suffix = buttonSuffix(msg.path);
-  const t = await postbox.sendTemplate(to, OWNER_TEMPLATE, [firstName, headline, detail], { language: OWNER_TEMPLATE_LANG, ...(suffix ? { buttonUrl: suffix } : {}) }).catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }) as SendVerdict);
+
+  let t: SendVerdict | undefined;
+  let used = '';
+  for (const c of ownerTemplates()) {
+    used = c.name;
+    t = await postbox
+      .sendTemplate(to, c.name, c.vars({ firstName, headline, detail }), { language: OWNER_TEMPLATE_LANG, ...(suffix ? { buttonUrl: suffix } : {}) })
+      .catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }) as SendVerdict);
+    if (!(t?.status === 'failed' && templateUnusable(t?.error))) break; // accepted, or a real refusal — stop trying names
+  }
 
   if (t?.status !== 'failed') {
-    const out: OwnerAlertResult = { sent: true, via: 'template', wamid: t?.wamid ?? null };
+    const out: OwnerAlertResult = { sent: true, via: 'template', wamid: t?.wamid ?? null, template: used };
     // The optional second message: only when the body says more than the template could carry.
     const long = String(msg.longBody || '').trim();
     if (long && long.length > flat(long, DETAIL_MAX).length) {
       const x = await postbox.sendText(to, long.slice(0, 3900)).catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }) as SendVerdict);
       out.followUp = x?.status === 'failed' ? 'failed' : 'sent';
     }
-    return out;
+    // Meta's real verdict (BEA-1379) — Postbox says `sent` before Meta decides.
+    const v = await metaVerdict(postbox, t?.id);
+    if (!v) return out;
+    if (v.verdict !== 'refused') {
+      out.delivery = v.verdict;
+      return out;
+    }
+    // Refused after the accept. The owner heard nothing — Telegram carries the same alert.
+    out.delivery = 'refused';
+    out.error = v.error || 'This message was not delivered to maintain healthy ecosystem engagement';
+    if (opts.telegramCarried) return { ...out, sent: false, telegram: 'already' };
+    const tg = opts.telegram === undefined ? defaultTelegram : opts.telegram;
+    const pushed = await tg?.notifyWhatsAppRefused?.({
+      headline: flat(msg.headline, HEADLINE_MAX) || 'An update from My Brain',
+      detail: String(msg.longBody || msg.detail || '').trim() || undefined,
+      url: `${APP_URL}/${suffix}`,
+    })?.catch?.((e: any) => ({ sent: false, why: String(e?.message || e) }));
+    if (pushed?.sent) return { ...out, sent: true, via: 'telegram', telegram: 'sent' };
+    return { ...out, sent: false, telegram: 'failed', telegramWhy: pushed?.why || 'Telegram is not set up on this server' };
   }
 
   if (templateUnusable(t?.error)) {
-    // The template is not (yet) approved: free text is the only road left, and it may not deliver.
+    // No usable template at all: free text is the only road left, and it may not deliver.
     const x = await postbox.sendText(to, msg.longBody?.trim() || ownerAlertText(msg)).catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }) as SendVerdict);
     if (x?.status === 'failed') return { sent: false, via: 'text', wamid: null, error: x?.error || t?.error || 'send failed', note: NOT_APPROVED_NOTE };
     return { sent: true, via: 'text', wamid: x?.wamid ?? null, note: NOT_APPROVED_NOTE };
   }
 
-  return { sent: false, via: 'template', wamid: null, error: t?.error || 'WhatsApp refused the message.' };
+  return { sent: false, via: 'template', wamid: null, error: t?.error || 'WhatsApp refused the message.', template: used };
 }
 
 /**
@@ -166,9 +277,15 @@ export async function sendOwnerAlert(postbox: OwnerAlertSender, to: string, msg:
 export function whatsappStepLabel(r: (Partial<OwnerAlertResult> & { why?: string }) | null | undefined): { label: string; status: 'done' | 'info' } {
   if (!r) return { label: '⚠️ Not sent to WhatsApp — WhatsApp is not available on this server', status: 'info' };
   if (r.sent) {
+    if (r.via === 'telegram') return { label: REFUSED_ON_TELEGRAM, status: 'done' };
     if (r.via === 'text') return { label: `WhatsApp sent (free text) — ${r.note || NOT_APPROVED_NOTE}`, status: 'done' };
     const tail = r.followUp === 'failed' ? ' — the longer follow-up text did not go through' : '';
-    return { label: `WhatsApp sent (template)${tail}`, status: 'done' };
+    const unconfirmed = r.delivery === 'unconfirmed' ? ' — delivery unconfirmed' : '';
+    return { label: `WhatsApp sent (template)${unconfirmed}${tail}`, status: 'done' };
+  }
+  if (r.delivery === 'refused') {
+    if (r.telegram === 'already') return { label: '⚠️ WhatsApp refused by Meta (engagement pacing) — this alert already went out on Telegram', status: 'info' };
+    return { label: `⚠️ WhatsApp refused by Meta (engagement pacing) — and Telegram could not carry it (${r.telegramWhy || 'Telegram is not set up'})`, status: 'info' };
   }
   switch (r.why) {
     case 'no number': return { label: '⚠️ Not sent to WhatsApp — no WhatsApp number in Settings (Settings → Agent Engine)', status: 'info' };

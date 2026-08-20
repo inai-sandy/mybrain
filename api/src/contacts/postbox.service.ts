@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-/** What every send here answers: Postbox's synchronous verdict. */
-export type SendResult = { wamid: string | null; status: string; error: string | null };
+/** What every send here answers: Postbox's synchronous verdict. `id` = Postbox's own message row, for {@link PostboxService.messageStatus}. */
+export type SendResult = { wamid: string | null; status: string; error: string | null; id?: string | null };
 
 /**
  * My Brain's thin client to the shared Postbox WhatsApp gateway (postbox.1site.ai).
@@ -90,8 +90,9 @@ export class PostboxService {
         variables: variables.map((v) => String(v ?? '')),
         ...(opts.buttonUrl ? { buttonUrl: opts.buttonUrl } : {}),
       });
-      // Postbox returns { id, status, wamid, error }
-      return { wamid: r?.wamid || null, status: r?.status || 'sent', error: r?.error || null };
+      // Postbox returns { id, status, wamid, error } — the id is kept so Meta's real verdict can be
+      // polled a few seconds later (BEA-1379).
+      return { wamid: r?.wamid || null, status: r?.status || 'sent', error: r?.error || null, id: r?.id || null };
     } catch (e: any) {
       this.log.warn(`sendTemplate(${name}) -> ${e?.message}`);
       return { wamid: null, status: 'failed', error: e?.message || 'send failed' };
@@ -131,6 +132,34 @@ export class PostboxService {
 
   async sendReminderTemplate(to: string, firstName: string, subject: string) {
     return this.sendTemplate(to, this.template, [firstName, subject]);
+  }
+
+  /**
+   * Meta's REAL verdict for a message Postbox sent (BEA-1379). Postbox answers `sent` before Meta
+   * decides; the Meta webhook lands the truth on Postbox's row 2–7 seconds later — `delivered` /
+   * `read`, or `failed` with the reason ("This message was not delivered to maintain healthy
+   * ecosystem engagement"). `null` = the verdict could not be checked (no id, route down) — the
+   * caller must say "delivery unconfirmed", never report a clean success it did not see.
+   */
+  async messageStatus(id: string): Promise<{ status: string; error: string | null } | null> {
+    if (!this.isConfigured() || !id) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      const res = await fetch(`${this.base}/v1/messages/${encodeURIComponent(id)}/status`, {
+        headers: { 'x-postbox-key': this.key },
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+      const j: any = await res.json().catch(() => null);
+      if (!j?.status) return null;
+      return { status: String(j.status), error: j.error ? String(j.error) : null };
+    } catch (e: any) {
+      this.log.warn(`messageStatus(${id}) -> ${e?.message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

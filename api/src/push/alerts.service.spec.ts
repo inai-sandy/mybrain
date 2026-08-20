@@ -1,5 +1,8 @@
 import { AlertsService } from './alerts.service';
-import { OWNER_TEMPLATE } from '../contacts/owner-alert';
+import { OWNER_RESULT_TEMPLATE, setOwnerAlertTelegram, VERDICT } from '../contacts/owner-alert';
+
+beforeAll(() => { VERDICT.waitMs = 0; }); // no real 8 s waits in tests (BEA-1379)
+afterEach(() => setOwnerAlertTelegram(null));
 
 /**
  * Every owner-bound WhatsApp goes out as the approved template FIRST (BEA-1362). Free text is
@@ -40,8 +43,8 @@ describe('AlertsService.runFinished — template first (BEA-1102 · BEA-1362)', 
     expect(r.wamid).toBe('wamid.T');
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0].kind).toBe('template');
-    expect(h.sent[0].name).toBe(OWNER_TEMPLATE);
-    expect(h.sent[0].variables).toEqual(['Sandy', 'Tech news finished', 'Apple on-device model + 3 more']);
+    expect(h.sent[0].name).toBe(OWNER_RESULT_TEMPLATE); // the chain tries the result template first (BEA-1379)
+    expect(h.sent[0].variables).toEqual(['Sandy', 'Tech news finished · Apple on-device model + 3 more']);
     expect(h.sent[0].buttonUrl).toBe('agent/runs/r1');
     expect(h.postbox.sendText).not.toHaveBeenCalled();
     expect(h.postbox.sendReminderTemplate).not.toHaveBeenCalled();
@@ -57,13 +60,13 @@ describe('AlertsService.runFinished — template first (BEA-1102 · BEA-1362)', 
     const h = harness({ settings: NUM });
     await h.svc.runFinished('Watch\nlegrand', '42 rows\n→ https://sheet\n\nmore', '/agent/runs/r1');
     for (const v of h.sent[0].variables) expect(v).not.toMatch(/\n/);
-    expect(h.sent[0].variables[2]).toBe('42 rows · more · The link is behind the button below.'); // links stay out of variables
+    expect(h.sent[0].variables[1]).toBe('Watch · legrand finished · 42 rows · more · The link is behind the button below.'); // links stay out of variables
   });
 
   it('a Watch/Alert that fired is worded as an alert', async () => {
     const h = harness({ settings: NUM });
     await h.svc.runFinished('🔔 legrand followers', '100 → 120', '/agent/runs/r1', { kind: 'alert' });
-    expect(h.sent[0].variables[1]).toBe('🔔 legrand followers — alert');
+    expect(h.sent[0].variables[1]).toContain('🔔 legrand followers — alert');
   });
 
   it("Meta refuses the template → NOT sent, with Meta's reason, and no free text is tried", async () => {
@@ -81,9 +84,9 @@ describe('AlertsService.runFinished — template first (BEA-1102 · BEA-1362)', 
     expect(r.sent).toBe(true);
     expect(r.via).toBe('text');
     expect(r.note).toBe('template not approved yet — free text may not deliver outside 24h');
-    expect(h.sent.map((s) => s.kind)).toEqual(['template', 'text']);
-    expect(h.sent[1].body).toContain('Tech news finished');
-    expect(h.sent[1].body).toContain('https://mybrain.1site.ai/agent/runs/r1');
+    expect(h.sent.map((s) => s.kind)).toEqual(['template', 'template', 'text']); // both chain names tried first (BEA-1379)
+    expect(h.sent[2].body).toContain('Tech news finished');
+    expect(h.sent[2].body).toContain('https://mybrain.1site.ai/agent/runs/r1');
   });
 
   it('the old road is gone: a free text that Postbox "accepts" can no longer count as sent', async () => {
@@ -92,6 +95,30 @@ describe('AlertsService.runFinished — template first (BEA-1102 · BEA-1362)', 
     const r = await h.svc.runFinished('X', 'y', '/p');
     expect(r.sent).toBe(false);
     expect(h.postbox.sendText).not.toHaveBeenCalled();
+  });
+
+  it('Meta refuses AFTER the accept → Telegram carries it; a Watch/Alert push (kind alert) never gets it twice (BEA-1379)', async () => {
+    const REFUSAL = 'This message was not delivered to maintain healthy ecosystem engagement';
+    const pushes: any[] = [];
+    setOwnerAlertTelegram({ notifyWhatsAppRefused: async (a: any) => { pushes.push(a); return { sent: true }; } });
+
+    // A Watch/Alert already went out on Telegram — the refusal must NOT send it there again.
+    const a = harness({ settings: NUM });
+    a.postbox.messageStatus = async () => ({ status: 'failed', error: REFUSAL });
+    a.postbox.sendTemplate = jest.fn(async () => ({ wamid: 'wamid.T', status: 'sent', error: null, id: 'm1' }));
+    const alert = await a.svc.runFinished('🔔 X', 'y', '/p', { kind: 'alert' });
+    expect(alert.sent).toBe(false);
+    expect(alert.telegram).toBe('already');
+    expect(pushes).toHaveLength(0);
+
+    // An ordinary finished alert IS re-sent on Telegram, once.
+    const f = harness({ settings: NUM });
+    f.postbox.messageStatus = async () => ({ status: 'failed', error: REFUSAL });
+    f.postbox.sendTemplate = jest.fn(async () => ({ wamid: 'wamid.T', status: 'sent', error: null, id: 'm2' }));
+    const fin = await f.svc.runFinished('X', 'y', '/p');
+    expect(fin.sent).toBe(true);
+    expect(fin.via).toBe('telegram');
+    expect(pushes).toHaveLength(1);
   });
 
   it('respects the master switch, a missing number and an unconfigured Postbox — unchanged', async () => {
@@ -109,8 +136,7 @@ describe('AlertsService.runFailed — WhatsApp me when an automation fails (BEA-
     const r = await h.svc.runFailed('Morning Brief', 'Engine unreachable', '/agent/runs/r1');
     expect(r.sent).toBe(true);
     expect(h.sent[0].kind).toBe('template');
-    expect(h.sent[0].variables[1]).toBe('⚠️ Morning Brief failed');
-    expect(h.sent[0].variables[2]).toBe('Engine unreachable');
+    expect(h.sent[0].variables[1]).toBe('⚠️ Morning Brief failed · Engine unreachable');
     expect(h.sent[0].buttonUrl).toBe('agent/runs/r1');
     expect(h.postbox.sendText).not.toHaveBeenCalled();
   });
@@ -138,8 +164,7 @@ describe('AlertsService.dailyMissDigest — the same road (BEA-1121 · BEA-1362)
     const r = await h.svc.dailyMissDigest('2026-08-17', [{ title: 'Production update', contact: 'Jayanth' }, { title: 'Sales report', contact: null }]);
     expect(r.sent).toBe(true);
     expect(h.sent[0].kind).toBe('template');
-    expect(h.sent[0].variables[1]).toBe('📋 2026-08-17: 2 daily updates did not come in');
-    expect(h.sent[0].variables[2]).toBe('• Production update — Jayanth · • Sales report');
+    expect(h.sent[0].variables[1]).toBe('📋 2026-08-17: 2 daily updates did not come in · • Production update — Jayanth · • Sales report');
     expect(h.sent[0].buttonUrl).toBe('tasks?tab=review&rtab=daily');
   });
 

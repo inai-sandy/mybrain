@@ -527,6 +527,27 @@ planned creators-first on an unsampled `search_profiles` with no budget left —
 sample for the finder), and when a plan's finder was never sampled and cannot be now, `think()` appends `unsampledFinderNote` ("I have not
 looked at X myself … judge the first run's rows") — the builder never claims accounts are real that it has not seen.
 
+**Owner WhatsApp alerts check Meta's REAL verdict — refused → the same alert on Telegram (BEA-1379).**
+Postbox answers `sent` before Meta decides; a template to the owner when he has stopped engaging is refused
+2–7 s later ("This message was not delivered to maintain healthy ecosystem engagement") and the old code
+reported "WhatsApp sent (template)" while his phone stayed silent. `sendOwnerAlert` (`api/src/contacts/
+owner-alert.ts`) now (a) tries the template CHAIN `ownerTemplates()` — `mybrain_result_v1` (2 variables:
+name + one-line result; pending at Meta as of 2026-08-20) then `mybrain_update_v1` (3 variables); a
+`templateUnusable` answer falls through to the next name, any other verdict stops the chain — and (b) keeps
+Postbox's message `id` off the send and polls `PostboxService.messageStatus(id)` (Postbox's app-key route
+`GET /v1/messages/:id/status`) after `VERDICT.waitMs` (8 s, one retry at +8 s while still `sent` — the
+constants live ONLY in `VERDICT`; tests set `waitMs` to 0). `failed` → the SAME alert goes out on Telegram
+and the step says exactly `REFUSED_ON_TELEGRAM` ("WhatsApp refused by Meta (engagement pacing) — sent on
+Telegram instead."); delivered/read → nothing extra; status route unreachable → the step says "WhatsApp
+sent (template) — delivery unconfirmed"; still `sent` after both polls → the plain label stands. The
+Telegram road is `TelegramService.notifyWhatsAppRefused`, registered at boot through
+`setOwnerAlertTelegram()` — a plain-function seam in owner-alert.ts, because PushModule/ContactsModule can
+NEVER import TelegramModule (Telegram → Daily → Mentor → Push, never back). A Watch/Alert push already
+carries Telegram itself, so `AlertsService.runFinished(..., { kind: 'alert' })` passes `telegramCarried`
+and a refusal only SAYS "already went out on Telegram" — never a second push. Contact reminders (other
+people) are untouched — they deliver fine. Trap: a spec stubbing `sendTemplate` without `messageStatus`
+never polls (old behavior); a stub WITH it must answer per poll or the test really waits.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

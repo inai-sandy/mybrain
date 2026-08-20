@@ -442,7 +442,7 @@ describe('work we can just do never reaches the engine (BEA-1203)', () => {
       sendText: async () => { calls.push('text'); return { status: 'sent' }; },
     } });
     const out = await s.runNode(node('whatsapp'), 'Daily numbers\n' + 'line of detail\n'.repeat(80), []);
-    expect(calls[0]).toMatch(/^template:mybrain_update_v1:3:flows/);
+    expect(calls[0]).toMatch(/^template:mybrain_result_v1:2:flows/); // the chain tries the result template first (BEA-1379)
     expect(calls[1]).toBe('text'); // the long body follows; it is never the only message
     expect(out).toMatch(/Sent to you on WhatsApp \(template\)/);
   });
