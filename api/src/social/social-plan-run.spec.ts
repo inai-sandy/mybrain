@@ -179,7 +179,7 @@ describe('creators-first', () => {
     const { itemsOf } = await import('./social-agent-run.service');
     expect(itemsOf({ items: [], user: { pk: '1' }, more_available: false })).toEqual([]);
     expect(itemsOf({ items: null, user: { pk: '1' } })).toEqual([]);
-    expect(itemsOf({ user: { pk: '1', username: 'x' } })).toEqual([{ user: { pk: '1', username: 'x' } }]); // a profile lookup as the per-creator action
+    expect(itemsOf({ user: { pk: '1', username: 'x' } })).toEqual([{ pk: '1', username: 'x' }]); // a profile lookup as the per-creator action — unwrapped to the profile itself (BEA-1377)
     expect(itemsOf({ items: [{ id: 1 }] })).toEqual([{ id: 1 }]);
     const h = harness({
       answer: (id, args) => {
@@ -269,6 +269,94 @@ describe('creators-first', () => {
     await e.svc.run('run1', creatorsJob());
     expect(e.finish[0].status).toBe('done');
     expect(e.steps.some((s) => /no creators found \(vendor answered not_found\)/.test(s.label))).toBe(true);
+  });
+
+  // BEA-1377 — the owner's live run: find profiles → the full profile per account. The per-creator
+  // answer is ONE object under `data.user`, and 101 succeeded calls were counted as "0 items".
+  describe('BEA-1377: a single-object per-creator answer is ONE row', () => {
+    const profileJob = (over: any = {}) => job({
+      'svc:instagram.search_profiles': { kind: 'creators', find: { actionId: 'svc:instagram.search_profiles', args: { query: 'smart home' }, take: 3 }, then: { actionId: 'svc:instagram.profile', argsFrom: { handle: 'username' }, ...over.then } },
+    }, over.job);
+    const profileAnswer = (who: string) => ({
+      ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Get Instagram Profile',
+      // the live shape: the profile under data.user, envelope around it (run f76834e7)
+      data: { success: true, credits_charged: 1, data: { user: { pk: `pk-${who}`, id: `id-${who}`, username: who, full_name: `${who} Homes`, biography: `${who} builds smart homes`, follower_count: 12345, is_verified: false } } },
+    });
+
+    it("the owner's shape: find search_profiles → profile (handle ← username) → 3 found → 3 rows with username/biography/follower_count and a creator column", async () => {
+      const h = harness({ answer: (id, args) => (id === 'svc:instagram.search_profiles' ? finder : profileAnswer(args.handle)) });
+      await h.svc.run('run1', profileJob());
+      expect(h.finish[0].status).toBe('done');
+      const write = h.calls.find((c) => c.id === SHEET_WRITE)!.ctx;
+      const header: string[] = write.args.values[0];
+      expect(write.args.values).toHaveLength(1 + 3); // one row per creator — never 0
+      for (const col of ['creator', 'username', 'biography', 'follower_count']) expect(header).toContain(col);
+      const at = (row: any[], col: string) => row[header.indexOf(col)];
+      expect(write.args.values.slice(1).map((r: any[]) => at(r, 'username'))).toEqual(['alpha', 'beta', 'gamma']);
+      expect(write.args.values.slice(1).map((r: any[]) => at(r, 'creator'))).toEqual(['alpha', 'beta', 'gamma']);
+      expect(at(write.args.values[1], 'biography')).toBe('alpha builds smart homes');
+      expect(at(write.args.values[1], 'follower_count')).toBe(12345);
+      // honest wording: profiles fetched · rows — never "0 items"
+      expect(h.steps.some((s) => s.label === '3 profiles fetched · 3 rows · 4 credits' && s.nodeId === 'src:svc:instagram.search_profiles')).toBe(true);
+      expect(h.finish[0].resultText).toMatch(/\*\*3 rows\*\*/);
+    });
+
+    it('keepDays on a profile (no date field): everything kept, said once per source — never silently dropped', async () => {
+      const h = harness({ answer: (id, args) => (id === 'svc:instagram.search_profiles' ? finder : profileAnswer(args.handle)) });
+      await h.svc.run('run1', profileJob({ then: { keepDays: 30 } }));
+      expect(h.finish[0].status).toBe('done');
+      expect(h.steps.some((s) => s.label === '3 profiles fetched · 3 rows — these carry no date, so all were kept (last 30 days could not be applied) · 4 credits')).toBe(true);
+      const write = h.calls.find((c) => c.id === SHEET_WRITE)!.ctx;
+      expect(write.args.values).toHaveLength(1 + 3);
+    });
+
+    it('the tripwire: calls succeeded with data but 0 rows recognised → the step says it is a My Brain bug, not the vendor; the run still finishes honestly', async () => {
+      const h = harness({
+        answer: (id) => (id === 'svc:instagram.search_profiles' ? finder : { ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Get Instagram Profile', data: { success: true, weird_numbers: [1, 2, 3] } }),
+      });
+      await h.svc.run('run1', profileJob());
+      expect(h.finish[0].status).toBe('done');
+      expect(h.steps.some((s) => /fetched 3 answers but recognised 0 rows — this is a My Brain bug, not the vendor/i.test(s.label))).toBe(true);
+      expect(h.finish[0].resultText).toMatch(/My Brain bug, not the vendor/);
+      expect(h.calls.some((c) => c.id === SHEET_CREATE)).toBe(false); // nothing invented
+    });
+
+    it('itemsOf: the live envelope {success, credits_charged, data:{user}} unwraps to ONE profile row', async () => {
+      const { itemsOf, unrecognisedAnswer } = await import('./social-agent-run.service');
+      expect(itemsOf({ success: true, credits_charged: 1, data: { user: { pk: '1', username: 'x', biography: 'b' } } })).toEqual([{ pk: '1', username: 'x', biography: 'b' }]);
+      expect(itemsOf({ success: true })).toEqual([]); // envelope only — never a row of nothing
+      // list answers keep behaving as before
+      expect(itemsOf({ items: null, user: { pk: '1' }, more_available: false })).toEqual([]);
+      expect(itemsOf({ items: [{ id: 1 }] })).toEqual([{ id: 1 }]);
+      // the tripwire's judge: an unreadable payload is unrecognised; an empty list on purpose is not
+      expect(unrecognisedAnswer({ success: true, weird_numbers: [1, 2, 3] })).toBe(true);
+      expect(unrecognisedAnswer({ items: null, user: { pk: '1' }, more_available: false })).toBe(false);
+      expect(unrecognisedAnswer({ items: [] })).toBe(false);
+      expect(unrecognisedAnswer({ success: true })).toBe(false);
+      expect(unrecognisedAnswer({ success: true, credits_charged: 1, data: { user: { pk: '1' } } })).toBe(false); // recognised → one row, not a bug
+      // review fixes: a stray null list-named key BESIDE the data wrapper never hides the profile…
+      expect(itemsOf({ success: true, data: { user: { pk: '1', username: 'x' } }, comments: null })).toEqual([{ pk: '1', username: 'x' }]);
+      expect(unrecognisedAnswer({ success: true, data: { user: { pk: '1' } }, comments: null })).toBe(false);
+      // …and the vendor's own "no such account" (`data.user: null`) is the vendor's empty, not our bug
+      expect(itemsOf({ success: true, data: { user: null } })).toEqual([]);
+      expect(unrecognisedAnswer({ success: true, data: { user: null } })).toBe(false);
+      expect(unrecognisedAnswer({ success: true, data: { weird_numbers: [1, 2, 3] } })).toBe(true); // unreadable inside the wrapper is still our bug
+    });
+
+    it('partial loss is never silent: some answers read, some unrecognised → the step names the dropped count as a My Brain bug', async () => {
+      const h = harness({
+        answer: (id, args) => {
+          if (id === 'svc:instagram.search_profiles') return finder;
+          if (args.handle === 'gamma') return { ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Get Instagram Profile', data: { success: true, weird_numbers: [1, 2, 3] } };
+          return profileAnswer(args.handle);
+        },
+      });
+      await h.svc.run('run1', profileJob());
+      expect(h.finish[0].status).toBe('done');
+      expect(h.steps.some((s) => /2 items · 4 credits · 1 answer carried data but no rows were recognised — a My Brain bug, not the vendor/.test(s.label))).toBe(true);
+      const write = h.calls.find((c) => c.id === SHEET_WRITE)!.ctx;
+      expect(write.args.values).toHaveLength(1 + 2); // the two readable profiles still land
+    });
   });
 
   it('a creators-first block beside a plain source: merged under a source column, both nodes badged', async () => {

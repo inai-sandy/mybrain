@@ -8,7 +8,7 @@ import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
 import { Diff, KEY_FIELDS, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
-import { LIST_KEYS, findList, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
+import { ENVELOPE, LIST_KEYS, findList, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, unwrap, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
 import { AgentPlan, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pagingOf, planFromAgent, sourceActionId, sourceHint, sourceLabel, thresholdOf } from './plan';
 import { BudgetCheck, SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
@@ -466,6 +466,8 @@ export class SocialAgentRunService {
     const answers: { who: string; rows: any[] }[] = [];
     let thenName = '';
     let serviceName = f.serviceName || '';
+    let singles = 0; // answers that were ONE object (a profile lookup) — one row each (BEA-1377)
+    let unrecognised = 0; // succeeded WITH data, but no rows recognised — the tripwire's count
     for (const cr of creators) {
       const stop2 = await guard(thenId);
       if (stop2) return { credits, stop: stop2 };
@@ -474,7 +476,10 @@ export class SocialAgentRunService {
       if (!r.ok) { failures.push(`${cr.who}: ${(r.error || 'the fetch failed').slice(0, 120)}`); continue; }
       thenName = r.actionName || thenName;
       serviceName = r.serviceName || serviceName;
-      answers.push({ who: cr.who, rows: itemsOf(r.data) });
+      const rows = itemsOf(r.data);
+      if (rows.length === 1 && !findList(r.data)) singles++;
+      else if (!rows.length && unrecognisedAnswer(r.data)) unrecognised++;
+      answers.push({ who: cr.who, rows });
     }
     const okCount = answers.length;
     const rawCount = answers.reduce((n, a) => n + a.rows.length, 0);
@@ -495,16 +500,34 @@ export class SocialAgentRunService {
       }
     }
     const kept = items.length;
+    // A per-creator action that answers ONE object (a profile lookup) reads as ROWS — "3 profiles
+    // fetched · 3 rows", never "3 creators · 0 items" while every call succeeded (BEA-1377).
+    const enrich = okCount > 0 && singles === okCount;
+    const unit = enrich ? 'row' : 'item';
     const keepNote = cutoff === null || rawCount === 0
-      ? `${kept} item${kept === 1 ? '' : 's'}`
+      ? `${kept} ${unit}${kept === 1 ? '' : 's'}`
       : dateField
         ? `${kept} kept from the last ${keepDays} day${keepDays === 1 ? '' : 's'} (of ${rawCount})`
-        : `${kept} item${kept === 1 ? '' : 's'} — these carry no date, so all were kept (last ${keepDays} days could not be applied)`;
+        : `${kept} ${unit}${kept === 1 ? '' : 's'} — these carry no date, so all were kept (last ${keepDays} days could not be applied)`;
     const failNote = failures.length ? ` · ${failures.length} failed and ${failures.length === 1 ? 'was' : 'were'} skipped` : '';
-    const label = `${creators.length} creator${creators.length === 1 ? '' : 's'} · fetched ${thenName ? thenName.toLowerCase() : 'items'} for ${okCount}${failNote} · ${keepNote} · ${credits} credit${credits === 1 ? '' : 's'}`;
+    // Partial loss is never silent (review of BEA-1377): SOME creators' answers were read and
+    // others carried data no shape here recognised — the step says how many were dropped and whose.
+    const bugNote = rawCount && unrecognised ? ` · ${unrecognised} answer${unrecognised === 1 ? '' : 's'} carried data but no rows were recognised — a My Brain bug, not the vendor` : '';
+    const noun = /profile/i.test(`${thenId} ${thenName}`) ? 'profile' : 'answer';
+    const label = enrich
+      ? `${okCount} ${noun}${okCount === 1 ? '' : 's'} fetched${failNote} · ${keepNote} · ${credits} credit${credits === 1 ? '' : 's'}${bugNote}`
+      : `${creators.length} creator${creators.length === 1 ? '' : 's'} · fetched ${thenName ? thenName.toLowerCase() : 'items'} for ${okCount}${failNote} · ${keepNote} · ${credits} credit${credits === 1 ? '' : 's'}${bugNote}`;
     if (!okCount) {
       await step({ label: `${label} — no creator's fetch succeeded`, status: 'done', detail: failures.join('\n').slice(0, 1200), nodeId });
       return { credits, empty: true, why: `${creators.length} creators found but no creator's fetch succeeded` };
+    }
+    // The tripwire (BEA-1377): calls succeeded and carried data, yet no shape here recognised a
+    // single row. That is OUR bug — say so plainly and finish honestly, never "0 items" as if the
+    // vendor had nothing. This line is what would have caught the 101-credit run on day one.
+    if (!rawCount && unrecognised) {
+      const bug = `fetched ${okCount} answer${okCount === 1 ? '' : 's'} but recognised 0 rows — this is a My Brain bug, not the vendor`;
+      await step({ label: `${creators.length} creator${creators.length === 1 ? '' : 's'} · ${bug} · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
+      return { credits, empty: true, why: bug };
     }
     await step({ label, status: 'done', detail: failures.length ? failures.join('\n').slice(0, 1200) : JSON.stringify(src.find.args).slice(0, 300), nodeId });
     // Fetched fine but nothing kept (every post older than the window, or every account empty): an
@@ -915,17 +938,50 @@ export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
 
 /**
  * The items of one per-creator answer: a list → its items; an answer SHAPED like a list with nothing
- * in it (`{items: []}`, `{items: null, user: {…}}`, a private account's `{user, more_available:false}`
- * with a list key present) → nothing, never one row of envelope; a plain object with no list key at
- * all (a profile lookup as the per-creator action) → that one object.
+ * in it (`{items: []}`, `{items: null, user: {…}}` — a list key holding null or an array) → nothing,
+ * never one row of envelope; a single-object answer (a profile lookup as the per-creator action) →
+ * ONE row, out of its envelope with the same `unwrap` the plain sources use — `{success,
+ * data:{user:{…}}}` IS the profile (BEA-1377: `data` is also a list key, and 101 succeeded profile
+ * calls were counted as "0 items" because the old check read that key's NAME, not its value).
  */
-export function itemsOf(data: any): any[] {
+const plainObj = (v: any) => v && typeof v === 'object' && !Array.isArray(v);
+
+export function itemsOf(data: any, depth = 0): any[] {
   const list = findList(data);
   if (list) return list.rows;
   if (Array.isArray(data)) return [];
   if (!data || typeof data !== 'object') return [];
-  const listShaped = Object.keys(data).some((k) => LIST_KEYS.includes(k)) || Object.values(data).some((v) => Array.isArray(v));
-  return listShaped ? [] : [data];
+  // The vendor's own envelope wraps the payload in `data` — judge what is INSIDE it, so a stray
+  // null list-named field BESIDE the wrapper (`{success, data:{user:{…}}, comments:null}`) can
+  // never hide a real profile (found in review of BEA-1377).
+  if (plainObj((data as any).data) && depth < 4) return itemsOf((data as any).data, depth + 1);
+  // A list answer with nothing in it: a list key holding null / an array findList rejected
+  // (a private account's `{items: null, user, more_available:false}`), or a bare array anywhere
+  // at the top — that is an empty list, never a row.
+  if (Object.entries(data).some(([k, v]) => LIST_KEYS.includes(k) && v !== undefined && !plainObj(v))) return [];
+  if (Object.values(data).some((v) => Array.isArray(v))) return [];
+  const one = unwrap(data);
+  const keys = plainObj(one) ? Object.keys(one).filter((k) => !ENVELOPE.has(k) && one[k] !== undefined && one[k] !== null) : [];
+  return keys.length ? [one] : [];
+}
+
+/**
+ * The tripwire's judge (BEA-1377): true when a SUCCEEDED answer carried a real payload that
+ * `itemsOf` could not read as rows — that is OUR bug, never the vendor's. An answer that is empty
+ * on purpose (a list key holding null/[], an empty array under any name, the vendor's wrapper
+ * around a null payload — `{success, data:{user:null}}` is "no such account" — or envelope only)
+ * is NOT a bug and never blamed on My Brain.
+ */
+export function unrecognisedAnswer(data: any, depth = 0): boolean {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  if (itemsOf(data).length) return false;
+  // Judge inside the vendor's `data` wrapper, exactly like itemsOf does (found in review).
+  if (plainObj((data as any).data) && depth < 4) return unrecognisedAnswer((data as any).data, depth + 1);
+  for (const [k, v] of Object.entries(data)) {
+    if (LIST_KEYS.includes(k) && (v === null || Array.isArray(v))) return false; // an empty list, on purpose
+    if (Array.isArray(v) && !(v as any[]).length) return false; // an empty list under any name
+  }
+  return Object.entries(data).some(([k, v]) => !ENVELOPE.has(k) && v !== null && v !== undefined);
 }
 
 /** What a search finds, for the run's own words: posts · reels · videos · results. */
