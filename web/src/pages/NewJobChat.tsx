@@ -23,6 +23,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   // The direct-fetch plan with its cost (BEA-1371) — shown instead of the job when the builder planned one.
   const [plan, setPlan] = useState<any>(null);
   const [cost, setCost] = useState<PlanCost | null>(null);
+  const [goal, setGoal] = useState<string | null>(null); // what the result is FOR (BEA-1378) — first line of the plan card
   const [planHidden, setPlanHidden] = useState(false); // "Not now" — the plan stays on the server; the next reply shows it again
   const inputRef = useRef<HTMLDivElement>(null);
   const [msg, setMsg] = useState('');
@@ -41,7 +42,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`/api/agent/areas/${areaId}/job-builder`).then((r) => r.json()).then((d) => { setLog(d.log || []); setJob(d.job || null); setPlan(d.plan || null); setCost(d.cost || null); }).catch(() => undefined);
+    fetch(`/api/agent/areas/${areaId}/job-builder`).then((r) => r.json()).then((d) => { setLog(d.log || []); setJob(d.job || null); setPlan(d.plan || null); setCost(d.cost || null); setGoal(d.goal || null); }).catch(() => undefined);
   }, [areaId]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }); }, [log, job]);
 
@@ -73,6 +74,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
       setJob(d.job || null);
       setPlan(d.plan || null);
       setCost(d.cost || null);
+      setGoal(d.goal || null);
       setPlanHidden(false);
     } catch (e: any) { setLog((p) => [...p, { who: 'ai', text: e?.message || 'Something went wrong — try again.' }]); }
     setBusy(false);
@@ -118,7 +120,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
 
   async function reset() {
     await fetch(`/api/agent/areas/${areaId}/job-builder`, { method: 'DELETE' }).catch(() => undefined);
-    setLog([]); setJob(null); setPlan(null); setCost(null); setPlanHidden(false);
+    setLog([]); setJob(null); setPlan(null); setCost(null); setGoal(null); setPlanHidden(false);
   }
 
   const toolName = (id: string) => (catalog?.tools || []).find((t: any) => t.id === id)?.name || id;
@@ -153,7 +155,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
             {log.map((m, i) => <BuilderMessage key={i} m={m} />)}
             {busy && <div className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />thinking…</div>}
 
-            {plan && !job && !planHidden && <PlanCard plan={plan} cost={cost} creating={creating} onCreate={create} createLabel="Create this job" onChange={() => inputRef.current?.querySelector('textarea')?.focus()} onDismiss={() => setPlanHidden(true)} />}
+            {plan && !job && !planHidden && <PlanCard plan={plan} cost={cost} goal={goal} creating={creating} onCreate={create} createLabel="Create this job" onChange={() => inputRef.current?.querySelector('textarea')?.focus()} onDismiss={() => setPlanHidden(true)} />}
             {plan && !job && planHidden && (
               <button onClick={() => setPlanHidden(false)} className="text-xs text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300" data-testid="plan-show-again">Show the plan again</button>
             )}

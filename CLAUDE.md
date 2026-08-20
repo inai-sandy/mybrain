@@ -422,7 +422,12 @@ One proposal at a time: a plan clears the ordinary `spec`/`job` and the other wa
 with a plan → `createAgent(planToAgentInput(plan))` (tools + toolArgs incl. `_pages`/creators blocks, task, mode/threshold/condition,
 outputDest/sheetId, notifyWhatsApp, schedule, `origin:'social'`, `category:'Social'` when every action is the social provider's) — the
 flow picture then draws itself (BEA-1366); the ordinary spec/job path is untouched. `healthNote()` appends a plain note when the plan
-uses a source whose card says FAILING and the reply did not say so. Prompt defaults `agent.builder`/`agent.jobBuilder` carry the
+uses a source whose card says FAILING and the reply did not say so. **The goal interview (BEA-1378):** the builder settles what the
+result is FOR before planning (`RULES_TEXT`'s goal rules — the goal decides the shape, a literal-ask/goal mismatch is said before
+planning, a stated goal is never re-asked); the model's `goal` field is kept in the conversation state, returned beside `plan`/`cost`,
+shown as the card's first "For:" line and carried onto the created agent's description (`withGoal`), and an EXPENSIVE plan
+(≥50 credits or ≥100k AI tokens by the server's own `estimatePlanCost`) with no goal established is stripped to reply-only exactly
+like the healthy-source rule (`isExpensivePlan`/`noGoalText`/`goalMissingNote`). Prompt defaults `agent.builder`/`agent.jobBuilder` carry the
 `{{facts}} {{tools}} {{blocks}} {{sample}} {{budget}} {{rules}}` slots; `fillTemplate()` APPENDS any slot an owner's older Settings
 override lacks, so an override never loses the facts. UI: `web/src/ui/PlanCard.tsx` (small plan-with-cost + Create in both chats until ⑤);
 NewJobChat must NOT plan a flow after a plan-create (the server drew it). Traps: `AgentAreasService`' constructor gained `sampler?`

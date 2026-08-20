@@ -13,7 +13,8 @@ import { BuilderSampleService } from './builder-sample.service';
 import {
   BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
   fillTemplate, healthNote, indexSection, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
-  BuilderSeed, MAX_ASKS_PER_MESSAGE, costReplyLine, noHealthySourceText, sampleFinderText, sampledActionIds, seedLine, seedText, unsampledFinderNote, unsampledFinders,
+  BuilderSeed, MAX_ASKS_PER_MESSAGE, costReplyLine, goalMissingNote, goalOf, isExpensivePlan, noGoalText, noHealthySourceText, sampleFinderText, sampledActionIds,
+  seedLine, seedText, unsampledFinderNote, unsampledFinders, withGoal,
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
 
@@ -26,7 +27,7 @@ export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; gro
  * proposal (`spec` for the top-level builder, `job` for a job builder), the direct-fetch `plan` with
  * its `cost`, the sample counter and the design-budget counter. A reset drops all of it.
  */
-export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter; seed?: BuilderSeed | null };
+export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter; seed?: BuilderSeed | null; goal?: string | null };
 
 function packState(st: BuilderState): string {
   return JSON.stringify({
@@ -38,6 +39,9 @@ function packState(st: BuilderState): string {
     ...(st.samples ? { samples: st.samples } : {}),
     ...(st.design ? { design: st.design } : {}),
     ...(st.seed ? { seed: st.seed } : {}),
+    // What the result is FOR, in the owner's words (BEA-1378) — set by the model's `goal` field,
+    // read by the stakes gate, shown on the plan card, carried onto the created agent.
+    ...(st.goal ? { goal: st.goal } : {}),
   });
 }
 
@@ -96,7 +100,7 @@ export class AgentAreasService {
   // `cost` and `design` (the design-budget counter) are the thinking builder's (BEA-1371).
   private async jobLoad(areaId: string): Promise<BuilderState> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.jobKey(areaId) } }).catch(() => null);
-    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design }; } catch { return { log: [], job: null, plan: null, cost: null }; }
+    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, goal: v?.goal || null }; } catch { return { log: [], job: null, plan: null, cost: null }; }
   }
   private async jobSave(areaId: string, st: BuilderState) {
     await this.prisma.setting.upsert({ where: { key: this.jobKey(areaId) }, create: { key: this.jobKey(areaId), value: packState(st) }, update: { value: packState(st) } });
@@ -105,7 +109,7 @@ export class AgentAreasService {
   async jobBuilderReset(areaId: string) { await this.jobSave(areaId, { log: [], job: null, plan: null, cost: null }); return { ok: true }; }
 
   /** One turn of the new-job conversation — the thinking builder (BEA-1371). */
-  async jobBuilderChat(areaId: string, message: string): Promise<{ reply: string; job: any | null; plan: AgentPlan | null; cost: PlanCost | null }> {
+  async jobBuilderChat(areaId: string, message: string): Promise<{ reply: string; job: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null }> {
     const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');
     const area: any = await this.get(areaId);
@@ -126,7 +130,7 @@ export class AgentAreasService {
       keepProposal: (g) => (g && typeof g === 'object' && g.name && g.task ? g : null),
       label: 'agent-job-builder',
     });
-    return { reply: st.reply, job: st.state.job, plan: st.state.plan || null, cost: st.state.cost || null };
+    return { reply: st.reply, job: st.state.job, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null };
   }
 
   /** Build the job the owner just approved. `overrides` carries their tool ticks (BEA-1171). */
@@ -138,9 +142,11 @@ export class AgentAreasService {
     // the runner and the flow picture see exactly what the builder showed.
     if (st.plan) {
       const input = planToAgentInput(st.plan, await this.socialTester(st.plan));
-      const created: any = await this.agentSvc.createAgent({ ...input, areaId } as any);
+      // The goal rides onto the job as "For: <goal>" on its description (BEA-1378).
+      const description = withGoal(null, st.goal);
+      const created: any = await this.agentSvc.createAgent({ ...input, areaId, ...(description ? { description } : {}) } as any);
       st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
-      st.job = null; st.plan = null; st.cost = null;
+      st.job = null; st.plan = null; st.cost = null; st.goal = null;
       await this.jobSave(areaId, st);
       return { ok: true as const, jobId: created.id, url: `/agent/a/${created.id}`, name: created.name };
     }
@@ -163,6 +169,8 @@ export class AgentAreasService {
       areaId,
       name: String(j.name).trim().slice(0, 120),
       icon: j.icon || undefined,
+      // The goal on the ordinary job too (BEA-1378) — "For: <goal>" onto its description.
+      description: withGoal(j.description, st.goal),
       prompt: String(j.task).trim(),
       rubric: j.outcome ? String(j.outcome).slice(0, 2000) : undefined,
       defaultDepth: ['quick', 'standard', 'deep'].includes(j.depth) ? j.depth : undefined,
@@ -174,7 +182,7 @@ export class AgentAreasService {
     } as any);
 
     st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
-    st.job = null; st.plan = null; st.cost = null;
+    st.job = null; st.plan = null; st.cost = null; st.goal = null;
     await this.jobSave(areaId, st);
     return { ok: true as const, jobId: created.id, url: `/agent/a/${created.id}`, name: created.name };
   }
@@ -220,6 +228,10 @@ export class AgentAreasService {
       const index = indexSection(shortlist as any, convo(), cards.map((c) => c.actionId));
       const allowedIds = new Set([...cards.map((c) => c.actionId), ...shortlist.filter((t: any) => isServiceToolId(t.id)).map((t: any) => t.id)]);
 
+      // The goal — what the result is FOR, in the owner's words (BEA-1378). Carried in the state, set by
+      // the model's `goal` field on any answer this turn; the prompt shows it so it is never re-asked.
+      let goal: string | null = st.goal || null;
+
       // The last plan rides along with ITS server cost, so a refinement quotes the server's numbers, never its own (BEA-1375).
       const previous = st.plan ? `\n\nThe plan you last proposed (refine it, don't start over):\n${JSON.stringify(st.plan)}${st.cost ? `\nServer cost of that plan (quote these, not your own): ${costLineText(st.cost)}` : ''}` : st[o.proposalKey] ? `\n\nThe ${o.proposalKey} you last proposed (refine it, don't start over):\n${JSON.stringify(st[o.proposalKey])}` : '';
       const buildPrompt = (extra: string) => fillTemplate(tpl, {
@@ -233,6 +245,8 @@ export class AgentAreasService {
         rules: { label: 'Rules', text: RULES_TEXT },
         // The Social hand-off (BEA-1372): the call the owner just made by hand — an empty text is not appended.
         seed: { label: 'Where the owner came from', text: seedText(st.seed) },
+        // The goal already established (BEA-1378) — so a later turn never re-asks what it is for.
+        goal: { label: 'What the result is FOR (the owner already said — do not ask again; keep it in your "goal" field)', text: goal || '' },
       }) + previous + extra;
 
       const ask = async (extra: string): Promise<any> => {
@@ -254,10 +268,15 @@ export class AgentAreasService {
       let samplesRun = 0;
       let plan: AgentPlan | null = null;
       let refused: AgentPlan | null = null;
-      const nudged = { invalid: false, health: false, finder: false };
+      // An expensive plan held back because no goal is established (BEA-1378) — its cost writes the note.
+      let heldForGoal: PlanCost | null = null;
+      const nudged = { invalid: false, health: false, finder: false, goal: false };
       const canSample = () => !!this.sampler && !overBudget(design) && readSampleCounter(st).used < SAMPLE_CAPS.calls;
       while (asks < MAX_ASKS_PER_MESSAGE) {
         g = await ask(extra); asks++;
+        // The goal may arrive on ANY answer this turn — a plan beside it counts as goal-established.
+        const said = goalOf(g);
+        if (said) goal = said;
         const want = sampleRequestOf(g);
         if (want) {
           if (samplesRun >= SAMPLE_LOOPS_PER_MESSAGE || !canSample()) {
@@ -283,6 +302,11 @@ export class AgentAreasService {
           extra += `\n\nYour "plan" did not validate: ${check.errors.join('; ')}. Send the whole JSON again with the plan fixed (same reply is fine).`;
           continue;
         }
+        // A validated plan supersedes anything held in an EARLIER round — only THIS plan's blocking
+        // reason may write the reply's note, or a revised plan that fixed its health would still be
+        // called "every source is failing" while it waits for the goal (review fix, BEA-1378).
+        refused = null;
+        heldForGoal = null;
         // A plan of only failing sources is an empty sheet today — not shown (BEA-1375).
         if (!planHasHealthySource(check.plan, cardsById as any)) {
           refused = check.plan;
@@ -298,8 +322,21 @@ export class AgentAreasService {
           extra += `\n\n${sampleFinderText(finders)}`;
           continue;
         }
+        // The stakes gate (BEA-1378): an expensive plan (by the SERVER's own estimate) with no goal
+        // established in the conversation is not shown — same mechanism as the healthy-source rule.
+        if (!goal) {
+          const est = this.costWithHealth(check.plan, cardsById);
+          if (isExpensivePlan(est)) {
+            heldForGoal = est;
+            if (nudged.goal) break;
+            nudged.goal = true;
+            extra += `\n\n${noGoalText(est)}`;
+            continue;
+          }
+        }
         plan = check.plan;
         refused = null;
+        heldForGoal = null;
         break;
       }
 
@@ -307,12 +344,14 @@ export class AgentAreasService {
       let reply = String(g?.reply || '').trim().slice(0, 2400);
       let cost: PlanCost | null = plan ? this.costWithHealth(plan, cardsById) : null;
       // Budget spent and still no plan: keep the best plan so far rather than asking on.
-      if (!plan && !refused && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || this.costWithHealth(plan, cardsById); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
+      if (!plan && !refused && !heldForGoal && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || this.costWithHealth(plan, cardsById); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
       if (!reply) reply = cantDo;
       // Honesty: a plan that leans on a failing source says so, even when the model forgot; a refused plan
       // (no healthy source) says why no card came.
       const note = healthNote(plan || refused, cardsById, reply);
       if (note) reply = `${reply}\n\n${note}`;
+      // An expensive plan held back for the goal (BEA-1378): the owner reads why no plan card came.
+      if (!plan && heldForGoal) reply = `${reply}\n\n${goalMissingNote(heldForGoal)}`;
       // A creators finder the conversation never looked at and cannot look at now (sample budget spent): said plainly.
       const unseen = plan ? unsampledFinderNote(unsampledFinders(plan, sampledActionIds(st)), cardsById) : '';
       if (unseen) reply = `${reply}\n\n${unseen}`;
@@ -326,6 +365,7 @@ export class AgentAreasService {
       const proposal = o.keepProposal(g?.[o.proposalKey]);
       if (plan) { st.plan = plan; st.cost = cost; (st as any)[o.proposalKey] = null; }
       else if (proposal) { (st as any)[o.proposalKey] = proposal; st.plan = null; st.cost = null; }
+      st.goal = goal; // remembered for every later turn, the gate, the card and Create (BEA-1378)
       st.design = { turns: design.turns + 1, tokens: design.tokens + spentTokens };
       st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
       await o.save(st);
@@ -363,7 +403,7 @@ export class AgentAreasService {
 
   private async builderLoad(): Promise<BuilderState> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.builderKey() } }).catch(() => null);
-    try { const v = row ? JSON.parse((row as any).value) : null; return { log: v?.log || [], spec: v?.spec || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, seed: v?.seed || null }; } catch { return { log: [], spec: null, plan: null, cost: null }; }
+    try { const v = row ? JSON.parse((row as any).value) : null; return { log: v?.log || [], spec: v?.spec || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, seed: v?.seed || null, goal: v?.goal || null }; } catch { return { log: [], spec: null, plan: null, cost: null }; }
   }
   // `samples` = the sample-call counter (BEA-1370); kept across turns, dropped by `builderReset()`.
   private async builderSave(st: BuilderState) {
@@ -415,7 +455,7 @@ export class AgentAreasService {
   }
 
   /** One builder turn: owner's message → the thinking builder's reply (+ the evolving spec or plan). */
-  async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null }> {
+  async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null }> {
     const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');
     const st = await this.think({
@@ -429,7 +469,7 @@ export class AgentAreasService {
       keepProposal: (g) => (g && typeof g === 'object' && g.area?.name ? g : null),
       label: 'agent-builder',
     });
-    return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null };
+    return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null };
   }
 
   /** Create the agent from the current proposal (the owner pressed Create). */
@@ -440,16 +480,18 @@ export class AgentAreasService {
     if (st.plan) {
       if (!this.agentSvc) throw new BadRequestException('Agent service unavailable.');
       const input = planToAgentInput(st.plan, await this.socialTester(st.plan));
-      const created: any = await this.agentSvc.createAgent(input as any);
+      // The goal rides onto the agent as "For: <goal>" on its description (BEA-1378).
+      const description = withGoal(null, st.goal);
+      const created: any = await this.agentSvc.createAgent({ ...input, ...(description ? { description } : {}) } as any);
       st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
-      st.plan = null; st.cost = null; st.seed = null;
+      st.plan = null; st.cost = null; st.seed = null; st.goal = null;
       await this.builderSave(st);
       return { ok: true as const, areaId: created.areaId, agentId: created.id, url: `/agent/a/${created.id}`, jobs: [{ id: created.id, name: created.name }] };
     }
     if (!st.spec) throw new BadRequestException('There is no proposal to create yet — keep chatting.');
-    const res = await this.createFromSpec(st.spec);
+    const res = await this.createFromSpec(st.spec, st.goal);
     st.log.push({ who: 'ai', text: `Created ✓ — "${st.spec.area.name}" with ${res.jobs.length} job(s).`, at: new Date().toISOString() });
-    st.spec = null; st.plan = null; st.cost = null; st.seed = null;
+    st.spec = null; st.plan = null; st.cost = null; st.seed = null; st.goal = null;
     await this.builderSave(st);
     return res;
   }
@@ -459,7 +501,7 @@ export class AgentAreasService {
    * Code skill and the in-app chat builder: area (identity + tools) + its jobs (each with task,
    * outcome, schedule and per-job settings). Nothing partial: a bad spec is refused up front.
    */
-  async createFromSpec(spec: any): Promise<{ ok: true; areaId: string; url: string; jobs: { id: string; name: string }[] }> {
+  async createFromSpec(spec: any, goal?: string | null): Promise<{ ok: true; areaId: string; url: string; jobs: { id: string; name: string }[] }> {
     const areaIn = spec?.area || {};
     const jobsIn: any[] = Array.isArray(spec?.jobs) ? spec.jobs : [];
     if (!areaIn?.name?.trim()) throw new BadRequestException('The agent needs a name.');
@@ -479,7 +521,8 @@ export class AgentAreasService {
         name: j.name.trim(),
         icon: j.icon || areaIn.icon || undefined,
         color: j.color || areaIn.color || undefined,
-        description: j.description || undefined,
+        // The goal from the builder conversation rides onto each job (BEA-1378).
+        description: withGoal(j.description, goal),
         prompt: String(j.task).trim(),
         rubric: j.outcome ? String(Array.isArray(j.outcome) ? j.outcome.map((o: any) => `- ${o}`).join('\n') : j.outcome).slice(0, 2000) : undefined,
         autonomy: ['cautious', 'balanced', 'autopilot'].includes(j.autonomy) ? j.autonomy : 'cautious',

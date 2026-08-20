@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, Bell, CalendarClock, Check, ChevronDown, Columns3, Database, Loader2, Pencil, Search, X } from 'lucide-react';
+import { AlertTriangle, Bell, CalendarClock, Check, ChevronDown, Columns3, Database, Loader2, Pencil, Search, Target, X } from 'lucide-react';
 
 /**
  * The plan-with-cost card the thinking builder shows before Create (BEA-1371 → the real thing in
@@ -89,8 +89,8 @@ function Row({ icon: Icon, label, children, testId }: { icon: any; label: string
   );
 }
 
-export function PlanCard({ plan, cost, creating, onCreate, onChange, onDismiss, createLabel = 'Create this agent' }: {
-  plan: any; cost?: PlanCost | null; creating?: boolean; onCreate: () => void; onChange?: () => void; onDismiss?: () => void; createLabel?: string;
+export function PlanCard({ plan, cost, goal, creating, onCreate, onChange, onDismiss, createLabel = 'Create this agent' }: {
+  plan: any; cost?: PlanCost | null; goal?: string | null; creating?: boolean; onCreate: () => void; onChange?: () => void; onDismiss?: () => void; createLabel?: string;
 }) {
   const [showHow, setShowHow] = useState(false);
   if (!plan) return null;
@@ -105,6 +105,12 @@ export function PlanCard({ plan, cost, creating, onCreate, onChange, onDismiss, 
       <div className="mt-1 break-words text-sm font-semibold">{plan.name}</div>
 
       <div className="mt-2 space-y-1.5">
+        {/* What the result is FOR — the goal interview (BEA-1378): first line when the owner has said it. */}
+        {goal && (
+          <Row icon={Target} label="For" testId="plan-goal">
+            <span className="break-words font-medium">{goal}</span>
+          </Row>
+        )}
         <Row icon={Search} label="Fetches" testId="plan-fetch">
           {sources.length === 0 ? <span>nothing yet</span> : (
             <ul className="space-y-0.5">

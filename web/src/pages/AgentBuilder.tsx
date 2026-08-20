@@ -30,6 +30,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded }: 
   // The direct-fetch plan with its cost (BEA-1371) — shown instead of the spec when the builder planned one.
   const [plan, setPlan] = useState<any>(null);
   const [cost, setCost] = useState<PlanCost | null>(null);
+  const [goal, setGoal] = useState<string | null>(null); // what the result is FOR (BEA-1378) — first line of the plan card
   const [planHidden, setPlanHidden] = useState(false); // "Not now" — the plan stays on the server; the next reply shows it again
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,7 +38,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded }: 
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLDivElement>(null);
 
-  function adopt(d: any) { setLog(d.log || []); setSpec(d.spec || null); setPlan(d.plan || null); setCost(d.cost || null); setPlanHidden(false); }
+  function adopt(d: any) { setLog(d.log || []); setSpec(d.spec || null); setPlan(d.plan || null); setCost(d.cost || null); setGoal(d.goal || null); setPlanHidden(false); }
   const seededRef = useRef(false); // one seed POST per mount — StrictMode runs the effect twice in dev
   useEffect(() => {
     if (seed?.tool) {
@@ -71,6 +72,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded }: 
       setSpec(d.spec || null);
       setPlan(d.plan || null);
       setCost(d.cost || null);
+      setGoal(d.goal || null);
       setPlanHidden(false);
     } catch (e: any) { setLog((p) => [...p, { who: 'ai', text: e?.message || 'Something went wrong — try again.' }]); }
     setBusy(false);
@@ -96,7 +98,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded }: 
 
   async function reset() {
     await fetch('/api/agent/builder', { method: 'DELETE' }).catch(() => undefined);
-    setLog([]); setSpec(null); setPlan(null); setCost(null); setPlanHidden(false);
+    setLog([]); setSpec(null); setPlan(null); setCost(null); setGoal(null); setPlanHidden(false);
   }
 
   return (
@@ -122,7 +124,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded }: 
           {busy && <div className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />thinking…</div>}
 
           {/* the plan-with-cost of a direct agent (BEA-1371/1372) */}
-          {plan && !spec && !planHidden && <PlanCard plan={plan} cost={cost} creating={creating} onCreate={create} onChange={changeSomething} onDismiss={() => setPlanHidden(true)} />}
+          {plan && !spec && !planHidden && <PlanCard plan={plan} cost={cost} goal={goal} creating={creating} onCreate={create} onChange={changeSomething} onDismiss={() => setPlanHidden(true)} />}
           {plan && !spec && planHidden && (
             <button onClick={() => setPlanHidden(false)} className="text-xs text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300" data-testid="plan-show-again">Show the plan again</button>
           )}
