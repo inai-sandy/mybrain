@@ -366,7 +366,9 @@ A per-creator answer goes through `itemsOf()`: a list → its items; a LIST-SHAP
 false}` — what a private/empty account answers, seen live) → 0 items, never one row of envelope; a single-object answer is ONE row via the same
 `unwrap` plain sources use — `{success, data:{user:{…}}}` IS the profile (BEA-1377: `data` is also a LIST_KEY and the old name-only check counted
 101 succeeded profile calls as "0 items"; the step now reads "N profiles fetched · N rows", and the tripwire `unrecognisedAnswer` makes the step say
-"fetched N answers but recognised 0 rows — this is a My Brain bug, not the vendor" whenever data arrived that no shape here could read) — and the date field is decided over EVERY creator's items together, or the first
+"fetched N answers but recognised 0 rows — this is a My Brain bug, not the vendor" whenever data arrived that no shape here could read; and `findList`
+runs only at the TOP of an answer — inside the wrapper it digs a profile's own `bio_links` out as "the list", which wrote 2 title/url junk rows per
+linked creator and LOST those profiles on the first live re-run) — and the date field is decided over EVERY creator's items together, or the first
 empty account switched "last 30 days" off for everyone (found on the first live creators run).
 Traps: `SocialAgentRunService`'s constructor gained `knowledge?: ToolKnowledgeService` LAST (positional harnesses); the finder id doubles as
 the block's key, so one job holds one creators block per finder action; `_pages` on an action that does not page costs one call and the step

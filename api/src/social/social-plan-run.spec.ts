@@ -279,8 +279,16 @@ describe('creators-first', () => {
     }, over.job);
     const profileAnswer = (who: string) => ({
       ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Get Instagram Profile',
-      // the live shape: the profile under data.user, envelope around it (run f76834e7)
-      data: { success: true, credits_charged: 1, data: { user: { pk: `pk-${who}`, id: `id-${who}`, username: who, full_name: `${who} Homes`, biography: `${who} builds smart homes`, follower_count: 12345, is_verified: false } } },
+      // The live shape (runs f76834e7 + 6785c4a5): the profile under data.user, envelope around it,
+      // and the profile CARRIES ARRAYS — bio_links (array of objects!), empty arrays, edge objects.
+      // The first live re-run pulled alpha's bio_links out as "the list" and wrote title/url junk
+      // rows instead of the profile; this fixture locks the real shape.
+      data: { success: true, credits_charged: 1, data: { user: {
+        pk: `pk-${who}`, id: `id-${who}`, username: who, full_name: `${who} Homes`, biography: `${who} builds smart homes`, follower_count: 12345, is_verified: false,
+        bio_links: who === 'alpha' ? [{ title: 'Website', url: 'https://example.com', link_type: 'external' }, { title: 'Shop', url: 'https://example.com/shop', link_type: 'external' }] : [],
+        regulated_news_in_locations: [], pronouns: [],
+        edge_followed_by: { count: 12345 }, hd_profile_pic_url_info: { url: 'https://cdn.example/p.jpg' },
+      } } },
     });
 
     it("the owner's shape: find search_profiles → profile (handle ← username) → 3 found → 3 rows with username/biography/follower_count and a creator column", async () => {
@@ -292,7 +300,8 @@ describe('creators-first', () => {
       expect(write.args.values).toHaveLength(1 + 3); // one row per creator — never 0
       for (const col of ['creator', 'username', 'biography', 'follower_count']) expect(header).toContain(col);
       const at = (row: any[], col: string) => row[header.indexOf(col)];
-      expect(write.args.values.slice(1).map((r: any[]) => at(r, 'username'))).toEqual(['alpha', 'beta', 'gamma']);
+      expect(write.args.values.slice(1).map((r: any[]) => at(r, 'username'))).toEqual(['alpha', 'beta', 'gamma']); // every row IS a profile — never a bio_links title/url row
+      expect(header).not.toContain('link_type'); // bio_links entries never become the rows
       expect(write.args.values.slice(1).map((r: any[]) => at(r, 'creator'))).toEqual(['alpha', 'beta', 'gamma']);
       expect(at(write.args.values[1], 'biography')).toBe('alpha builds smart homes');
       expect(at(write.args.values[1], 'follower_count')).toBe(12345);

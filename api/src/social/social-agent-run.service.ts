@@ -947,8 +947,15 @@ export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
 const plainObj = (v: any) => v && typeof v === 'object' && !Array.isArray(v);
 
 export function itemsOf(data: any, depth = 0): any[] {
-  const list = findList(data);
-  if (list) return list.rows;
+  // findList runs ONLY at the top: it digs one level into every key, and inside the vendor's
+  // wrapper that dig pulls a profile's own `bio_links` out as "the list" — the first live re-run
+  // (f768… → 6785…) wrote 2 title/url rows per creator with links and LOST those profiles. A real
+  // list under the wrapper (`{data:{items:[…]}}`) is already found from the top; past it only an
+  // empty list or a single object remains.
+  if (depth === 0) {
+    const list = findList(data);
+    if (list) return list.rows;
+  }
   if (Array.isArray(data)) return [];
   if (!data || typeof data !== 'object') return [];
   // The vendor's own envelope wraps the payload in `data` — judge what is INSIDE it, so a stray
