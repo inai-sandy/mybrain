@@ -4,9 +4,11 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { Agents, NewAgentForm } from './Agents';
 
 /**
- * BEA-1380 — folders on the Agents home: the rail/chips render All · folders · Unfiled with counts,
- * picking a folder narrows the grid, the card menu moves one agent, multi-select moves several, and
- * an agent created from inside a folder carries that folder onto the create call.
+ * BEA-1380 folders on the Agents home, laid out per BEA-1383: ONE horizontal chips row at every
+ * width (the laptop left rail is REMOVED) renders All · folders · Unfiled with counts and scrolls
+ * sideways inside its own container; picking a folder narrows the grid, the card menu moves one
+ * agent, multi-select moves several, and an agent created from inside a folder carries that folder
+ * onto the create call.
  */
 vi.mock('../ui/Toast', () => ({ useToast: () => vi.fn() }));
 vi.mock('../ui/DictateButton', () => ({ DictateButton: () => null }));
@@ -34,23 +36,43 @@ function mockApi(fetchMock: ReturnType<typeof vi.fn>) {
   });
 }
 
-describe('the folder rail + chips (BEA-1380)', () => {
+describe('the folder chips row (BEA-1380 · layout BEA-1383)', () => {
   const fetchMock = vi.fn();
   beforeEach(() => { fetchMock.mockReset(); (globalThis as any).fetch = fetchMock; mockApi(fetchMock); });
   afterEach(() => cleanup());
 
-  it('renders All · Work · Unfiled with counts, in both shapes', async () => {
+  it('renders ONE chips row — All · Work · Unfiled with counts + New folder — and no left rail at any width', async () => {
     render(<MemoryRouter initialEntries={['/agent']}><Agents /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByTestId('folder-rail')).toBeTruthy());
-    const rail = within(screen.getByTestId('folder-rail'));
-    expect(rail.getByText('All')).toBeTruthy();
-    expect(rail.getByText('Work')).toBeTruthy();
-    expect(rail.getByText('Unfiled')).toBeTruthy();
-    // counts: All 2 · Work 1 · Unfiled 1
-    expect(rail.getByText('2')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('folder-chips')).toBeTruthy());
+    // The BEA-1380 laptop left rail is gone for good (BEA-1383) — one shape at every width.
+    expect(screen.queryByTestId('folder-rail')).toBeNull();
     const chips = within(screen.getByTestId('folder-chips'));
+    expect(chips.getByText('All')).toBeTruthy();
     expect(chips.getByText('Work')).toBeTruthy();
     expect(chips.getByText('Unfiled')).toBeTruthy();
+    expect(chips.getByText('New folder')).toBeTruthy();
+    // counts: All 2 · Work 1 · Unfiled 1
+    expect(chips.getByText('2')).toBeTruthy();
+    expect(chips.getAllByText('1').length).toBe(2);
+  });
+
+  it('the row scrolls sideways inside its own container (overflow-x-auto), never the page', async () => {
+    render(<MemoryRouter initialEntries={['/agent']}><Agents /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId('folder-chips')).toBeTruthy());
+    const row = screen.getByRole('tablist', { name: 'Agent folders' });
+    expect(row.className).toContain('overflow-x-auto');
+    // Chips must not wrap into a tall block.
+    expect(row.className).not.toContain('flex-wrap');
+  });
+
+  it('rename + delete stay reachable from the ACTIVE folder chip', async () => {
+    render(<MemoryRouter initialEntries={['/agent']}><Agents /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId('folder-chips')).toBeTruthy());
+    const chips = within(screen.getByTestId('folder-chips'));
+    expect(chips.queryByLabelText('Rename folder Work')).toBeNull(); // not active yet
+    fireEvent.click(chips.getByText('Work'));
+    await waitFor(() => expect(chips.getByLabelText('Rename folder Work')).toBeTruthy());
+    expect(chips.getByLabelText('Delete folder Work')).toBeTruthy();
   });
 
   it('picking a folder shows only its agents; Unfiled shows the rest; All shows everything', async () => {
@@ -58,15 +80,15 @@ describe('the folder rail + chips (BEA-1380)', () => {
     await waitFor(() => expect(screen.getByText('Radar')).toBeTruthy());
     expect(screen.getByText('Sheets')).toBeTruthy();
 
-    fireEvent.click(within(screen.getByTestId('folder-rail')).getByText('Work'));
+    fireEvent.click(within(screen.getByTestId('folder-chips')).getByText('Work'));
     await waitFor(() => expect(screen.queryByText('Sheets')).toBeNull());
     expect(screen.getByText('Radar')).toBeTruthy();
 
-    fireEvent.click(within(screen.getByTestId('folder-rail')).getByText('Unfiled'));
+    fireEvent.click(within(screen.getByTestId('folder-chips')).getByText('Unfiled'));
     await waitFor(() => expect(screen.queryByText('Radar')).toBeNull());
     expect(screen.getByText('Sheets')).toBeTruthy();
 
-    fireEvent.click(within(screen.getByTestId('folder-rail')).getByText('All'));
+    fireEvent.click(within(screen.getByTestId('folder-chips')).getByText('All'));
     await waitFor(() => expect(screen.getByText('Radar')).toBeTruthy());
     expect(screen.getByText('Sheets')).toBeTruthy();
   });
