@@ -23,7 +23,7 @@ export type BuilderSeed = { tool: string; args: Record<string, any>; label?: str
  * with the builder's own first line about the call just made; "Repeat exactly this call" keeps
  * the pre-filled form one tap away.
  */
-export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded }: { onCreated: (url: string) => void; onUseForm: () => void; onClose: () => void; seed?: BuilderSeed | null; onSeeded?: () => void }) {
+export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, folderId }: { onCreated: (url: string) => void; onUseForm: () => void; onClose: () => void; seed?: BuilderSeed | null; onSeeded?: () => void; folderId?: string | null }) {
   const toast = useToast();
   const [log, setLog] = useState<BuilderLine[]>([]);
   const [spec, setSpec] = useState<any>(null);
@@ -87,7 +87,8 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded }: 
     if ((!spec && !plan) || creating) return;
     setCreating(true);
     try {
-      const r = await fetch('/api/agent/builder/create', { method: 'POST' });
+      // Created from inside a folder → the new agent lands in that folder (BEA-1380).
+      const r = await fetch('/api/agent/builder/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(folderId ? { folderId } : {}) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not create');
       toast('success', 'Agent created 🎉');

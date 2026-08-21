@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X, Send, Pencil, MoreHorizontal, Copy, Check } from 'lucide-react';
+import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X, Send, Pencil, MoreHorizontal, Copy, Check, CheckSquare, Square, FolderInput } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Sheet } from '../ui/Sheet';
 import { GrowTextarea } from '../ui/GrowTextarea';
@@ -13,6 +13,7 @@ import { AgentBuilder, BuilderSeed } from './AgentBuilder';
 import { EMPTY_THRESHOLD, KEEP_AS_FETCHED, OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdOfDraft } from '../ui/agentJobFields';
 import { AddSourcePanel, SocialSource } from './social/AddSourcePanel';
 import { sourceIdFor, toolArgsOf, toolsOf } from '../ui/toolArgs';
+import { AgentFolder, FolderNav, FolderPickerSheet, FolderSel, folderCounts, inFolder } from '../ui/AgentFolders';
 
 /** What a Social result hands the builder (BEA-1357): the tool, the exact arguments just used, a label. */
 export type SocialPrefill = { tool: string; args: Record<string, any>; label?: string; mode?: string };
@@ -193,7 +194,7 @@ function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; on
  * The ordinary operations on an agent, reachable from the list (BEA-1182) — the owner went looking
  * for rename and delete and couldn't find them, because they were buried inside the agent's page.
  */
-function AgentCardMenu({ area, onChanged }: { area: any; onChanged: () => void }) {
+function AgentCardMenu({ area, onChanged, onMoveToFolder }: { area: any; onChanged: () => void; onMoveToFolder?: () => void }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -239,6 +240,7 @@ function AgentCardMenu({ area, onChanged }: { area: any; onChanged: () => void }
     <>
       <button
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
         aria-label={`Actions for ${area.name}`}
         className="absolute right-2 top-2 z-10 rounded-lg p-1.5 text-zinc-400 opacity-100 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 sm:opacity-0 sm:group-hover:opacity-100"
       >
@@ -248,6 +250,7 @@ function AgentCardMenu({ area, onChanged }: { area: any; onChanged: () => void }
         <div onClick={(e) => e.stopPropagation()} className="absolute right-2 top-10 z-20 w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
           <button onClick={() => { setOpen(false); setEditing(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-3.5 w-3.5 text-zinc-400" />Rename &amp; edit</button>
           <button onClick={() => { setOpen(false); duplicate(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Copy className="h-3.5 w-3.5 text-zinc-400" />Duplicate</button>
+          {onMoveToFolder && <button onClick={() => { setOpen(false); onMoveToFolder(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><FolderInput className="h-3.5 w-3.5 text-zinc-400" />Move to folder…</button>}
           <button onClick={() => { setOpen(false); remove(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"><Trash2 className="h-3.5 w-3.5" />Delete</button>
         </div>
       )}
@@ -366,7 +369,7 @@ function ImportGithubModal({ onDone, onClose }: { onDone: (url?: string) => void
   );
 }
 
-export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: { initial?: Starter | null; areaId?: string; social?: SocialPrefill | null; onCreated: (id?: string) => void; onCancel: () => void }) {
+export function NewAgentForm({ initial, areaId, social, folderId, onCreated, onCancel }: { initial?: Starter | null; areaId?: string; social?: SocialPrefill | null; folderId?: string | null; onCreated: (id?: string) => void; onCancel: () => void }) {
   const toast = useToast();
   // A Social handoff (BEA-1357) skips the "describe it" step: the tool and its arguments ARE the job.
   const [step, setStep] = useState<'describe' | 'form'>(social ? 'form' : 'describe');
@@ -457,6 +460,7 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
           name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, defaultDepth, evals: evalCases, schedule, scheduleText,
           icon, color: color || undefined, category: category || undefined, description: description.trim() || undefined, autonomy,
           ...(areaId ? { areaId } : {}), // creating a job inside an existing agent (BEA-1098)
+          ...(folderId ? { folderId } : {}), // created from inside a folder → it lands there (BEA-1380)
           ...(draftTools.length ? { tools: draftTools } : {}), // inferred toolbox → the area's Tools section (BEA-1100)
           outputDest, sheetId: sheetId.trim() || null, sheetAppend: outputDest === 'sheet' && !sheetId.trim() && sheetAppend, notifyWhatsApp, // BEA-1357 · BEA-1374
           // A Social job (BEA-1357): the sources — each its action id + exact arguments, keyed by source id (BEA-1374) — run directly, no engine turn.
@@ -596,8 +600,6 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
   );
 }
 
-const CATEGORY_ORDER = ['Daily', 'Research', 'People', 'Brain care', 'Imported', 'Other'];
-
 /** One template card on the shelf gallery (BEA-1064): icon, what it does, example runs, rhythm. */
 function StarterCard({ s, onPick }: { s: Starter; onPick: (s: Starter) => void }) {
   return (
@@ -657,7 +659,17 @@ export function Agents() {
   const [agentPage, setAgentPage] = useState(1);
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
   const [showBuilder, setShowBuilder] = useState((params.get('builder') === '1' && !readSocialPrefill(params)) || params.get('builder') === 'chat'); // chat builder (BEA-1104); `?builder=1` alone opens it; `builder=chat` = the Social hand-off (BEA-1372)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // big shelf groups expanded (BEA-1083)
+  // Folders (BEA-1380): flat, owner-made. The selection lives in the URL (`?folder=<id|unfiled>`)
+  // so Back and refresh land where you were; null = All. The auto-category shelves are retired —
+  // folders are the ONE organizing idea on this screen (Agent.category stays in the data for colors).
+  const folderSel: FolderSel = params.get('folder');
+  const [folders, setFolders] = useState<AgentFolder[] | null>(null);
+  const loadFolders = useCallback(() => fetch('/api/agent/folders').then((r) => r.json()).then((d) => setFolders(Array.isArray(d?.folders) ? d.folders : [])).catch(() => setFolders((p) => p || [])), []);
+  useEffect(() => { loadFolders(); }, [loadFolders]);
+  // Multi-select (BEA-1380): checkbox at laptop widths, long-press on the phone; a bar moves them together.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pickerFor, setPickerFor] = useState<{ kind: 'one'; id: string; name: string } | { kind: 'bulk' } | null>(null);
+  const longPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean }>({ timer: null, fired: false });
   // Slim one-tap push opt-in (BEA-1088) — shown while this device could get notifications but isn't
   // subscribed yet (covers both "never asked" and "allowed but not registered").
   const [pushNudge, setPushNudge] = useState(false);
@@ -767,6 +779,75 @@ export function Agents() {
   const loadAreas = useCallback(() => fetch('/api/agent/areas').then((r) => r.json()).then((d) => setAreasList(Array.isArray(d) ? d : [])).catch(() => setAreasList([])), []);
   useEffect(() => { loadAreas(); }, [loadAreas]);
 
+  // ---- Folders (BEA-1380) ----
+  const realFolderId = folderSel && folderSel !== 'unfiled' ? folderSel : null; // where a new agent lands
+  function setFolder(sel: FolderSel) {
+    const p = new URLSearchParams(params);
+    if (sel) p.set('folder', sel); else p.delete('folder');
+    setParams(p, { replace: true });
+    setAgentPage(1);
+    setSelected(new Set());
+  }
+  async function createFolderReturning(name: string): Promise<AgentFolder | null> {
+    try {
+      const r = await fetch('/api/agent/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not make the folder');
+      await loadFolders();
+      return d;
+    } catch (e: any) { toast('error', e?.message || 'Could not make the folder'); return null; }
+  }
+  async function createFolder(name: string): Promise<boolean> {
+    const made = await createFolderReturning(name);
+    if (made) { toast('success', `Folder "${made.name}" made`); setFolder(made.id); }
+    return !!made;
+  }
+  async function renameFolder(id: string, name: string): Promise<boolean> {
+    const r = await fetch(`/api/agent/folders/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { toast('error', d.message || 'Could not rename'); return false; }
+    loadFolders();
+    return true;
+  }
+  async function deleteFolder(id: string) {
+    const f = (folders || []).find((x) => x.id === id);
+    const n = areasList ? areasList.filter((a: any) => a.folderId === id).length : 0;
+    // Deleting a folder NEVER deletes agents — the dialog says so (BEA-1380).
+    const msg = n === 0
+      ? `Delete the empty folder "${f?.name || ''}"?`
+      : `Delete the folder "${f?.name || ''}"? Its ${n} agent${n === 1 ? '' : 's'} move to Unfiled — nothing is deleted.`;
+    if (!window.confirm(msg)) return;
+    const r = await fetch(`/api/agent/folders/${id}`, { method: 'DELETE' });
+    if (!r.ok) { toast('error', 'Could not delete the folder'); return; }
+    if (folderSel === id) setFolder(null);
+    toast('success', n > 0 ? `Folder deleted — ${n} agent${n === 1 ? '' : 's'} back in Unfiled` : 'Folder deleted');
+    loadFolders(); loadAreas();
+  }
+  async function moveToFolder(ids: string[], folderId: string | null) {
+    try {
+      const r = ids.length === 1
+        ? await fetch(`/api/agent/areas/${ids[0]}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId }) })
+        : await fetch('/api/agent/areas/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, folderId }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not move');
+      const fname = folderId ? (folders || []).find((x) => x.id === folderId)?.name || 'that folder' : 'Unfiled';
+      toast('success', `Moved ${ids.length === 1 ? '' : ids.length + ' agents '}to ${fname}`);
+      setSelected(new Set());
+      loadAreas(); loadFolders();
+    } catch (e: any) { toast('error', e?.message || 'Could not move'); }
+  }
+  function toggleSelected(id: string) {
+    setSelected((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  // Long-press at 390 starts multi-select (BEA-1380); the flag swallows the click that follows.
+  function pressStart(id: string) {
+    longPressRef.current.fired = false;
+    longPressRef.current.timer = setTimeout(() => { longPressRef.current.fired = true; toggleSelected(id); }, 500);
+  }
+  function pressEnd() {
+    if (longPressRef.current.timer) { clearTimeout(longPressRef.current.timer); longPressRef.current.timer = null; }
+  }
+
   // The page is about your agents now (BEA-1181), so the subtitle counts THEM — not today's runs.
   const greet = home
     ? [
@@ -815,13 +896,14 @@ export function Agents() {
         </div>
       </header>
 
-      {/* Floating "Quick ask" — a one-off run without saving an agent (capture pattern, BEA-698) */}
-      <button
+      {/* Floating "Quick ask" — a one-off run without saving an agent (capture pattern, BEA-698).
+          Hidden while multi-select is on: the move bar owns the bottom of the screen (BEA-1380). */}
+      {selected.size === 0 && <button
         onClick={() => setShowAsk(true)}
         className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg transition-colors hover:bg-emerald-500"
       >
         <Sparkles className="h-4 w-4" />Quick ask
-      </button>
+      </button>}
 
       {showAsk && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={() => !starting && setShowAsk(false)}>
@@ -872,9 +954,22 @@ export function Agents() {
             <button onClick={() => setShowBuilder(true)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New agent</button>
           </div>
         </div>
-        {showImport && <ImportGithubModal onDone={(url) => { setShowImport(false); loadHome(); loadAreas(); if (url) nav(url); }} onClose={() => setShowImport(false)} />}
-        {showBuilder && <AgentBuilder seed={builderSeed} onSeeded={dropSeedParam} onCreated={(url) => { setShowBuilder(false); clearBuilderParams(); loadHome(); loadAreas(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); if (builderSeed) { const p = new URLSearchParams(params); p.set('builder', '1'); p.delete('sample'); setParams(p, { replace: true }); } setShowNew(true); }} onClose={() => { setShowBuilder(false); clearBuilderParams(); }} />}
-        {showNew && <NewAgentForm initial={starterPick} social={socialPrefill} onCreated={(id) => { setShowNew(false); setStarterPick(null); clearBuilderParams(); loadHome(); loadAreas(); if (id && socialPrefill) nav(`/agent/a/${id}`); }} onCancel={() => { setShowNew(false); setStarterPick(null); clearBuilderParams(); }} />}
+        {showImport && <ImportGithubModal onDone={(url) => { setShowImport(false); loadHome(); loadAreas(); loadFolders(); if (url) nav(url); }} onClose={() => setShowImport(false)} />}
+        {showBuilder && <AgentBuilder seed={builderSeed} folderId={realFolderId} onSeeded={dropSeedParam} onCreated={(url) => { setShowBuilder(false); clearBuilderParams(); loadHome(); loadAreas(); loadFolders(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); if (builderSeed) { const p = new URLSearchParams(params); p.set('builder', '1'); p.delete('sample'); setParams(p, { replace: true }); } setShowNew(true); }} onClose={() => { setShowBuilder(false); clearBuilderParams(); }} />}
+        {showNew && <NewAgentForm initial={starterPick} social={socialPrefill} folderId={realFolderId} onCreated={(id) => { setShowNew(false); setStarterPick(null); clearBuilderParams(); loadHome(); loadAreas(); loadFolders(); if (id && socialPrefill) nav(`/agent/a/${id}`); }} onCancel={() => { setShowNew(false); setStarterPick(null); clearBuilderParams(); }} />}
+        {/* Folders (BEA-1380): chips row on the phone, left rail on the laptop — All · folders · Unfiled. */}
+        <div className="lg:flex lg:items-start lg:gap-6">
+          {folders !== null && areasList !== null && (areasList.length > 0 || folders.length > 0) && (
+            <aside className="hidden w-52 shrink-0 lg:block">
+              <FolderNav variant="rail" folders={folders} counts={folderCounts(areasList)} active={folderSel} onSelect={setFolder} onCreate={createFolder} onRename={renameFolder} onDelete={deleteFolder} />
+            </aside>
+          )}
+          <div className="min-w-0 flex-1 space-y-3">
+            {folders !== null && areasList !== null && (areasList.length > 0 || folders.length > 0) && (
+              <div className="lg:hidden">
+                <FolderNav variant="chips" folders={folders} counts={folderCounts(areasList)} active={folderSel} onSelect={setFolder} onCreate={createFolder} onRename={renameFolder} onDelete={deleteFolder} />
+              </div>
+            )}
         {areasList === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
         ) : areasList.length === 0 ? (
@@ -889,9 +984,11 @@ export function Agents() {
         ) : (() => {
           // Areas grid (BEA-1098): each tile is a whole agent; its jobs live inside.
           // Search · filter · sort · count · pagination — ALWAYS on, never behind a threshold
-          // (BEA-1183). A list with one item still shows its controls.
+          // (BEA-1183). A list with one item still shows its controls. The selected folder narrows
+          // the scope first (BEA-1380): All searches everything, a folder searches that folder.
+          const scope = inFolder(areasList as any[], folderSel);
           const needle = q.trim().toLowerCase();
-          const matched = areasList.filter((ar) => {
+          const matched = scope.filter((ar) => {
             if (needle && !(ar.name + ' ' + (ar.description || '') + ' ' + ar.jobs.map((j: any) => j.name).join(' ')).toLowerCase().includes(needle)) return false;
             const jobs = ar.jobs || [];
             if (agentFilter === 'waiting') return jobs.some((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
@@ -933,7 +1030,7 @@ export function Agents() {
                   <option value="name">By name</option>
                   <option value="jobs">Most jobs</option>
                 </select>
-                <span className="shrink-0 text-xs text-zinc-400">{narrowed ? `${sorted.length} of ${areasList.length}` : `${areasList.length}`}</span>
+                <span className="shrink-0 text-xs text-zinc-400">{narrowed ? `${sorted.length} of ${scope.length}` : `${scope.length}`}</span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {filtered.map((ar) => {
@@ -941,11 +1038,21 @@ export function Agents() {
                   const runningJob = ar.jobs.find((j: any) => j.lastRun?.status === 'running');
                   const waitingJob = ar.jobs.find((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
                   const lastDone = ar.jobs.map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
+                  const isSel = selected.has(ar.id);
+                  const selectMode = selected.size > 0;
                   return (
-                    <div key={ar.id} style={{ borderLeftColor: color }} className="group relative flex flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
-                    {/* Rename · duplicate · delete, right where you can see them (BEA-1182). */}
-                    <AgentCardMenu area={ar} onChanged={() => { loadAreas(); loadHome(); }} />
-                    <button onClick={() => nav(`/agent/ar/${ar.id}`)} className="flex flex-1 flex-col text-left">
+                    <div key={ar.id} style={{ borderLeftColor: color }}
+                      onTouchStart={() => pressStart(ar.id)} onTouchEnd={pressEnd} onTouchMove={pressEnd} onTouchCancel={pressEnd}
+                      className={'group relative flex select-none flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all touch-manipulation hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900 ' + (isSel ? 'ring-2 ring-emerald-500' : '')}>
+                    {/* Rename · duplicate · move to folder · delete, right where you can see them (BEA-1182 / BEA-1380). */}
+                    <AgentCardMenu area={ar} onChanged={() => { loadAreas(); loadHome(); loadFolders(); }} onMoveToFolder={() => setPickerFor({ kind: 'one', id: ar.id, name: ar.name })} />
+                    {/* Multi-select (BEA-1380): a checkbox on hover at laptop widths; long-press starts it on the phone. */}
+                    <button onClick={(e) => { e.stopPropagation(); toggleSelected(ar.id); }} aria-label={`Select ${ar.name}`} aria-pressed={isSel}
+                      onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
+                      className={'absolute right-9 top-2 z-10 rounded-lg p-1.5 transition-opacity focus-visible:pointer-events-auto focus-visible:opacity-100 ' + (selectMode ? 'opacity-100 ' : 'pointer-events-none opacity-0 sm:group-hover:pointer-events-auto sm:group-hover:opacity-100 ') + (isSel ? 'text-emerald-600' : 'text-zinc-400 hover:text-emerald-600')}>
+                      {isSel ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                    </button>
+                    <button onClick={() => { if (longPressRef.current.fired) { longPressRef.current.fired = false; return; } if (selectMode) toggleSelected(ar.id); else nav(`/agent/ar/${ar.id}`); }} className="flex flex-1 flex-col text-left">
                       <div className="flex items-start gap-2.5">
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: color + '22' }}>{ar.icon || '🤖'}</span>
                         <span className="min-w-0 flex-1">
@@ -966,10 +1073,18 @@ export function Agents() {
                 })}
               </div>
               {filtered.length === 0 && (
-                <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
-                  Nothing matches{needle ? ` “${q}”` : ' that filter'}.{' '}
-                  <button onClick={() => { setQ(''); setAgentFilter('all'); setAgentPage(1); }} className="text-emerald-600 hover:underline">Clear</button>
-                </div>
+                scope.length === 0 && !narrowed ? (
+                  // An empty folder (BEA-1380) — say how to fill it rather than "nothing matches".
+                  <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
+                    {folderSel === 'unfiled' ? 'Nothing is unfiled — every agent sits in a folder.' : 'This folder is empty — open an agent card’s ⋯ menu and pick "Move to folder…", or create a new agent while you’re in here.'}{' '}
+                    <button onClick={() => setFolder(null)} className="text-emerald-600 hover:underline">Show all</button>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
+                    Nothing matches{needle ? ` “${q}”` : ' that filter'}{folderSel ? ' in this folder' : ''}.{' '}
+                    <button onClick={() => { setQ(''); setAgentFilter('all'); setAgentPage(1); }} className="text-emerald-600 hover:underline">Clear</button>
+                  </div>
+                )
               )}
               {pages > 1 && (
                 <div className="flex items-center justify-center gap-2 pt-1">
@@ -981,7 +1096,29 @@ export function Agents() {
             </div>
           );
         })()}
+          </div>
+        </div>
       </section>
+
+      {/* Multi-select move bar (BEA-1380) — floats while anything is ticked. */}
+      {selected.size > 0 && (
+        <div data-testid="bulk-bar" className="fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 sm:bottom-6">
+          <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white py-1.5 pl-4 pr-1.5 text-sm shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+            <span className="whitespace-nowrap font-medium">{selected.size} selected</span>
+            <button onClick={() => setPickerFor({ kind: 'bulk' })} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"><FolderInput className="h-3.5 w-3.5" />Move to…</button>
+            <button onClick={() => setSelected(new Set())} aria-label="Clear selection" className="rounded-full p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+          </div>
+        </div>
+      )}
+      {pickerFor && folders !== null && (
+        <FolderPickerSheet
+          folders={folders}
+          title={pickerFor.kind === 'bulk' ? `Move ${selected.size} agent${selected.size === 1 ? '' : 's'} to…` : `Move "${pickerFor.name}" to…`}
+          onPick={(fid) => { const ids = pickerFor.kind === 'bulk' ? [...selected] : [pickerFor.id]; setPickerFor(null); moveToFolder(ids, fid); }}
+          onCreate={createFolderReturning}
+          onClose={() => setPickerFor(null)}
+        />
+      )}
       {/* ⚡ Needs you — kept below the grid (BEA-1181): a job waiting on your answer is a blocker,
           so it must never be hidden, but the agents themselves are what this page is for.
           "Running now" and "Landed today" were removed — they live in History. */}

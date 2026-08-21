@@ -279,7 +279,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   // ---------- saved agents (BEA-623) ----------
 
   async createAgent(
-    input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; sheetAppend?: boolean; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown },
+    input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; sheetAppend?: boolean; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown; folderId?: string | null },
     // `drawFlow:false` — the caller draws (and plans) the picture itself, e.g. the voice research
     // job, which links its own flow so it can plan inside the toolbox in one pass (BEA-1366).
     opts: { drawFlow?: boolean } = {},
@@ -341,8 +341,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
               status: t?.status === 'installed' ? 'installed' : 'needed',
             })).filter((t: any) => t.name)
           : [];
+        // Created from inside a folder (BEA-1380) → its card lands in that folder; a stale/unknown
+        // folder id degrades to Unfiled (the create itself must never fail on it).
+        const wantFolder = typeof (input as any).folderId === 'string' && (input as any).folderId ? String((input as any).folderId) : null;
+        const folder = wantFolder ? await Promise.resolve((this.prisma as any).agentFolder?.findUnique?.({ where: { id: wantFolder } })).catch(() => null) : null;
         const area = await (this.prisma as any).agentArea.create({
-          data: { name: a.name, icon: a.icon, color: a.color, description: a.description, sourceUrl: (a as any).sourceUrl ?? null, tools: JSON.stringify(tools) },
+          data: { name: a.name, icon: a.icon, color: a.color, description: a.description, sourceUrl: (a as any).sourceUrl ?? null, tools: JSON.stringify(tools), ...(folder ? { folderId: folder.id } : {}) },
         });
         await this.prisma.agent.update({ where: { id: a.id }, data: { areaId: area.id } as any });
         (a as any).areaId = area.id;
@@ -384,7 +388,16 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   async getAgent(id: string) {
     const a = await this.prisma.agent.findUnique({ where: { id } });
     if (!a) throw new NotFoundException('Agent not found');
-    return this.shapeAgent(a);
+    const shaped: any = this.shapeAgent(a);
+    // The job page's folder crumb (BEA-1380): the folder its agent card sits in, when there is one.
+    if ((a as any).areaId) {
+      const area: any = await Promise.resolve((this.prisma as any).agentArea?.findUnique?.({ where: { id: (a as any).areaId } })).catch(() => null);
+      if (area?.folderId) {
+        const f: any = await Promise.resolve((this.prisma as any).agentFolder?.findUnique?.({ where: { id: area.folderId } })).catch(() => null);
+        if (f) shaped.folder = { id: f.id, name: f.name };
+      }
+    }
+    return shaped;
   }
 
   /**
