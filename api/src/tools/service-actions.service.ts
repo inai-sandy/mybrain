@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { ComposioProvider } from './composio.provider';
 import { ScrapeCreatorsProvider } from './scrapecreators.provider';
+import { WhatsAppProvider } from './whatsapp.provider';
 import { ExecuteResult, parseServiceToolId, ServiceAccount, ServiceAction, ServiceProvider } from './service-provider';
 import { GatePause, PendingGate, ServiceGatesService } from './service-gates.service';
 
@@ -109,6 +110,9 @@ export class ServiceActionsService {
     // The second provider (BEA-1355). An action is routed to it only when it says the id is one
     // of its own — exact ids, never a guess — and everything else goes where it always went.
     private readonly social?: ScrapeCreatorsProvider,
+    // The third (BEA-1384): WhatsApp owns every `svc:whatsapp.*` id — the general provider blocks
+    // that service on purpose (it is ours), so nothing else can ever answer for it.
+    private readonly whatsapp?: WhatsAppProvider,
   ) {
     this.gates = gates || new ServiceGatesService(prisma, provider);
   }
@@ -123,6 +127,11 @@ export class ServiceActionsService {
       if (this.social?.owns && (await this.social.owns(actionId))) return this.social as any;
     } catch {
       /* an unreachable second provider must never take the first one down with it */
+    }
+    try {
+      if (this.whatsapp?.owns && this.whatsapp.owns(actionId)) return this.whatsapp as any;
+    } catch {
+      /* same rule for the third */
     }
     return this.provider as any;
   }

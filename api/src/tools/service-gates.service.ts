@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ComposioProvider } from './composio.provider';
+import { WhatsAppProvider } from './whatsapp.provider';
 import { isRiskyAction, parseServiceToolId, ServiceAction, ServiceProvider } from './service-provider';
 
 /**
@@ -74,6 +75,9 @@ export class ServiceGatesService {
     // Optional + LAST — spec files build the services around this one positionally.
     private readonly prisma?: PrismaService,
     private readonly provider?: ComposioProvider,
+    // WhatsApp's gated sends live on its own provider (BEA-1384) — the general one blocks the
+    // whole service, so `listForService('whatsapp')` must read the list from here.
+    private readonly whatsapp?: WhatsAppProvider,
   ) {}
 
   // ---- the decision -------------------------------------------------------------------------
@@ -249,7 +253,7 @@ export class ServiceGatesService {
    */
   async listForService(slug: string): Promise<{ service: string; actions: { id: string; name: string; description?: string; released: boolean; retired?: boolean }[] }> {
     const service = String(slug || '').toLowerCase();
-    const p: ServiceProvider = this.provider as any;
+    const p: ServiceProvider = (service === 'whatsapp' && this.whatsapp ? this.whatsapp : this.provider) as any;
     const actions: ServiceAction[] = p?.listActions ? await p.listActions(service).catch(() => [] as ServiceAction[]) : [];
     const releasedRows = (await this.prisma?.serviceGate?.findMany?.({ where: { service, scope: 'always' } }).catch(() => [])) || [];
     const released = new Set<string>(releasedRows.map((r: any) => r.action));

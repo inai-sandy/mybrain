@@ -5,7 +5,7 @@ import { Column, DataTable, SortOption } from '../ui/DataTable';
 import { Skeleton } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
 import { useUrlState } from '../ui/useUrlState';
-import { CHIP, CreditStrip, Endpoint, FieldInput, argsOf, GHOST_BTN, INPUT, NoKeyNotice, Notice, Platform, PlatformLogo, PRIMARY_BTN, RunResult, Spend, fieldsOf, num, plural } from './social/socialShared';
+import { CHIP, CreditStrip, Endpoint, FieldInput, argsOf, GHOST_BTN, INPUT, NoKeyNotice, Notice, Platform, PlatformConnection, PlatformLogo, PRIMARY_BTN, RunResult, SocialGate, Spend, fieldsOf, num, plural } from './social/socialShared';
 import { cell, format, heading, pickColumns, shapeOf, toMarkdown } from './social/resultShape';
 import { ToolFacts } from '../ui/ToolFacts';
 
@@ -26,7 +26,7 @@ import { ToolFacts } from '../ui/ToolFacts';
  * wraps or scrolls INSIDE its own box, and the page itself never scrolls sideways.
  */
 
-type PageData = { platform: Platform | null; actions: Endpoint[]; message?: string };
+type PageData = { platform: Platform | null; actions: Endpoint[]; message?: string; connection?: PlatformConnection };
 
 /** One row of the endpoint list, with the flat fields the table searches and sorts on. */
 type Row = Endpoint & { _search: string; _tag: string; _order: number; _cost: number; _params: number };
@@ -116,7 +116,13 @@ export function SocialPlatform() {
   }, [groups, rows, q, tag]);
 
   const status = spend?.status;
-  const noKey = !!status && !status.configured;
+  // A platform on its own provider (WhatsApp) carries its OWN connection state — the scraping key
+  // being missing must never grey it out, and the other way round (BEA-1384).
+  const connection = data?.connection;
+  const noKey = connection ? !connection.configured : !!status && !status.configured;
+  /** FALSE = no credits here (WhatsApp): the credit strip and the cost chips make no sense. */
+  const metered = data?.platform ? data.platform.metered !== false : true;
+  const hasSends = (data?.actions || []).some((a) => a.risky);
 
   return (
     <div className="space-y-5 pb-16">
@@ -153,15 +159,23 @@ export function SocialPlatform() {
               <h1 className="truncate text-2xl font-extrabold">{platform.name}</h1>
               <p className="text-sm text-zinc-500">
                 <span data-testid="endpoint-count">{plural(actions.length, 'endpoint')}</span>
-                {groups.length > 1 && <> in {plural(groups.length, 'group')}</>} · every one is a read, none asks a confirm
+                {groups.length > 1 && <> in {plural(groups.length, 'group')}</>} · {hasSends ? 'reads run at once — a send stops and asks first' : 'every one is a read, none asks a confirm'}
               </p>
             </div>
           </header>
 
-          <CreditStrip balance={spend?.balance ?? null} spentToday={spend?.spentToday ?? 0} ceiling={spend?.ceiling ?? null} status={status} compact />
+          {metered && <CreditStrip balance={spend?.balance ?? null} spentToday={spend?.spentToday ?? 0} ceiling={spend?.ceiling ?? null} status={status} compact />}
 
-          {noKey && <NoKeyNotice />}
-          {status && status.configured && !status.reachable && (
+          {noKey && metered && <NoKeyNotice />}
+          {noKey && !metered && (
+            <Notice
+              tone="warn"
+              icon={<AlertTriangle size={20} />}
+              title={`${platform.name} is not set up on this server yet`}
+              body={(connection?.message || 'The server token is missing.') + ' You can browse every action below, but nothing can run until the owner adds the token to the server settings.'}
+            />
+          )}
+          {metered && status && status.configured && !status.reachable && (
             <Notice
               tone="warn"
               icon={<AlertTriangle size={20} />}
@@ -219,6 +233,7 @@ export function SocialPlatform() {
                         open={open === r.id}
                         onToggle={() => setOpen(open === r.id ? '' : r.id)}
                         noKey={noKey}
+                        metered={metered}
                         topUpUrl={spend?.topUpUrl}
                         onRan={refreshSpend}
                       />
@@ -254,7 +269,7 @@ function TagChip({ on, onClick, children }: { on: boolean; onClick: () => void; 
 
 // ---- one endpoint -----------------------------------------------------------------------------
 
-function EndpointCard({ e, platform, open, onToggle, noKey, topUpUrl, onRan }: { e: Endpoint; platform: Platform; open: boolean; onToggle: () => void; noKey: boolean; topUpUrl?: string; onRan: () => void }) {
+function EndpointCard({ e, platform, open, onToggle, noKey, metered, topUpUrl, onRan }: { e: Endpoint; platform: Platform; open: boolean; onToggle: () => void; noKey: boolean; metered: boolean; topUpUrl?: string; onRan: () => void }) {
   const props = e.schema?.properties || {};
   const required = e.schema?.required || [];
   const nParams = Object.keys(props).length;
@@ -264,14 +279,17 @@ function EndpointCard({ e, platform, open, onToggle, noKey, topUpUrl, onRan }: {
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="min-w-0 font-semibold leading-snug break-words">{e.name}</h3>
-            {e.method && e.method !== 'GET' && <span className={CHIP + ' bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'}>{e.method}</span>}
+            {metered && e.method && e.method !== 'GET' && <span className={CHIP + ' bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'}>{e.method}</span>}
+            {e.risky && <span className={CHIP + ' bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'} title="This cannot be undone, so it stops and asks before running." data-testid="risky-chip">asks first</span>}
             {e.retired && <span className={CHIP + ' bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'} title="The vendor has retired this endpoint. It is still listed so nothing is skipped.">retired</span>}
           </div>
           {e.description && !open && <p className="mt-1 line-clamp-2 break-words text-sm text-zinc-500 dark:text-zinc-400">{e.description}</p>}
           <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
-            <span className={CHIP + ' bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'} title={e.costHint || 'Most endpoints cost 1 credit; the real cost is shown after each run.'}>
-              <Coins size={11} /> {e.costHint ? plural(costOf(e.costHint), 'credit') : '~1 credit'}
-            </span>
+            {metered && (
+              <span className={CHIP + ' bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'} title={e.costHint || 'Most endpoints cost 1 credit; the real cost is shown after each run.'}>
+                <Coins size={11} /> {e.costHint ? plural(costOf(e.costHint), 'credit') : '~1 credit'}
+              </span>
+            )}
             <span>{nParams === 0 ? 'No inputs' : `${plural(nParams, 'input')}${required.length ? ` · ${required.length} required` : ''}`}</span>
             {e.path && <code className="min-w-0 truncate font-mono text-[11px] text-zinc-400">{e.path}</code>}
           </div>
@@ -281,10 +299,10 @@ function EndpointCard({ e, platform, open, onToggle, noKey, topUpUrl, onRan }: {
       {open && (
         <div className="border-t border-zinc-100 p-3 dark:border-zinc-800 sm:p-4">
           {e.description && <p className="mb-3 break-words text-sm text-zinc-500 dark:text-zinc-400">{e.description}</p>}
-          {e.costHint && <p className="mb-3 text-xs text-zinc-400"><Coins size={11} className="mr-1 inline" />{e.costHint}</p>}
+          {metered && e.costHint && <p className="mb-3 text-xs text-zinc-400"><Coins size={11} className="mr-1 inline" />{e.costHint}</p>}
           {/* What we KNOW about this endpoint — fields, paging, cost, health, traps (BEA-1368). Read only when opened. */}
           <ToolFacts actionId={e.id} className="mb-3" />
-          <RunPanel e={e} platform={platform} noKey={noKey} topUpUrl={topUpUrl} onRan={onRan} />
+          <RunPanel e={e} platform={platform} noKey={noKey} metered={metered} topUpUrl={topUpUrl} onRan={onRan} />
         </div>
       )}
     </div>
@@ -325,7 +343,7 @@ export function makeAgentUrl(o: { actionId: string; args: Record<string, any>; l
   return `/agent?${q.toString()}`;
 }
 
-function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platform: Platform; noKey: boolean; topUpUrl?: string; onRan: () => void }) {
+function RunPanel({ e, platform, noKey, metered, topUpUrl, onRan }: { e: Endpoint; platform: Platform; noKey: boolean; metered: boolean; topUpUrl?: string; onRan: () => void }) {
   const toast = useToast();
   const navigate = useNavigate();
   const fields = useMemo(() => fieldsOf(e), [e]);
@@ -333,6 +351,8 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; outOfCredits?: boolean; topUpUrl?: string } | null>(null);
+  /** A gated send stopped to ask (BEA-1384) — drawn as a confirm card with Send / Cancel. */
+  const [gate, setGate] = useState<SocialGate | null>(null);
   /** The vendor answered "nothing found" for these arguments (BEA-1359) — drawn calmly, and still worth an agent. */
   const [empty, setEmpty] = useState<{ text: string; args: Record<string, any> } | null>(null);
   /** Every page fetched so far. One entry for a plain run; more after "load more". */
@@ -352,13 +372,18 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
     setBusy(true);
     setError(null);
     setEmpty(null);
+    setGate(null);
     const args: Record<string, any> = argsOf(fields, values);
     Object.assign(args, extra);
     try {
       const r = await fetch('/api/social/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actionId: e.id, args }) });
       const body: RunResult = await r.json().catch(() => ({ ok: false, error: 'The server did not answer properly.' }));
       if (!r.ok && !body.error) body.error = 'The server did not answer properly.';
-      if (!body.ok && body.notFound && !append) {
+      if (!body.ok && body.gate) {
+        // It stopped at the can't-undo gate: not an error — a question with two buttons.
+        setGate(body.gate);
+        if (!append) setPages([]);
+      } else if (!body.ok && body.notFound && !append) {
         // Their "No posts found": nothing matches TODAY — not an error. An agent on a schedule is
         // exactly how you keep asking, so "Make it an agent" stays on offer (BEA-1359).
         setEmpty({ text: body.error || 'Nothing found for that.', args });
@@ -369,6 +394,29 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
       } else {
         const page = { data: body.data, credits: body.credits, ms: body.ms, args };
         setPages((p) => (append ? [...p, page] : [page]));
+      }
+    } catch {
+      setError({ text: 'We could not reach the server. Try again in a moment.' });
+    } finally {
+      setBusy(false);
+      onRan();
+    }
+  }
+
+  /** He answered the confirm card. A yes re-runs with the EXACT approved arguments; a no stops. */
+  async function answerGate(g: SocialGate, answer: 'yes' | 'no') {
+    setBusy(true);
+    setGate(null);
+    try {
+      const r = await fetch('/api/social/gate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gate: g, answer }) });
+      const body: RunResult = await r.json().catch(() => ({ ok: false, error: 'The server did not answer properly.' }));
+      if (answer === 'no') {
+        toast('success', body.error && /nothing was done/i.test(body.error) ? 'Stopped — nothing was sent.' : body.error || 'Stopped — nothing was sent.');
+      } else if (!body.ok) {
+        setError({ text: body.error || 'That did not work.' });
+      } else {
+        setPages([{ data: body.data, credits: body.credits, ms: body.ms, args: g.args }]);
+        toast('success', 'Done.');
       }
     } catch {
       setError({ text: 'We could not reach the server. Try again in a moment.' });
@@ -473,12 +521,37 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => run()} disabled={busy || noKey} className={PRIMARY_BTN} data-testid="run-button" title={noKey ? 'Add the key in Settings first' : undefined}>
+        <button onClick={() => run()} disabled={busy || noKey} className={PRIMARY_BTN} data-testid="run-button" title={noKey ? (metered ? 'Add the key in Settings first' : 'The server token is missing') : undefined}>
           {busy && !pages.length ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} {busy && !pages.length ? 'Running…' : 'Run'}
         </button>
-        {noKey && <span className="text-xs text-zinc-400">Add the key in Settings to run this.</span>}
+        {noKey && <span className="text-xs text-zinc-400">{metered ? 'Add the key in Settings to run this.' : 'Not set up on this server yet.'}</span>}
         {missing.length > 0 && !noKey && <span className="text-xs text-zinc-400">Needs {missing.join(', ')}</span>}
       </div>
+
+      {gate && (
+        <div className="rounded-xl border border-amber-300/60 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/5" role="alertdialog" aria-label="Confirm before sending" data-testid="run-gate">
+          <h4 className="font-semibold text-amber-800 dark:text-amber-300">{gate.headline}?</h4>
+          {/* The server's own question, secret-masked in ServiceGatesService.build() — never
+              re-derived from raw args here (the chat card keeps the same rule). The headline is
+              already the title, and the closing "say yes / say no" line describes an unattended
+              run, not a card with two buttons an inch below. */}
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-600 dark:text-zinc-400">
+            {'This cannot be undone.\n' +
+              String(gate.question || '')
+                .split('\n')
+                .slice(1)
+                .filter((l) => !/^say yes/i.test(l.trim()))
+                .join('\n')
+                .trim()}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={() => answerGate(gate, 'yes')} disabled={busy} className={PRIMARY_BTN} data-testid="gate-yes">
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} Yes, send it
+            </button>
+            <button onClick={() => answerGate(gate, 'no')} disabled={busy} className={GHOST_BTN} data-testid="gate-no">No, stop</button>
+          </div>
+        </div>
+      )}
 
       {empty && (
         <div className="space-y-3" data-testid="run-empty">
@@ -511,9 +584,11 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
       {merged !== null && last && (
         <div className="space-y-3" data-testid="run-result">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className={CHIP + ' bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'} data-testid="credits-charged">
-              <Coins size={11} /> {totalCredits === 0 ? 'cached · 0' : `${totalCredits} credit${totalCredits === 1 ? '' : 's'}`}
-            </span>
+            {metered && (
+              <span className={CHIP + ' bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'} data-testid="credits-charged">
+                <Coins size={11} /> {totalCredits === 0 ? 'cached · 0' : `${totalCredits} credit${totalCredits === 1 ? '' : 's'}`}
+              </span>
+            )}
             {last.ms !== undefined && <span className="text-zinc-400">{(num(last.ms) / 1000).toFixed(1)}s</span>}
             {pages.length > 1 && <span className="text-zinc-400">{pages.length} pages</span>}
             <button onClick={() => setShowRaw((v) => !v)} className="ml-auto text-zinc-500 underline-offset-2 hover:underline">{showRaw ? 'Show it nicely' : 'Raw JSON'}</button>

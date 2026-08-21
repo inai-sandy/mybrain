@@ -548,6 +548,32 @@ and a refusal only SAYS "already went out on Telegram" — never a second push. 
 people) are untouched — they deliver fine. Trap: a spec stubbing `sendTemplate` without `messageStatus`
 never polls (old behavior); a stub WITH it must answer per poll or the test really waits.
 
+**WhatsApp is the THIRD provider on the seam (BEA-1384).** `WhatsAppProvider` (`api/src/tools/
+whatsapp.provider.ts`) wraps our own gateway's MCP server (streamable HTTP, stateless POST JSON-RPC,
+answer = JSON or one-event SSE — both parsed): `tools/list` is read at boot/daily/refresh (last good
+copy on disk under `DATA_DIR`) and every action is generated from it — ids `svc:whatsapp.<tool>`,
+NEVER the gateway's name (the seam rule). Auth = `WHATSAPP_MCP_TOKEN` in deploy.sh (a Postbox team
+token, `tm_…`, minted in Postbox → Team; the "My Brain" one sends from +91 78938 20808) — env only,
+never in code/DB/logs; without it the provider is honestly not-configured (tile marked, runs refuse,
+no fake success). **Gating map:** `send_template · send_text · send_list · send_rfq ·
+delete_template` carry `risky:true` and stop at the can't-undo gate; every read and
+`create_template`/`generate_pdf` run free; `isRiskyAction()` runs on top so a future `delete_*`
+tool gates by name. Reads carry `method:'GET'` so the builder's sampler recognises
+`broadcast_status`/`get_stats` as reads. It joins the catalog's **Social** group
+(`loadSocialFrom()` builds both providers side by side, `risky` carried), `ServiceActionsService.
+providerFor` routes `svc:whatsapp.*` to it (Composio BLOCKS the whole service — ours), the know-how
+cards fetch from it (`tool-knowledge.service.ts`, notes in `knowledge-notes.ts` carry the 24h-window
+/ APPROVED-template truths), and `/social` shows it as one more platform: `metered:false` (no
+credits, no credit strip, never "cached · 0"), its OWN `connection` state on the platform page (the
+scraping key being missing must not grey it out). A gated send from the Social form answers a
+`gate` shape (not an error) → confirm card → `POST /api/social/gate` re-runs with the EXACT
+approved args (same runId/nodeId contract as Chat's card). A send the gateway reports `status:
+"failed"` (Meta's async refusal, 24h window, unapproved template) FAILS the step with Meta's real
+reason — "sent" only means "handed to Meta". Traps: the direct Social runner does not catch
+`GatePause`, so a send inside a direct-fetch agent fails the run honestly ("Held for your
+approval…") — the flows road is where a send pauses durably; `list_templates` etc. are 16 tools on
+the live server (fixture `fixtures/whatsapp-mcp-tools.json`).
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

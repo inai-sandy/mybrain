@@ -166,6 +166,50 @@ export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
     match: 'svc:gmail.fetch_emails',
     notes: ['The list comes back in ARRIVAL order, not date order — re-sort on messageTimestamp.'],
   },
+
+  // ---- WhatsApp (our own gateway, BEA-1384) ----------------------------------------------------
+  {
+    match: 'whatsapp',
+    notes: [
+      'These reach REAL phones from the shared business number. Every send stops at the can\'t-undo gate; reads run freely.',
+      'Free text only works inside 24 hours after the person last messaged us. To start a conversation, or to reach anyone cold, use send_template with an APPROVED template — never promise free text to a cold contact.',
+      'No credits are charged — WhatsApp calls never touch the Social daily ceiling.',
+    ],
+  },
+  {
+    match: 'svc:whatsapp.send_text',
+    notes: [
+      'Only works inside the 24h window after the person last messaged us. Outside it, WhatsApp accepts the send and Meta refuses it a few seconds later — plan send_template instead for anyone who may be cold.',
+      'A "sent" answer is not "delivered" — check get_conversation or the message status, not just the send result.',
+    ],
+  },
+  {
+    match: 'svc:whatsapp.send_template',
+    notes: [
+      'Works any time (no 24h window), but ONLY with a template whose Meta status is APPROVED — call list_templates first and use the exact name.',
+      'Meta can still refuse it seconds AFTER a "sent" answer (engagement pacing on an unengaged recipient). Treat "sent" as "handed to Meta", not "on the phone".',
+    ],
+  },
+  {
+    match: 'svc:whatsapp.send_list',
+    notes: ['24h window only, and it says so instead of pretending. Max 10 rows; a row title is cut at 24 characters — put the fuller wording in the description.'],
+  },
+  {
+    match: 'svc:whatsapp.send_rfq',
+    notes: ['ONE SHOT to EVERY vendor in a KIOT category — there is no confirm step at the gateway and no undo. Double-check the category and items; never use this for anything but a real vendor RFQ.'],
+  },
+  {
+    match: 'svc:whatsapp.delete_template',
+    notes: ['Deletes the template from Meta and the gateway in one go. It cannot be undone, and a deleted name cannot be resubmitted to Meta for 30 days.'],
+  },
+  {
+    match: 'svc:whatsapp.check_replies',
+    notes: ['Made for polling: pass the `latest` timestamp from the previous answer as `since` next time.'],
+  },
+  {
+    match: 'svc:whatsapp.list_templates',
+    notes: ['Shows each template\'s LIVE Meta status — only APPROVED ones can be sent. Meta can silently reclassify a template\'s category after approval.'],
+  },
 ];
 
 /** The notes that apply to one action id, most specific first, without repeats. */

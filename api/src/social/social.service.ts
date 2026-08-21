@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { localDayKey, TZ_OFFSET_MIN } from '../common/localday';
 import { ScrapeCreatorsProvider } from '../tools/scrapecreators.provider';
-import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
+import { WhatsAppProvider, WHATSAPP_SERVICE } from '../tools/whatsapp.provider';
+import { ServiceActionsService, ServiceCallContext, ServiceRunResult } from '../tools/service-actions.service';
+import { GatePause, PendingGate } from '../tools/service-gates.service';
 import { ServiceAction, ServiceInfo } from '../tools/service-provider';
 
 /**
@@ -49,7 +52,18 @@ export type SocialPlatform = {
   kinds: string[];
   description?: string;
   connected: boolean;
+  /**
+   * FALSE when this platform's provider does not charge credits (WhatsApp, BEA-1384) — the pages
+   * then hide the credit strip and the per-run cost chips instead of saying "cached · 0".
+   */
+  metered?: boolean;
 };
+
+/** How one platform's OWN provider stands — for a platform that is not on the scraping key (BEA-1384). */
+export type PlatformConnection = { configured: boolean; message?: string };
+
+/** The gate as the Social page draws it: the question, plus the keys the answer must echo back. */
+export type SocialGate = PendingGate & { runId: string; nodeId: string; options: string[] };
 
 export type SocialOverview = {
   status: { configured: boolean; reachable: boolean; message?: string };
@@ -61,8 +75,8 @@ export type SocialOverview = {
   topUpUrl: string;
 };
 
-/** What the run route answers. `data` is the provider's whole envelope. */
-export type SocialRunResult = ServiceRunResult & { topUpUrl?: string };
+/** What the run route answers. `data` is the provider's whole envelope; `gate` = stopped to ask (BEA-1384). */
+export type SocialRunResult = ServiceRunResult & { topUpUrl?: string; gate?: SocialGate };
 
 /**
  * The words the grid can filter platforms by, matched against the endpoint half of each id.
@@ -86,6 +100,8 @@ export class SocialService {
     private readonly actions: ServiceActionsService,
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly prisma?: PrismaService,
+    // WhatsApp, the third provider on the seam (BEA-1384) — one more platform on the same grid.
+    private readonly whatsapp?: WhatsAppProvider,
   ) {}
 
   /** The grid page in one answer: key state, balance, today's spend, the ceiling, every platform. */
@@ -99,6 +115,10 @@ export class SocialService {
     // The grid is the provider's list minus the vendor's own `account` (BEA-1365); spend is still
     // summed over EVERY platform the provider has, so the header's numbers do not move.
     const platforms = await Promise.all(services.filter(isGridPlatform).map((s) => this.platformRow(s)));
+    // WhatsApp rides on the same grid from its own provider (BEA-1384) — shown even when its
+    // token is missing, honestly marked not connected, so the owner can see what it would offer.
+    const wa = await this.whatsappRow();
+    if (wa) platforms.push(wa);
     const [balance, spentToday, ceiling] = await Promise.all([
       status.configured && status.reachable ? this.social.creditBalance().catch(() => null) : Promise.resolve(null),
       this.spentToday(services.map((s) => s.slug)),
@@ -131,7 +151,17 @@ export class SocialService {
    * One platform and EVERY endpoint it has, with the schema each form is generated from. Null
    * when there is no such platform (a typed URL, or one the spec dropped).
    */
-  async platform(slug: string): Promise<{ platform: SocialPlatform; actions: ServiceAction[] } | null> {
+  async platform(slug: string): Promise<{ platform: SocialPlatform; actions: ServiceAction[]; connection?: PlatformConnection } | null> {
+    // WhatsApp is its own provider (BEA-1384): its page carries the provider's OWN connection
+    // state, so the scraping key being missing can never grey out a configured WhatsApp — and
+    // the other way round.
+    if (String(slug || '').toLowerCase() === WHATSAPP_SERVICE && this.whatsapp) {
+      const platform = await this.whatsappRow();
+      if (!platform) return null;
+      const actions = await this.whatsapp.listActions(WHATSAPP_SERVICE).catch(() => [] as ServiceAction[]);
+      const status = await this.whatsapp.status().catch(() => ({ configured: false, reachable: false, message: 'WhatsApp could not be checked just now.' }));
+      return { platform, actions, connection: { configured: !!status.configured, message: status.message } };
+    }
     const info = await this.social.getService(String(slug || '')).catch(() => null);
     if (!info) return null;
     const actions = await this.social.listActions(info.slug).catch(() => [] as ServiceAction[]);
@@ -151,24 +181,84 @@ export class SocialService {
    */
   async run(actionId: string, args: Record<string, any> = {}): Promise<SocialRunResult> {
     const id = String(actionId || '').trim();
-    if (!(await this.social.owns(id).catch(() => false))) {
+    const isWhatsApp = !!this.whatsapp?.owns?.(id);
+    if (!isWhatsApp && !(await this.social.owns(id).catch(() => false))) {
       return { ok: false, error: 'That is not one of the social endpoints we know. Reload the page and pick it again.' };
     }
-    const action = await this.social.getAction(id).catch(() => null);
+    const action = isWhatsApp
+      ? await this.whatsapp!.getAction(id).catch(() => null)
+      : await this.social.getAction(id).catch(() => null);
     const clean = this.cleanArgs(args, action);
     const missing = this.missingRequired(clean, action);
     if (missing.length) {
       return { ok: false, error: `Fill in ${missing.join(', ')} first — ${action?.name || 'this endpoint'} needs ${missing.length === 1 ? 'it' : 'them'}.` };
     }
-    const r = await this.actions.runDetailed(id, '', { runKind: 'social', args: clean, argsPinned: true, label: action?.name });
-    // 402 = out of credits. The owner gets a sentence and a place to top up, never the raw refusal.
-    if (!r.ok && r.outOfCredits) {
-      return { ...r, error: 'Your Scrape Creators credits are out. Top up, then run it again.', topUpUrl: TOP_UP_URL };
+    // The run/step pair the gate's answer will point back at (BEA-1384): one fresh id per press of
+    // Run, so an approval is spent on exactly this attempt and can never bless tomorrow's.
+    const ctx: ServiceCallContext = { runKind: 'social', runId: `social-${randomUUID()}`, nodeId: id, args: clean, argsPinned: true, label: action?.name };
+    try {
+      const r = await this.actions.runDetailed(id, '', ctx);
+      // 402 = out of credits. The owner gets a sentence and a place to top up, never the raw refusal.
+      if (!r.ok && r.outOfCredits) {
+        return { ...r, error: 'Your Scrape Creators credits are out. Top up, then run it again.', topUpUrl: TOP_UP_URL };
+      }
+      return r;
+    } catch (e: any) {
+      // A send stopped at the can't-undo gate (BEA-1348): not a failure — a question. The page
+      // draws it with Run / Cancel, and the answer comes back through `answerGate()` below.
+      if (e instanceof GatePause || e?.name === 'GatePause') {
+        const gate: PendingGate = e.gate;
+        return { ok: false, error: e.message, gate: { ...gate, runId: ctx.runId!, nodeId: ctx.nodeId!, options: ['Yes, send it', 'No, stop'] } };
+      }
+      return { ok: false, error: String(e?.message || e).slice(0, 400) };
     }
-    return r;
+  }
+
+  /**
+   * The owner answered a gate on the Social page (BEA-1384). A no records the refusal and runs
+   * nothing; a yes records the approval and re-runs the step with the SAME run/step pair, which is
+   * how `ServiceActionsService` finds the approval and re-uses the EXACT arguments he was shown —
+   * the same contract Chat's confirm card keeps.
+   */
+  async answerGate(gate: SocialGate, answer: string): Promise<SocialRunResult> {
+    const id = String(gate?.actionId || '').trim();
+    if (!id || !gate?.runId || !gate?.nodeId) return { ok: false, error: 'That confirm card is incomplete — run it again from the form.' };
+    const ctx: ServiceCallContext = { runKind: 'social', runId: gate.runId, nodeId: gate.nodeId, label: gate.actionName };
+    const said = await this.actions.answerGate(gate, answer, ctx).catch((e: any) => ({ approved: false, message: String(e?.message || e) }));
+    if (!said.approved) return { ok: false, error: said.message };
+    try {
+      return await this.actions.runDetailed(id, '', { ...ctx, args: gate.args, argsPinned: true });
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e).slice(0, 400) };
+    }
   }
 
   // ---- pieces ------------------------------------------------------------------------------
+
+  /**
+   * The WhatsApp tile (BEA-1384): its own provider, its own connection state, and `metered:false`
+   * because the gateway charges no credits — the pages then skip the credit strip and cost chips.
+   */
+  private async whatsappRow(): Promise<SocialPlatform | null> {
+    if (!this.whatsapp) return null;
+    const info = (await this.whatsapp.listServices().catch(() => [] as ServiceInfo[]))[0];
+    if (!info) return null;
+    const actions = await this.whatsapp.listActions(WHATSAPP_SERVICE).catch(() => [] as ServiceAction[]);
+    // The doc's own groups, biggest first — the platform page groups by the same tags.
+    const counts = new Map<string, number>();
+    for (const a of actions) for (const t of a.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+    const tags = [...counts.keys()].sort((x, y) => counts.get(y)! - counts.get(x)! || x.localeCompare(y));
+    return {
+      slug: info.slug,
+      name: info.name,
+      actionCount: actions.length || (Number.isFinite(info.actionCount) ? Number(info.actionCount) : 0),
+      tags,
+      kinds: ['messages', 'templates'],
+      description: info.description,
+      connected: !!info.connected,
+      metered: false,
+    };
+  }
 
   private async platformRow(s: ServiceInfo, actions?: ServiceAction[]): Promise<SocialPlatform> {
     const list = actions || (await this.social.listActions(s.slug).catch(() => [] as ServiceAction[]));
@@ -242,6 +332,10 @@ export class SocialService {
         out[k] = type === 'integer' ? Math.trunc(n) : n;
       } else if (type === 'boolean') {
         out[k] = raw === true || String(raw).toLowerCase() === 'true' || String(raw) === '1';
+      } else if ((type === 'array' || type === 'object') && typeof raw === 'string' && /^[[{]/.test(raw.trim())) {
+        // A structured field typed as JSON (WhatsApp's list rows, a PDF's item table) — parsed,
+        // and said plainly when it does not parse rather than sent on as one long string.
+        try { out[k] = JSON.parse(raw); } catch { out[k] = raw; }
       } else if (type === 'array' && typeof raw === 'string') {
         out[k] = raw.split(',').map((x) => x.trim()).filter(Boolean);
       } else {
