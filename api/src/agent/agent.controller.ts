@@ -5,7 +5,7 @@ import { AgentAreasService, AreaTool } from './agent-areas.service';
 import { BuilderSampleService } from './builder-sample.service';
 import { TOP_BUILDER_SESSION } from './builder-session';
 
-type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[] };
+type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[]; folderId?: string | null };
 
 /**
  * Agent HTTP surface (BEA-619). All routes are protected by the global cookie-session guard.
@@ -29,6 +29,36 @@ export class AgentController {
     return this.areas.list();
   }
 
+  // ---- Folders (BEA-1380): flat, owner-made shelves for the agent cards ----
+
+  /** Every folder in order, with counts — plus the All and Unfiled totals. */
+  @Get('folders')
+  listFolders() {
+    return this.areas.listFolders();
+  }
+
+  @Post('folders')
+  createFolder(@Body() body: { name?: string }) {
+    return this.areas.createFolder(body?.name);
+  }
+
+  @Patch('folders/:id')
+  updateFolder(@Param('id') id: string, @Body() body: { name?: string; order?: number }) {
+    return this.areas.updateFolder(id, body || {});
+  }
+
+  /** Delete a folder. Its agents are never deleted — they return to Unfiled. */
+  @Delete('folders/:id')
+  deleteFolder(@Param('id') id: string) {
+    return this.areas.deleteFolder(id);
+  }
+
+  /** Bulk move: several agent cards into one folder (folderId null/'' = back to Unfiled). */
+  @Post('areas/move')
+  moveAreas(@Body() body: { ids?: string[]; folderId?: string | null }) {
+    return this.areas.moveAreasToFolder(Array.isArray(body?.ids) ? body.ids : [], body?.folderId ?? null);
+  }
+
   /** Create a whole agent (area + jobs + tools) from one spec — the skill/chat-builder landing point (BEA-1103). */
   @Post('areas/spec')
   createFromSpec(@Body() body: unknown) {
@@ -48,8 +78,9 @@ export class AgentController {
   }
 
   @Post('builder/create')
-  builderCreate() {
-    return this.areas.builderCreate();
+  builderCreate(@Body() body?: { folderId?: string | null }) {
+    // `folderId` = the folder the owner was inside when he pressed Create (BEA-1380).
+    return this.areas.builderCreate({ folderId: body?.folderId ?? null });
   }
 
   @Delete('builder')
@@ -71,7 +102,7 @@ export class AgentController {
   }
 
   @Post('areas')
-  createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string; folderId?: string | null }) {
     return this.areas.create(body || {});
   }
 
@@ -109,7 +140,7 @@ export class AgentController {
   }
 
   @Patch('areas/:id')
-  updateArea(@Param('id') id: string, @Body() body: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  updateArea(@Param('id') id: string, @Body() body: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string; folderId?: string | null }) {
     return this.areas.update(id, body || {});
   }
 

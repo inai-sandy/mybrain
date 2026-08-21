@@ -229,7 +229,16 @@ export function AgentApp() {
 
   return (
     <div className="space-y-4">
-      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Agents</button>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Agents</button>
+        {/* The folder this agent's card sits in (BEA-1380) — tap goes to that folder on the home. */}
+        {a.folder && (<>
+          <span className="text-sm text-zinc-300 dark:text-zinc-600">/</span>
+          <button onClick={() => nav(`/agent?folder=${encodeURIComponent(a.folder.id)}`)} data-testid="folder-crumb" className="inline-flex min-w-0 items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+            <span aria-hidden>📁</span><span className="truncate">{a.folder.name}</span>
+          </button>
+        </>)}
+      </div>
 
       <header className="flex items-center gap-3">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-2xl" style={{ background: color + '22' }}>{a.icon || '🤖'}</span>

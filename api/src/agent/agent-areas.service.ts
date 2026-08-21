@@ -472,9 +472,10 @@ export class AgentAreasService {
     return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null };
   }
 
-  /** Create the agent from the current proposal (the owner pressed Create). */
-  async builderCreate() {
+  /** Create the agent from the current proposal (the owner pressed Create). `folderId` = the folder the owner was inside (BEA-1380). */
+  async builderCreate(opts: { folderId?: string | null } = {}) {
     const st = await this.builderLoad();
+    const folderId = await this.folderIdOrNull(opts.folderId);
     // A DIRECT agent (BEA-1371): one job from the plan, its own area, the flow picture drawn from the
     // same fields — `createAgent` without an area gives the job an area of the same name.
     if (st.plan) {
@@ -482,14 +483,14 @@ export class AgentAreasService {
       const input = planToAgentInput(st.plan, await this.socialTester(st.plan));
       // The goal rides onto the agent as "For: <goal>" on its description (BEA-1378).
       const description = withGoal(null, st.goal);
-      const created: any = await this.agentSvc.createAgent({ ...input, ...(description ? { description } : {}) } as any);
+      const created: any = await this.agentSvc.createAgent({ ...input, ...(description ? { description } : {}), ...(folderId ? { folderId } : {}) } as any);
       st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
       st.plan = null; st.cost = null; st.seed = null; st.goal = null;
       await this.builderSave(st);
       return { ok: true as const, areaId: created.areaId, agentId: created.id, url: `/agent/a/${created.id}`, jobs: [{ id: created.id, name: created.name }] };
     }
     if (!st.spec) throw new BadRequestException('There is no proposal to create yet — keep chatting.');
-    const res = await this.createFromSpec(st.spec, st.goal);
+    const res = await this.createFromSpec(st.spec, st.goal, folderId);
     st.log.push({ who: 'ai', text: `Created ✓ — "${st.spec.area.name}" with ${res.jobs.length} job(s).`, at: new Date().toISOString() });
     st.spec = null; st.plan = null; st.cost = null; st.seed = null; st.goal = null;
     await this.builderSave(st);
@@ -501,7 +502,7 @@ export class AgentAreasService {
    * Code skill and the in-app chat builder: area (identity + tools) + its jobs (each with task,
    * outcome, schedule and per-job settings). Nothing partial: a bad spec is refused up front.
    */
-  async createFromSpec(spec: any, goal?: string | null): Promise<{ ok: true; areaId: string; url: string; jobs: { id: string; name: string }[] }> {
+  async createFromSpec(spec: any, goal?: string | null, folderId?: string | null): Promise<{ ok: true; areaId: string; url: string; jobs: { id: string; name: string }[] }> {
     const areaIn = spec?.area || {};
     const jobsIn: any[] = Array.isArray(spec?.jobs) ? spec.jobs : [];
     if (!areaIn?.name?.trim()) throw new BadRequestException('The agent needs a name.');
@@ -513,6 +514,7 @@ export class AgentAreasService {
     const area = await this.create({
       name: areaIn.name, icon: areaIn.icon, color: areaIn.color, description: areaIn.description,
       tools: areaIn.tools, sourceUrl: areaIn.sourceUrl,
+      ...(folderId ? { folderId } : {}), // created from inside a folder → it lands there (BEA-1380)
     });
     const jobs: { id: string; name: string }[] = [];
     for (const j of jobsIn.slice(0, 12)) {
@@ -548,6 +550,7 @@ export class AgentAreasService {
     return {
       id: area.id,
       name: area.name,
+      folderId: area.folderId || null, // the flat folder this card sits in (BEA-1380); null = Unfiled
       icon: area.icon,
       color: area.color,
       description: area.description,
@@ -660,7 +663,7 @@ export class AgentAreasService {
     return this.shape(made, []);
   }
 
-  async create(input: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  async create(input: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string; folderId?: string | null }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const area = await (this.prisma as any).agentArea.create({
       data: {
@@ -670,12 +673,15 @@ export class AgentAreasService {
         description: input.description?.trim() || null,
         tools: JSON.stringify(this.cleanTools(input.tools)),
         sourceUrl: input.sourceUrl?.trim() || null,
+        // Created from inside a folder → it lands in that folder (BEA-1380). A folder that no
+        // longer exists degrades to Unfiled rather than failing the create.
+        folderId: input.folderId ? await this.folderIdOrNull(input.folderId) : null,
       },
     });
     return this.shape(area);
   }
 
-  async update(id: string, patch: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  async update(id: string, patch: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string; folderId?: string | null }) {
     const data: any = {};
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120) || undefined;
     if (patch.icon !== undefined) data.icon = patch.icon || null;
@@ -684,8 +690,102 @@ export class AgentAreasService {
     if (patch.tools !== undefined) data.tools = JSON.stringify(this.cleanTools(patch.tools));
     if ((patch as any).outcome !== undefined) data.outcome = ((patch as any).outcome || '').trim().slice(0, 2000) || null;
     if (patch.sourceUrl !== undefined) data.sourceUrl = patch.sourceUrl?.trim() || null;
+    // Move to a folder (BEA-1380): null/'' = back to Unfiled; a real id must exist.
+    if (patch.folderId !== undefined) {
+      if (!patch.folderId) data.folderId = null;
+      else {
+        const f = await this.findFolder(patch.folderId);
+        if (!f) throw new NotFoundException('That folder does not exist any more');
+        data.folderId = f.id;
+      }
+    }
     const area = await (this.prisma as any).agentArea.update({ where: { id }, data }).catch(() => { throw new NotFoundException('Agent not found'); });
     return this.shape(area);
+  }
+
+  // ---- Folders (BEA-1380): flat, owner-made, each agent card in at most one -------------------
+
+  private async findFolder(id: string): Promise<any | null> {
+    return await Promise.resolve((this.prisma as any).agentFolder?.findUnique?.({ where: { id } })).catch(() => null) || null;
+  }
+
+  /** A folder id if that folder still exists, else null (Unfiled) — for creates, which must not fail on a stale folder. */
+  private async folderIdOrNull(id?: string | null): Promise<string | null> {
+    if (!id || typeof id !== 'string') return null;
+    const f = await this.findFolder(id);
+    return f ? f.id : null;
+  }
+
+  /** All folders in order, each with how many agent cards it holds — plus the Unfiled count. */
+  async listFolders() {
+    const [folders, areas] = await Promise.all([
+      Promise.resolve((this.prisma as any).agentFolder?.findMany?.({ orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] })).catch(() => []),
+      Promise.resolve((this.prisma as any).agentArea?.findMany?.({ select: { id: true, folderId: true } })).catch(() => []),
+    ]);
+    const counts = new Map<string, number>();
+    let unfiled = 0;
+    for (const a of (areas || []) as any[]) {
+      if (a.folderId) counts.set(a.folderId, (counts.get(a.folderId) || 0) + 1);
+      else unfiled += 1;
+    }
+    return {
+      folders: ((folders || []) as any[]).map((f) => ({ id: f.id, name: f.name, order: f.order ?? 0, createdAt: f.createdAt, count: counts.get(f.id) || 0 })),
+      all: ((areas || []) as any[]).length,
+      unfiled,
+    };
+  }
+
+  async createFolder(name?: string) {
+    const n = (name || '').trim().slice(0, 60);
+    if (!n) throw new BadRequestException('A folder needs a name');
+    const existing: any[] = await Promise.resolve((this.prisma as any).agentFolder?.findMany?.({ select: { name: true, order: true } })).catch(() => []) || [];
+    if (existing.some((f) => String(f.name).trim().toLowerCase() === n.toLowerCase())) throw new BadRequestException(`You already have a folder called "${n}"`);
+    const order = existing.reduce((m, f) => Math.max(m, Number(f.order) || 0), 0) + 1;
+    const f = await (this.prisma as any).agentFolder.create({ data: { name: n, order } });
+    return { id: f.id, name: f.name, order: f.order ?? 0, createdAt: f.createdAt, count: 0 };
+  }
+
+  async updateFolder(id: string, patch: { name?: string; order?: number }) {
+    const data: any = {};
+    if (patch.name !== undefined) {
+      const n = (patch.name || '').trim().slice(0, 60);
+      if (!n) throw new BadRequestException('A folder needs a name');
+      const existing: any[] = await Promise.resolve((this.prisma as any).agentFolder?.findMany?.({ select: { id: true, name: true } })).catch(() => []) || [];
+      if (existing.some((f) => f.id !== id && String(f.name).trim().toLowerCase() === n.toLowerCase())) throw new BadRequestException(`You already have a folder called "${n}"`);
+      data.name = n;
+    }
+    if (patch.order !== undefined && Number.isFinite(Number(patch.order))) data.order = Math.max(0, Math.floor(Number(patch.order)));
+    if (!Object.keys(data).length) throw new BadRequestException('Nothing to change');
+    const f = await (this.prisma as any).agentFolder.update({ where: { id }, data }).catch(() => { throw new NotFoundException('Folder not found'); });
+    return { id: f.id, name: f.name, order: f.order ?? 0, createdAt: f.createdAt };
+  }
+
+  /** Delete a folder. Its agents are NEVER deleted — they go back to Unfiled (BEA-1380). */
+  async deleteFolder(id: string) {
+    const f = await this.findFolder(id);
+    if (!f) throw new NotFoundException('Folder not found');
+    const unfiled = await (this.prisma as any).agentArea.updateMany({ where: { folderId: id }, data: { folderId: null } });
+    try {
+      await (this.prisma as any).agentFolder.delete({ where: { id } });
+    } catch {
+      // Swallow only "already gone" — a real failure must not report "deleted" while the row stays.
+      if (await this.findFolder(id)) throw new BadRequestException('Could not delete the folder — try again');
+    }
+    return { ok: true, unfiled: unfiled?.count ?? 0 };
+  }
+
+  /** Bulk move: several agent cards into one folder (or back to Unfiled with folderId null). */
+  async moveAreasToFolder(ids: string[], folderId?: string | null) {
+    const clean = Array.isArray(ids) ? ids.filter((x) => typeof x === 'string' && x).slice(0, 200) : [];
+    if (!clean.length) throw new BadRequestException('Pick at least one agent to move');
+    let target: string | null = null;
+    if (folderId) {
+      const f = await this.findFolder(folderId);
+      if (!f) throw new NotFoundException('That folder does not exist any more');
+      target = f.id;
+    }
+    const res = await (this.prisma as any).agentArea.updateMany({ where: { id: { in: clean } }, data: { folderId: target } });
+    return { ok: true, moved: res?.count ?? 0, folderId: target };
   }
 
   /** Delete an area. Jobs (and their history) go ONLY with the explicit withJobs flag (BEA-1109). */

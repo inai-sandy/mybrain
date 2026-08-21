@@ -667,9 +667,20 @@ model AgentActionLog {
 /// An agent AREA (BEA-1095): the container the owner thinks of as "an agent" — Research Agent,
 /// Daily News… It holds a Tools list and many jobs (Agent rows). Jobs stay in the Agent table so
 /// every run/flow/waitpoint reference keeps working.
+/// A flat folder on the Agents home (BEA-1380). The owner creates these and moves his agent cards
+/// (AgentArea rows) into them; "All" and "Unfiled" are views, not rows. Deleting a folder un-files
+/// its agents — it never deletes them.
+model AgentFolder {
+  id        String   @id @default(uuid())
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
 model AgentArea {
   id          String   @id @default(uuid())
   name        String
+  folderId    String? // the flat folder this agent card sits in (BEA-1380); null = Unfiled
   icon        String? // emoji
   color       String? // card colour
   description String?
