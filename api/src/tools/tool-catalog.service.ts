@@ -4,7 +4,8 @@ import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
 import { ComposioProvider } from './composio.provider';
 import { ScrapeCreatorsProvider } from './scrapecreators.provider';
-import { isBlockedService, isServiceToolId, ServiceAction, ServiceInfo } from './service-provider';
+import { WhatsAppProvider } from './whatsapp.provider';
+import { isBlockedService, isServiceToolId, ServiceAction, ServiceInfo, ServiceProvider } from './service-provider';
 
 /**
  * The ONE tool catalog (BEA-1167).
@@ -116,6 +117,7 @@ export class ToolCatalogService implements OnModuleInit {
     private readonly llm?: LlmService, // to know which engine is chosen (BEA-1224)
     private readonly services?: ComposioProvider, // outside services, behind the seam (BEA-1345)
     private readonly social?: ScrapeCreatorsProvider, // social platforms, behind the same seam (BEA-1355)
+    private readonly whatsapp?: WhatsAppProvider, // WhatsApp, the third provider on the seam (BEA-1384)
   ) {}
 
   /**
@@ -334,7 +336,7 @@ export class ToolCatalogService implements OnModuleInit {
    * and the same budget as Services applies on top, so the catalog's answer time does not move.
    */
   private async socialTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
-    if (!this.social) return { tools: [], available: false };
+    if (!this.social && !this.whatsapp) return { tools: [], available: false };
     const budget = new Promise<{ tools: CatalogTool[]; available: boolean } | null>((r) => setTimeout(() => r(null), SERVICE_LOOKUP_BUDGET_MS).unref?.());
     const fresh = await Promise.race([this.loadSocialTools(), budget]);
     if (fresh) {
@@ -344,15 +346,25 @@ export class ToolCatalogService implements OnModuleInit {
     return this.lastSocial || { tools: [], available: false };
   }
 
+  /**
+   * Both Social-group providers, side by side (BEA-1384): the scraping platforms and WhatsApp.
+   * One provider being down or unconfigured never hides the other's tools.
+   */
   private async loadSocialTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
+    const [sc, wa] = await Promise.all([this.loadSocialFrom(this.social), this.loadSocialFrom(this.whatsapp)]);
+    return { tools: [...sc.tools, ...wa.tools], available: sc.available || wa.available };
+  }
+
+  private async loadSocialFrom(provider?: ServiceProvider): Promise<{ tools: CatalogTool[]; available: boolean }> {
+    if (!provider) return { tools: [], available: false };
     try {
-      const status = await this.social!.status();
-      // Configured is the whole test. Reachable is not: their API being down for a minute must not
-      // empty the group, and the spec (last good copy) is what the list is built from anyway.
+      const status = await provider.status();
+      // Configured is the whole test. Reachable is not: an API being down for a minute must not
+      // empty the group, and the last good list is what the tools are built from anyway.
       if (!status.configured) return { tools: [], available: false };
-      const services: ServiceInfo[] = await this.social!.listServices({ connectedOnly: true });
+      const services: ServiceInfo[] = await provider.listServices({ connectedOnly: true });
       const perService = await Promise.all(
-        services.map(async (s) => ({ service: s, actions: await this.social!.listActions(s.slug).catch(() => [] as ServiceAction[]) })),
+        services.map(async (s) => ({ service: s, actions: await provider.listActions(s.slug).catch(() => [] as ServiceAction[]) })),
       );
       const tools: CatalogTool[] = [];
       for (const { service, actions } of perService) {
@@ -366,7 +378,9 @@ export class ToolCatalogService implements OnModuleInit {
             connected: service.connected,
             description: clip(a.description, 160) || `${a.name} on ${service.name}`,
             service: service.slug,
-            risky: false,
+            // The scraping provider's actions are all reads (risky always false there); WhatsApp's
+            // sends carry the flag, and the gate acts on it (BEA-1384).
+            risky: !!a.risky,
             ...(a.retired ? { retired: true } : {}),
           });
         }

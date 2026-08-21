@@ -1,0 +1,546 @@
+[
+ {
+  "name": "send_template",
+  "description": "Send an approved WhatsApp template to ONE number, from the sending number assigned to your token (default +91 90006 07141). Works any time (no 24h window). variables fill {{1}}, {{2}}, \u2026 in order. Optional: a dynamic URL-button suffix, or a document header (pass a public PDF link, e.g. from generate_pdf). The result includes status \"sent\" or \"failed\" with the real error.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "to": {
+     "type": "string",
+     "description": "Recipient number with country code, e.g. 919876543210 (a + or spaces are fine)."
+    },
+    "template": {
+     "type": "string",
+     "description": "Template name exactly as in list_templates (must be APPROVED)."
+    },
+    "language": {
+     "description": "Template language code (default \"en\").",
+     "type": "string"
+    },
+    "variables": {
+     "description": "Values for {{1}}, {{2}}, \u2026 in order.",
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "buttonUrl": {
+     "description": "Suffix for the template's dynamic URL button, if it has one.",
+     "type": "string"
+    },
+    "headerDocumentUrl": {
+     "description": "Public PDF link for a DOCUMENT-header template.",
+     "type": "string"
+    },
+    "headerDocumentFilename": {
+     "description": "Filename shown in WhatsApp for the document header.",
+     "type": "string"
+    }
+   },
+   "required": [
+    "to",
+    "template"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "send_text",
+  "description": "Send a free-text WhatsApp message to ONE number, from the sending number assigned to your token (default +91 90006 07141). Only works inside the 24h window after the person last messaged us \u2014 outside it the result is status \"failed\" with the real error, and you should use send_template instead.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "to": {
+     "type": "string",
+     "description": "Recipient number with country code, e.g. 919876543210."
+    },
+    "body": {
+     "type": "string",
+     "description": "The message text."
+    }
+   },
+   "required": [
+    "to",
+    "body"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "send_list",
+  "description": "Send a WhatsApp message with tappable ROWS to ONE number, from the sending number assigned to your token (default +91 90006 07141). Each row carries an id you choose, and that id comes back when they tap it \u2014 so the answer is exact instead of something you have to interpret from their words. Only works inside the 24h window after the person last messaged us \u2014 outside it this REFUSES with a clear reason rather than pretending to send, because WhatsApp accepts an out-of-window message and silently drops it. A list cannot be sent as a template, so send_template first and wait for a reply. Max 10 rows; a row title is cut to 24 characters, so put the fuller wording in the description.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "to": {
+     "type": "string",
+     "description": "Recipient number with country code, e.g. 919876543210."
+    },
+    "body": {
+     "type": "string",
+     "description": "The question or message above the list."
+    },
+    "buttonText": {
+     "description": "Text on the button that opens the list. Max 20 chars. Defaults to \"Choose\".",
+     "type": "string"
+    },
+    "header": {
+     "description": "Optional short heading above the message.",
+     "type": "string"
+    },
+    "footer": {
+     "description": "Optional small print below the message.",
+     "type": "string"
+    },
+    "rows": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "title": {
+        "type": "string"
+       },
+       "description": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "title"
+      ]
+     },
+     "description": "The choices. `id` is what comes back on the tap \u2014 make it something you can look up. Max 10."
+    }
+   },
+   "required": [
+    "to",
+    "body",
+    "rows"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "get_conversation",
+  "description": "The full WhatsApp conversation with one number: our outbound messages (any app) + their replies, time-ordered. Returns the LAST `limit` items (default 50) plus the total count.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "number": {
+     "type": "string",
+     "description": "The contact number with country code."
+    },
+    "limit": {
+     "description": "Max items, newest kept (default 50).",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 200
+    }
+   },
+   "required": [
+    "number"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "list_messages",
+  "description": "Message history across all numbers and apps, newest first, paged. Filter by direction (\"in\"/\"out\"), status (queued/sent/delivered/read/failed), or a search string (number, body, template name).",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "query": {
+     "description": "Search in number, body, or template name.",
+     "type": "string"
+    },
+    "direction": {
+     "type": "string",
+     "enum": [
+      "in",
+      "out"
+     ]
+    },
+    "status": {
+     "description": "queued | sent | delivered | read | failed",
+     "type": "string"
+    },
+    "page": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 9007199254740991
+    },
+    "pageSize": {
+     "description": "Default 20, max 100.",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    }
+   }
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "check_replies",
+  "description": "New inbound WhatsApp messages since a timestamp \u2014 made for polling agents. Returns the messages oldest-first plus `latest` (the newest timestamp seen) to pass as `since` next time.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "since": {
+     "type": "string",
+     "description": "ISO timestamp; only messages AFTER this are returned, e.g. 2026-08-06T10:00:00Z."
+    },
+    "from": {
+     "description": "Only replies from this number.",
+     "type": "string"
+    },
+    "limit": {
+     "description": "Max messages (default 100).",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 200
+    }
+   },
+   "required": [
+    "since"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "get_stats",
+  "description": "Overall delivery stats: message counts by status and direction, plus app and inbound totals.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "list_broadcasts",
+  "description": "Broadcast history (newest first, paged): category, template, requested by, counts. Use broadcast_status for per-recipient detail.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "query": {
+     "description": "Search string.",
+     "type": "string"
+    },
+    "page": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 9007199254740991
+    },
+    "pageSize": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    }
+   }
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "list_templates",
+  "description": "All WhatsApp templates with their LIVE Meta status (APPROVED / PENDING / REJECTED with reason), body text and variable docs. Only APPROVED templates can be sent.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "create_template",
+  "description": "Submit a NEW template to Meta for approval (usually minutes to hours). Body uses {{1}}, {{2}}, \u2026 blanks in order; every blank needs a meaning + example for the Meta reviewers. Optional: a DOCUMENT header (for PDF attachments) and a URL button whose link is baseUrl + a per-send suffix.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Lowercase letters, numbers and underscores only, e.g. order_update."
+    },
+    "bodyText": {
+     "type": "string",
+     "description": "The message text with {{1}}, {{2}}, \u2026 blanks (each may appear once, numbered in order)."
+    },
+    "language": {
+     "description": "Default \"en\".",
+     "type": "string"
+    },
+    "category": {
+     "description": "Default UTILITY. Note: Meta may reclassify.",
+     "type": "string",
+     "enum": [
+      "UTILITY",
+      "MARKETING",
+      "AUTHENTICATION"
+     ]
+    },
+    "headerType": {
+     "description": "DOCUMENT = the template carries a PDF attachment.",
+     "type": "string",
+     "enum": [
+      "NONE",
+      "DOCUMENT"
+     ]
+    },
+    "variables": {
+     "description": "One per {{n}} blank, in order: what it is + a sample value.",
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "meaning": {
+        "type": "string"
+       },
+       "example": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "meaning",
+       "example"
+      ]
+     }
+    },
+    "urlButton": {
+     "type": "object",
+     "properties": {
+      "text": {
+       "type": "string",
+       "description": "Button label (max 25 chars)."
+      },
+      "urlBase": {
+       "type": "string",
+       "description": "https:// link prefix; the send appends a suffix."
+      },
+      "example": {
+       "type": "string",
+       "description": "One-word sample suffix for the Meta reviewers."
+      }
+     },
+     "required": [
+      "text",
+      "urlBase",
+      "example"
+     ]
+    }
+   },
+   "required": [
+    "name",
+    "bodyText"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "delete_template",
+  "description": "Delete a template by name (all its languages), from Meta and from Postbox. Cannot be undone.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "The template name exactly as in list_templates."
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "list_numbers",
+  "description": "Our WhatsApp business numbers with labels, enabled state and message counts. MCP sends from the number assigned to your token (default +91 90006 07141).",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "generate_pdf",
+  "description": "Build a branded KIOT requirement PDF (summary + item table) and host it at a permanent unguessable URL. Use the returned url as headerDocumentUrl in send_template for DOCUMENT-header templates.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "summary": {
+     "type": "string",
+     "description": "One-line heading for the document."
+    },
+    "items": {
+     "minItems": 1,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "component": {
+        "type": "string"
+       },
+       "spec": {
+        "type": "string"
+       },
+       "quantity": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "number"
+         }
+        ]
+       }
+      },
+      "required": [
+       "component",
+       "quantity"
+      ]
+     },
+     "description": "The table rows."
+    },
+    "requestedBy": {
+     "description": "Name shown on the PDF (defaults to your token's name).",
+     "type": "string"
+    }
+   },
+   "required": [
+    "summary",
+    "items"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "list_categories",
+  "description": "List the vendor categories from the KIOT vendor Google Sheet, with how many vendors are in each. Broadcasts always go to a WHOLE category, never to an individual number.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "send_rfq",
+  "description": "Send the approved WhatsApp template \"rfq_requirement\" to EVERY vendor in a category, with a generated KIOT Innovations requirement PDF attached. The message reads: \"Hi {{1}}, this is {{2}} from KIOT Innovations. We have a new requirement for {{3}}. The full list with quantities is in the attached PDF. Please share your best price and delivery time for the items you can supply. Thank you, KIOT Innovations\" \u2014 where {{1}} is each vendor's name from the sheet, {{2}} is YOUR name (from your token \u2014 not changeable), and {{3}} is the summary you pass. ONE-SHOT: this sends immediately, there is no confirm step \u2014 double-check the category and items before calling. The result lists exactly who was messaged. Unknown or empty categories are refused.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "category": {
+     "type": "string",
+     "description": "The vendor category to send to, exactly as in list_categories (case-insensitive)."
+    },
+    "summary": {
+     "type": "string",
+     "description": "One line saying what the requirement is about, e.g. \"SMD resistors and capacitors, 8 items\". Fills {{3}} and heads the PDF. No line breaks."
+    },
+    "items": {
+     "minItems": 1,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "component": {
+        "type": "string",
+        "description": "Component name, e.g. \"SMD resistor 10k 0603\""
+       },
+       "spec": {
+        "description": "Specification, e.g. \"1%, full reel\" (optional)",
+        "type": "string"
+       },
+       "quantity": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "number"
+         }
+        ],
+        "description": "Quantity, e.g. 5000 or \"150 pcs\""
+       }
+      },
+      "required": [
+       "component",
+       "quantity"
+      ]
+     },
+     "description": "The component list that goes into the attached PDF table."
+    }
+   },
+   "required": [
+    "category",
+    "summary",
+    "items"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
+  "name": "broadcast_status",
+  "description": "Live per-vendor delivery status (queued/sent/delivered/read/failed, with error reasons) for one broadcast, by the broadcastId that send_rfq returned.",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "broadcastId": {
+     "type": "string",
+     "description": "The broadcastId returned by send_rfq."
+    }
+   },
+   "required": [
+    "broadcastId"
+   ]
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ }
+]

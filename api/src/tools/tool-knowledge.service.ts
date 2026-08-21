@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ComposioProvider } from './composio.provider';
 import { KNOWLEDGE_NOTES, KnowledgeNote, notesFor } from './knowledge-notes';
 import { ScrapeCreatorsProvider } from './scrapecreators.provider';
+import { WhatsAppProvider } from './whatsapp.provider';
 import { isServiceToolId, parseServiceToolId, ServiceAction } from './service-provider';
 
 /**
@@ -451,6 +452,9 @@ export class ToolKnowledgeService {
     // Optional + LAST — spec files build this positionally with fewer args; without it the
     // observed part is simply empty and the card is spec + notes.
     private readonly prisma?: PrismaService,
+    // The third provider (BEA-1384). Its cards read like a Services card (no metering, schema-only
+    // spec part); the 24h-window / approved-template truths ride in as notes.
+    private readonly whatsapp?: WhatsAppProvider,
   ) {}
 
   /** The hand-kept notes in use — swapped only by the tests. */
@@ -508,10 +512,16 @@ export class ToolKnowledgeService {
     const parsed = parseServiceToolId(actionId);
     if (!parsed) return null;
     const mine = await this.social?.owns?.(actionId).catch(() => false);
+    // WhatsApp's ids never reach the general provider (the service is blocked there on purpose),
+    // so its cards must be fetched from its own provider — and drawn like a Services card: no
+    // metering, and the spec part is the argument schema alone.
+    const wa = !mine && !!this.whatsapp?.owns?.(actionId);
     const provider: 'social' | 'services' = mine ? 'social' : 'services';
     const action: ServiceAction | null = mine
       ? await this.social.getAction(actionId).catch(() => null)
-      : await this.services?.getAction?.(actionId).catch(() => null);
+      : wa
+        ? await this.whatsapp!.getAction(actionId).catch(() => null)
+        : await this.services?.getAction?.(actionId).catch(() => null);
     if (!action) return null;
 
     const rows = await this.rows(parsed.service, actionId);

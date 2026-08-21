@@ -73,4 +73,13 @@ export class SocialController {
   run(@Body() body: { actionId?: string; args?: Record<string, any> }) {
     return this.social.run(String(body?.actionId || ''), body?.args && typeof body.args === 'object' ? body.args : {});
   }
+
+  /**
+   * The owner answered a confirm card on a gated send (BEA-1384). A yes re-runs the step with the
+   * exact arguments he approved; a no records the refusal and runs nothing. Same shape as /run.
+   */
+  @Post('gate')
+  gate(@Body() body: { gate?: any; answer?: string }) {
+    return this.social.answerGate(body?.gate, String(body?.answer || ''));
+  }
 }

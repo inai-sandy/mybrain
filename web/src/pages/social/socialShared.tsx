@@ -17,7 +17,12 @@ export type Platform = {
   kinds: string[];
   description?: string;
   connected: boolean;
+  /** FALSE = this platform's provider charges no credits (WhatsApp) — hide the cost chrome (BEA-1384). */
+  metered?: boolean;
 };
+
+/** How a platform's OWN provider stands, when it is not on the scraping key (WhatsApp, BEA-1384). */
+export type PlatformConnection = { configured: boolean; message?: string };
 
 export type SocialStatus = { configured: boolean; reachable: boolean; message?: string };
 
@@ -46,6 +51,22 @@ export type Endpoint = {
   costHint?: string;
   /** The spec marks it deprecated — still listed, tagged (BEA-1365). */
   retired?: boolean;
+  /** Cannot be undone (a WhatsApp send) — it stops at the confirm gate before running (BEA-1384). */
+  risky?: boolean;
+};
+
+/** A gated run stopped to ask (BEA-1384) — the question, and the keys the answer echoes back. */
+export type SocialGate = {
+  actionId: string;
+  service: string;
+  serviceName: string;
+  actionName: string;
+  args: Record<string, any>;
+  headline: string;
+  question: string;
+  runId: string;
+  nodeId: string;
+  options: string[];
 };
 
 export type RunResult = {
@@ -59,6 +80,8 @@ export type RunResult = {
   notFound?: boolean;
   topUpUrl?: string;
   actionName?: string;
+  /** The run stopped at the can't-undo gate and wants a yes or a no (BEA-1384). */
+  gate?: SocialGate;
 };
 
 export const num = (n: number | undefined | null) => (Number.isFinite(n as number) ? Number(n) : 0);
@@ -101,6 +124,7 @@ const MARKS: Record<string, { icon: string; color: string }> = {
   kick: { icon: 'kick', color: '53FC18' },
   linktree: { icon: 'linktree', color: '43E55E' },
   amazon: { icon: 'amazon', color: 'FF9900' },
+  whatsapp: { icon: 'whatsapp', color: '25D366' },
 };
 
 /** The brand mark's URL, or null when we have none for this slug (the tile then shows an initial). */

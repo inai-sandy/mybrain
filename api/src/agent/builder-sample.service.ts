@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ComposioProvider } from '../tools/composio.provider';
 import { ScrapeCreatorsProvider } from '../tools/scrapecreators.provider';
+import { WhatsAppProvider } from '../tools/whatsapp.provider';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { GatePause } from '../tools/service-gates.service';
 import { isReadAction, isRiskyAction, isServiceToolId, parseServiceToolId, ServiceAction, ServiceProvider } from '../tools/service-provider';
@@ -89,6 +90,9 @@ export class BuilderSampleService {
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly social?: ScrapeCreatorsProvider,
     private readonly prisma?: PrismaService,
+    // The third provider (BEA-1384): WhatsApp reads (list_templates, check_replies…) are
+    // sampleable; its sends are risky and refused above like any other write.
+    private readonly whatsapp?: WhatsAppProvider,
   ) {}
 
   /** `SocialBudgetService` hands itself in at boot. Null = no ceiling on this server (tests). */
@@ -243,6 +247,11 @@ export class BuilderSampleService {
       if (this.social?.owns && (await this.social.owns(actionId))) return this.social as any;
     } catch {
       /* an unreachable second provider must never take the first one down with it */
+    }
+    try {
+      if (this.whatsapp?.owns && this.whatsapp.owns(actionId)) return this.whatsapp as any;
+    } catch {
+      /* same rule for the third */
     }
     return this.services as any;
   }

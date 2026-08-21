@@ -24,6 +24,8 @@ const KIND_LABELS: Record<string, string> = {
   search: 'Search',
   ads: 'Ad libraries',
   followers: 'Followers & audience',
+  messages: 'Messages',
+  templates: 'Templates',
 };
 
 export function Social() {
@@ -87,7 +89,7 @@ export function Social() {
         <div className="min-w-0">
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><Share2 className="text-emerald-500" /> Social</h1>
           <p className="text-zinc-500 text-sm">
-            Every social platform your agents can read from. Pick one, run any endpoint right there, keep what comes back.
+            Every social platform your agents can read from — and WhatsApp to send with. Pick one, run any endpoint right there, keep what comes back.
           </p>
         </div>
         {!loading && !failed && (
