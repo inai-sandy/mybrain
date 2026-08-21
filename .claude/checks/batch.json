@@ -3,7 +3,7 @@
   "note": "Overnight batch (owner asleep, 'finish properly without hold'): BEA-1379 WhatsApp verdict+Telegram fallback (in build, incl. mybrain_result_v1 template preference) -> BEA-1380 folders -> BEA-1381 Settings redesign (mockup approved, specs/mockups/agent-settings.html). Known flake BEA-1376 may fail one ship test run - rerun ship.sh once. Owner will message the WhatsApp number tomorrow.",
   "issues": [
     { "id": "BEA-1379", "title": "WhatsApp verdict check + Telegram fallback (2 repos)", "status": "done" },
-    { "id": "BEA-1380", "title": "Agent folders", "status": "in_progress" },
-    { "id": "BEA-1381", "title": "Agent Settings redesign (approved mockup)", "status": "pending" }
+    { "id": "BEA-1380", "title": "Agent folders", "status": "done" },
+    { "id": "BEA-1381", "title": "Agent Settings redesign (approved mockup)", "status": "done" }
   ]
 }

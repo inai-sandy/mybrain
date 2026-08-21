@@ -1,0 +1,197 @@
+<title>Agent Settings Redesign</title>
+<style>
+  :root{--pg-bg:#ececf0;--pg-ink:#3f3f46;--pg-mut:#71717a;}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){--pg-bg:#111113;--pg-ink:#d4d4d8;--pg-mut:#8b8b93;}
+  }
+  :root[data-theme="dark"]{--pg-bg:#111113;--pg-ink:#d4d4d8;--pg-mut:#8b8b93;}
+  body{background:var(--pg-bg);color:var(--pg-ink);font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;padding:28px 16px 48px;}
+  .intro{max-width:640px;margin:0 auto 26px}
+  .intro h1{font-size:20px;font-weight:800;letter-spacing:-.01em;text-wrap:balance}
+  .intro p{font-size:13.5px;line-height:1.6;color:var(--pg-mut);margin-top:8px}
+  .intro b{color:var(--pg-ink)}
+  .stage{display:flex;flex-wrap:wrap;gap:30px;justify-content:center;align-items:flex-start}
+  .lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--pg-mut);margin:0 0 8px 4px}
+  .col{flex:0 1 auto;max-width:100%}
+
+  /* Each frame carries its OWN fixed palette — it demonstrates the app's light and dark, whatever theme the viewer reads in. */
+  .frame{--bg:#fafafa;--card:#ffffff;--ink:#18181b;--mut:#71717a;--line:#e4e4e7;--em:#059669;--emb:#ecfdf5;--rose:#e11d48;--roseb:#fff1f2;
+    width:min(390px,100%);border-radius:28px;border:8px solid #27272a;overflow:hidden;background:var(--bg);color:var(--ink)}
+  .frame.dk{--bg:#09090b;--card:#18181b;--ink:#fafafa;--mut:#a1a1aa;--line:#27272a;--em:#34d399;--emb:#022c22;--rose:#fb7185;--roseb:#2c0b16}
+  .frame.wide{width:min(760px,100%);border-radius:16px;border-width:4px}
+  h2.pg{font-size:15px;font-weight:700;padding:14px 16px 4px}
+  p.sub{font-size:11px;color:var(--mut);padding:0 16px 10px;line-height:1.5}
+  .sheet{padding:10px 12px 20px;display:flex;flex-direction:column;gap:8px}
+  .wide .sheet{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+  .wide .sheet .full{grid-column:1/-1}
+  details{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  summary{list-style:none;display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer}
+  summary:focus-visible{outline:2px solid var(--em);outline-offset:-2px;border-radius:14px}
+  summary::-webkit-details-marker{display:none}
+  .ico{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;background:var(--emb);flex:0 0 auto}
+  .t{flex:1;min-width:0}
+  .t b{font-size:13px;display:block}
+  .t span{font-size:11px;color:var(--mut);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chev{color:var(--mut);font-size:11px;transition:transform .15s}
+  @media (prefers-reduced-motion: reduce){.chev{transition:none}}
+  details[open] .chev{transform:rotate(90deg)}
+  .body{border-top:1px solid var(--line);padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+  label{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)}
+  .inp{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;background:var(--bg);color:var(--ink)}
+  .row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .row .k{font-size:12px;color:var(--ink);font-weight:500}
+  .pill{font-size:10px;border-radius:999px;padding:3px 9px;background:var(--emb);color:var(--em);font-weight:600}
+  .src{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:11px;display:flex;justify-content:space-between;gap:6px;align-items:center}
+  .src span{color:var(--mut)}
+  .warn{color:#d97706;font-weight:600}
+  .btn{border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-size:11px;font-weight:600;background:none;color:var(--ink);cursor:pointer}
+  .btn:focus-visible{outline:2px solid var(--em);outline-offset:2px}
+  .btn.em{background:var(--em);border-color:transparent;color:#fff}
+  .sw{width:34px;height:20px;border-radius:999px;background:var(--em);position:relative;flex:0 0 auto}
+  .sw::after{content:'';position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+  .sw.off{background:var(--line)}.sw.off::after{right:auto;left:2px}
+  .danger .ico{background:var(--roseb)}
+  .danger .t b{color:var(--rose)}
+  .note{font-size:10.5px;color:var(--mut);line-height:1.5}
+  .save{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:10px 2px 0;margin-top:4px}
+  .save .btn{width:100%;padding:11px;font-size:13px;border-radius:12px}
+</style>
+
+<div class="intro">
+  <h1>Agent Settings, redesigned — seven calm rows</h1>
+  <p>Today the sheet is thirteen blocks in one endless scroll. The proposal: <b>every closed row shows its current setting</b> — “Sources · 5 sources · ≈14 credits/run”, “Schedule · Every Monday 08:00” — so the whole agent is readable in one screen without opening anything. Tap a row to change it; one open at a time; Delete lives apart in red. <b>The rows below really open — tap them.</b></p>
+</div>
+
+<div class="stage">
+<div class="col">
+<p class="lbl">Phone · light</p>
+<div class="frame">
+  <h2 class="pg">Settings — Smart Home India — weekly digest</h2>
+  <p class="sub">Everything about this agent. Closed rows show what’s set, so you rarely need to open them.</p>
+  <div class="sheet">
+    <details open>
+      <summary><div class="ico">🎯</div><div class="t"><b>What it does</b><span>For: understand what gets reach · graded each run</span></div><div class="chev">▶</div></summary>
+      <div class="body">
+        <label>For (the goal)</label><div class="inp">Understand how smart-home accounts post to get maximum reach</div>
+        <label>The task, each run</label><div class="inp" style="min-height:44px">Merge all sources, de-duplicate on shortcode, keep India-relevant posts…</div>
+        <label>A good result looks like</label><div class="inp">A sheet where every row is a real post from the last 30 days…</div>
+      </div>
+    </details>
+    <details>
+      <summary><div class="ico">📥</div><div class="t"><b>Sources</b><span>5 sources · ≈14 credits + ₹18 AI per run</span></div><div class="chev">▶</div></summary>
+      <div class="body">
+        <div class="src"><div>#smarthomeindia <span>· hashtag · ×2 pages</span></div><span>1cr/page</span></div>
+        <div class="src"><div>"smart home india" <span>· reels · ×1</span></div><span class="warn">down ⚠</span></div>
+        <div class="src"><div>Find creators → their posts <span>· 10 · last 30d</span></div><span>≈11cr</span></div>
+        <button class="btn">＋ Add a source</button>
+      </div>
+    </details>
+    <details>
+      <summary><div class="ico">📤</div><div class="t"><b>Result &amp; alerts</b><span>New Google Sheet each run · WhatsApp on</span></div><div class="chev">▶</div></summary>
+      <div class="body">
+        <div class="row"><span class="k">Where it goes</span><span class="pill">Google Sheet — new each run</span></div>
+        <div class="row"><span class="k">WhatsApp me the link</span><div class="sw"></div></div>
+        <div class="row"><span class="k">Telegram</span><div class="sw off"></div></div>
+      </div>
+    </details>
+    <details>
+      <summary><div class="ico">⏰</div><div class="t"><b>Schedule</b><span>Every Monday at 08:00</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="inp">Every week · Monday · 08:00</div></div>
+    </details>
+    <details>
+      <summary><div class="ico">👁</div><div class="t"><b>Watch &amp; alerts</b><span>Fetch every time (not watching)</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="note">Fetch every time · Watch for changes · Alert when… — condition and threshold appear when chosen.</div></div>
+    </details>
+    <details>
+      <summary><div class="ico">🧰</div><div class="t"><b>Skills &amp; tools</b><span>Toolbox: 3 picked · no skills</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="note">Tools this job can use (picker) and skills it reads — the same controls as today, living here.</div></div>
+    </details>
+    <details>
+      <summary><div class="ico">⚙️</div><div class="t"><b>Advanced</b><span>Model: default · history kept forever</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="note">Model for this job · Keep history for · Move to another agent — the rarely-touched things, out of the way.</div></div>
+    </details>
+    <details class="danger">
+      <summary><div class="ico">🗑</div><div class="t"><b>Delete this job</b><span>Run history goes with it · documents are kept</span></div><div class="chev">▶</div></summary>
+      <div class="body"><button class="btn" style="color:var(--rose);border-color:var(--rose)">Delete job</button></div>
+    </details>
+    <div class="save"><button class="btn em">Save changes</button></div>
+  </div>
+</div>
+</div>
+
+<div class="col">
+<p class="lbl">Phone · dark</p>
+<div class="frame dk">
+  <h2 class="pg">Settings — Smart Home India — weekly digest</h2>
+  <p class="sub">Dark mode, same seven rows. The open row is the only tall thing on screen.</p>
+  <div class="sheet">
+    <details>
+      <summary><div class="ico">🎯</div><div class="t"><b>What it does</b><span>For: understand what gets reach · graded each run</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="note">Goal · task · good-result — as in light.</div></div>
+    </details>
+    <details open>
+      <summary><div class="ico">📥</div><div class="t"><b>Sources</b><span>5 sources · ≈14 credits + ₹18 AI per run</span></div><div class="chev">▶</div></summary>
+      <div class="body">
+        <div class="src"><div>#smarthomeindia <span>· hashtag · ×2 pages</span></div><span>1cr/page</span></div>
+        <div class="src"><div>#homeautomationindia <span>· hashtag · ×2</span></div><span>1cr/page</span></div>
+        <div class="src"><div>Find creators → their posts <span>· 10 · last 30d</span></div><span>≈11cr</span></div>
+        <button class="btn">＋ Add a source</button>
+      </div>
+    </details>
+    <details>
+      <summary><div class="ico">📤</div><div class="t"><b>Result &amp; alerts</b><span>New Google Sheet each run · WhatsApp on</span></div><div class="chev">▶</div></summary>
+      <div class="body">
+        <div class="row"><span class="k">Where it goes</span><span class="pill">Google Sheet — new each run</span></div>
+        <div class="row"><span class="k">WhatsApp me the link</span><div class="sw"></div></div>
+      </div>
+    </details>
+    <details>
+      <summary><div class="ico">⏰</div><div class="t"><b>Schedule</b><span>Every Monday at 08:00</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="inp">Every week · Monday · 08:00</div></div>
+    </details>
+    <details>
+      <summary><div class="ico">👁</div><div class="t"><b>Watch &amp; alerts</b><span>Fetch every time</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="note">Fetch every time · Watch for changes · Alert when…</div></div>
+    </details>
+    <details>
+      <summary><div class="ico">🧰</div><div class="t"><b>Skills &amp; tools</b><span>Toolbox: 3 picked</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="note">Toolbox picker + skills.</div></div>
+    </details>
+    <details>
+      <summary><div class="ico">⚙️</div><div class="t"><b>Advanced</b><span>Model: default · history forever</span></div><div class="chev">▶</div></summary>
+      <div class="body"><div class="note">Model · history retention · move.</div></div>
+    </details>
+    <details class="danger">
+      <summary><div class="ico">🗑</div><div class="t"><b>Delete this job</b><span>Run history goes with it</span></div><div class="chev">▶</div></summary>
+      <div class="body"><button class="btn" style="color:var(--rose);border-color:var(--rose)">Delete job</button></div>
+    </details>
+    <div class="save"><button class="btn em">Save changes</button></div>
+  </div>
+</div>
+</div>
+
+<div class="col" style="flex-basis:760px">
+<p class="lbl">Laptop · 1180 — two columns; What-it-does and Sources span full width</p>
+<div class="frame wide">
+  <div class="sheet" style="padding-top:16px">
+    <details class="full" open>
+      <summary><div class="ico">🎯</div><div class="t"><b>What it does</b><span>For: understand what gets reach · graded each run</span></div><div class="chev">▶</div></summary>
+      <div class="body" style="flex-direction:row;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px"><label>For (the goal)</label><div class="inp">Understand how smart-home accounts post to get maximum reach</div></div>
+        <div style="flex:1;min-width:220px"><label>The task, each run</label><div class="inp">Merge all sources, de-dupe on shortcode, keep India-relevant…</div></div>
+      </div>
+    </details>
+    <details class="full">
+      <summary><div class="ico">📥</div><div class="t"><b>Sources</b><span>5 sources · ≈14 credits + ₹18 AI per run</span></div><div class="chev">▶</div></summary>
+      <div class="body"></div>
+    </details>
+    <details><summary><div class="ico">📤</div><div class="t"><b>Result &amp; alerts</b><span>New Sheet · WhatsApp on</span></div><div class="chev">▶</div></summary><div class="body"></div></details>
+    <details><summary><div class="ico">⏰</div><div class="t"><b>Schedule</b><span>Every Monday 08:00</span></div><div class="chev">▶</div></summary><div class="body"></div></details>
+    <details><summary><div class="ico">👁</div><div class="t"><b>Watch &amp; alerts</b><span>Fetch every time</span></div><div class="chev">▶</div></summary><div class="body"></div></details>
+    <details><summary><div class="ico">🧰</div><div class="t"><b>Skills &amp; tools</b><span>Toolbox: 3 picked</span></div><div class="chev">▶</div></summary><div class="body"></div></details>
+    <details><summary><div class="ico">⚙️</div><div class="t"><b>Advanced</b><span>Model: default · history forever</span></div><div class="chev">▶</div></summary><div class="body"></div></details>
+    <details class="danger"><summary><div class="ico">🗑</div><div class="t"><b>Delete this job</b><span>History goes with it</span></div><div class="chev">▶</div></summary><div class="body"></div></details>
+  </div>
+</div>
+</div>
+</div>
