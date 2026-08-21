@@ -957,19 +957,11 @@ export function Agents() {
         {showImport && <ImportGithubModal onDone={(url) => { setShowImport(false); loadHome(); loadAreas(); loadFolders(); if (url) nav(url); }} onClose={() => setShowImport(false)} />}
         {showBuilder && <AgentBuilder seed={builderSeed} folderId={realFolderId} onSeeded={dropSeedParam} onCreated={(url) => { setShowBuilder(false); clearBuilderParams(); loadHome(); loadAreas(); loadFolders(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); if (builderSeed) { const p = new URLSearchParams(params); p.set('builder', '1'); p.delete('sample'); setParams(p, { replace: true }); } setShowNew(true); }} onClose={() => { setShowBuilder(false); clearBuilderParams(); }} />}
         {showNew && <NewAgentForm initial={starterPick} social={socialPrefill} folderId={realFolderId} onCreated={(id) => { setShowNew(false); setStarterPick(null); clearBuilderParams(); loadHome(); loadAreas(); loadFolders(); if (id && socialPrefill) nav(`/agent/a/${id}`); }} onCancel={() => { setShowNew(false); setStarterPick(null); clearBuilderParams(); }} />}
-        {/* Folders (BEA-1380): chips row on the phone, left rail on the laptop — All · folders · Unfiled. */}
-        <div className="lg:flex lg:items-start lg:gap-6">
-          {folders !== null && areasList !== null && (areasList.length > 0 || folders.length > 0) && (
-            <aside className="hidden w-52 shrink-0 lg:block">
-              <FolderNav variant="rail" folders={folders} counts={folderCounts(areasList)} active={folderSel} onSelect={setFolder} onCreate={createFolder} onRename={renameFolder} onDelete={deleteFolder} />
-            </aside>
-          )}
-          <div className="min-w-0 flex-1 space-y-3">
-            {folders !== null && areasList !== null && (areasList.length > 0 || folders.length > 0) && (
-              <div className="lg:hidden">
-                <FolderNav variant="chips" folders={folders} counts={folderCounts(areasList)} active={folderSel} onSelect={setFolder} onCreate={createFolder} onRename={renameFolder} onDelete={deleteFolder} />
-              </div>
-            )}
+        {/* Folders (BEA-1383): ONE horizontal chips row above the list at EVERY width — the BEA-1380
+            laptop left rail was rejected and removed, so the agents list keeps the full width. */}
+        {folders !== null && areasList !== null && (areasList.length > 0 || folders.length > 0) && (
+          <FolderNav folders={folders} counts={folderCounts(areasList)} active={folderSel} onSelect={setFolder} onCreate={createFolder} onRename={renameFolder} onDelete={deleteFolder} />
+        )}
         {areasList === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
         ) : areasList.length === 0 ? (
@@ -1096,8 +1088,6 @@ export function Agents() {
             </div>
           );
         })()}
-          </div>
-        </div>
       </section>
 
       {/* Multi-select move bar (BEA-1380) — floats while anything is ticked. */}

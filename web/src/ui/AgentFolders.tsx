@@ -2,9 +2,9 @@ import { useRef, useState } from 'react';
 import { Check, FolderPlus, Loader2, Pencil, Trash2, X } from 'lucide-react';
 
 /**
- * Flat folders on the Agents home (BEA-1380). The owner creates them and moves his agent cards in;
- * "All" and "Unfiled" are always there. One drawing, two shapes: a chips row on the phone (390) and
- * a left rail on the laptop (1180) — same data, same handlers.
+ * Flat folders on the Agents home (BEA-1380, layout by BEA-1383). The owner creates them and moves
+ * his agent cards in; "All" and "Unfiled" are always there. ONE shape at every width: a horizontal,
+ * sideways-scrolling chips row above the list — the BEA-1380 laptop left rail was rejected and removed.
  */
 export type AgentFolder = { id: string; name: string; order: number; count?: number };
 
@@ -32,7 +32,6 @@ export function inFolder<T extends { folderId?: string | null }>(areas: T[], sel
 }
 
 type NavProps = {
-  variant: 'rail' | 'chips';
   folders: AgentFolder[];
   counts: FolderCounts;
   active: FolderSel;
@@ -98,10 +97,11 @@ function FolderActions({ f, onRename, onDelete }: { f: AgentFolder; onRename: (i
 }
 
 /**
- * The folder nav. `rail` = the laptop left rail (render inside `hidden lg:block`);
- * `chips` = the phone row (render inside `lg:hidden`), horizontally scrollable so 390 never overflows.
+ * The folder nav (BEA-1383): ONE horizontal chips row at every width —
+ * All · folders (with counts) · Unfiled · + New folder. The row scrolls sideways inside its own
+ * container (never the page), and rename/delete ride on the ACTIVE folder chip.
  */
-export function FolderNav({ variant, folders, counts, active, onSelect, onCreate, onRename, onDelete }: NavProps) {
+export function FolderNav({ folders, counts, active, onSelect, onCreate, onRename, onDelete }: NavProps) {
   const [adding, setAdding] = useState(false);
 
   const items: { sel: FolderSel; label: string; count: number; folder?: AgentFolder }[] = [
@@ -110,57 +110,28 @@ export function FolderNav({ variant, folders, counts, active, onSelect, onCreate
     { sel: 'unfiled' as FolderSel, label: 'Unfiled', count: counts.unfiled },
   ];
 
-  if (variant === 'rail') {
-    return (
-      <nav aria-label="Agent folders" data-testid="folder-rail" className="space-y-0.5">
-        {items.map((it) => {
-          const on = active === it.sel;
-          return (
-            <div key={String(it.sel)} className={'group/frow flex items-center rounded-lg ' + (on ? 'bg-zinc-100 dark:bg-zinc-800' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/60')}>
-              <button onClick={() => onSelect(it.sel)} aria-current={on ? 'true' : undefined}
-                className={'flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left text-sm ' + (on ? 'font-semibold text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-300')}>
-                <span aria-hidden className="shrink-0 text-xs">{it.sel === null ? '🗂' : it.sel === 'unfiled' ? '📄' : '📁'}</span>
-                <span className="min-w-0 flex-1 truncate">{it.label}</span>
-                <span className={'shrink-0 rounded-full px-1.5 text-[11px] ' + (on ? 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200' : 'text-zinc-400')}>{it.count}</span>
-              </button>
-              {it.folder && <span className={'pr-1 focus-within:opacity-100 ' + (on ? 'opacity-100' : 'opacity-0 group-hover/frow:opacity-100')}><FolderActions f={it.folder} onRename={onRename} onDelete={onDelete} /></span>}
-            </div>
-          );
-        })}
-        <div className="pt-1">
-          {adding ? (
-            <NewFolderInline onCreate={onCreate} onDone={() => setAdding(false)} />
-          ) : (
-            <button onClick={() => setAdding(true)} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-200">
-              <FolderPlus className="h-4 w-4" />New folder
-            </button>
-          )}
-        </div>
-      </nav>
-    );
-  }
-
-  // chips (phone): one scrollable row — the page itself must never scroll sideways.
   return (
-    <div data-testid="folder-chips" className="space-y-1.5">
-      <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5" role="tablist" aria-label="Agent folders">
+    <div data-testid="folder-chips" className="space-y-2">
+      <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5" role="tablist" aria-label="Agent folders">
         {items.map((it) => {
           const on = active === it.sel;
           return (
-            <span key={String(it.sel)} className="flex shrink-0 items-center">
+            <span key={String(it.sel)} className="flex shrink-0 items-center gap-0.5">
               <button onClick={() => onSelect(it.sel)} role="tab" aria-selected={on}
                 className={'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ' +
-                  (on ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-200 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300')}>
+                  (on
+                    ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                    : 'border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100')}>
                 {it.label}
-                <span className={'rounded-full px-1 text-[10px] ' + (on ? 'bg-white/20' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{it.count}</span>
+                <span className={'rounded-full px-1.5 tabular-nums text-[10px] ' + (on ? 'bg-white/25' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{it.count}</span>
               </button>
               {it.folder && on && <FolderActions f={it.folder} onRename={onRename} onDelete={onDelete} />}
             </span>
           );
         })}
         {adding ? null : (
-          <button onClick={() => setAdding(true)} aria-label="New folder" className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
-            <FolderPlus className="h-3.5 w-3.5" />New
+          <button onClick={() => setAdding(true)} aria-label="New folder" className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-600 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-300">
+            <FolderPlus className="h-3.5 w-3.5" />New folder
           </button>
         )}
       </div>
