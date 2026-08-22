@@ -177,6 +177,9 @@ export class WorkerController {
         const shaped = await this.social.shape(prompt, table, header, (n, of) => this.agent.stampProgress?.(runId, `shaping batch ${n} of ${of}`));
         let aiTokens = 0;
         try { aiTokens = (await this.llm.tokensSince?.('social-shape', start)) || 0; } catch { aiTokens = 0; }
+        // Onto the run, so a worker run shows its AI cost like a plan run does (BEA-1394 §I). Inside
+        // `once()` on purpose: a replayed call spent nothing, so it must not be counted twice.
+        await this.agent.addAiTokens?.(runId, aiTokens)?.catch?.(() => undefined);
         return { ok: !!shaped.ok, columns: shaped.columns || null, rows: shaped.rows || null, note: shaped.note || null, error: shaped.error || null, aiTokens };
       });
       return { ...(hit.value as any), replayed: hit.replayed };
@@ -186,10 +189,14 @@ export class WorkerController {
     if (!prompt.trim()) throw new BadRequestException('An AI step needs a prompt, or a table to shape.');
     const maxTokens = Math.min(Math.max(1, Number(body?.maxTokens) || 1000), AI_MAX_TOKENS);
     const hit = await this.journal.once(runId, seq, 'ai', { helper, prompt, maxTokens }, async () => {
+      const start = new Date();
       const text = await this.llm.completeHelper(helper as any, prompt, maxTokens, helper).catch((e: any) => {
         throw new Error(`the ${helper} model could not be reached — ${String(e?.message || e).slice(0, 120)}`);
       });
-      return { ok: !!text, text: text || null };
+      let aiTokens = 0;
+      try { aiTokens = (await this.llm.tokensSince?.(helper, start)) || 0; } catch { aiTokens = 0; }
+      await this.agent.addAiTokens?.(runId, aiTokens)?.catch?.(() => undefined); // this run's own total (BEA-1394)
+      return { ok: !!text, text: text || null, aiTokens };
     });
     return { ...(hit.value as any), replayed: hit.replayed };
   }

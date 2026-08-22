@@ -5,7 +5,7 @@ import { AgentAreasService, AreaTool } from './agent-areas.service';
 import { BuilderSampleService } from './builder-sample.service';
 import { TOP_BUILDER_SESSION } from './builder-session';
 
-type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[]; folderId?: string | null };
+type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[]; folderId?: string | null; useWorker?: boolean };
 
 /**
  * Agent HTTP surface (BEA-619). All routes are protected by the global cookie-session guard.

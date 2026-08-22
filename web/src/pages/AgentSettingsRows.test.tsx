@@ -7,7 +7,8 @@ import { AgentApp, advancedSummary, contractSummary, goalOf, resultSummary, sche
  * BEA-1381 — the Settings sheet is an accordion of summary rows (approved mockup at
  * specs/mockups/agent-settings.html):
  *  - the rows in the mocked order, ONE open at a time, "What it does" open first
- *    (BEA-1391 added "What counts as a good run" after Result, for direct-fetch jobs only);
+ *    (BEA-1391 added "What counts as a good run" after Result and BEA-1394 the Worker row after it,
+ *    both for direct-fetch jobs only);
  *  - every closed row's summary line states the CURRENT values (live, not placeholders);
  *  - engine (non-social) agents get no Sources row and no Watch row;
  *  - drafted fields (task/rubric, source args, watch mode) surface a sticky "Save changes"
@@ -118,10 +119,10 @@ describe('the accordion (BEA-1381)', () => {
     // ship gate twice; nothing about the page changed).
     await waitFor(() => {
       const ids = Array.from(document.querySelectorAll('[data-testid^="srow-"]:not([data-testid$="-summary"])')).map((el) => el.getAttribute('data-testid'));
-      expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-contract', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
+      expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-contract', 'srow-worker', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
     });
     expect(rowOpen('what')).toBe(true);
-    for (const k of ['sources', 'result', 'contract', 'schedule', 'watch', 'tools', 'advanced', 'delete']) expect(rowOpen(k)).toBe(false);
+    for (const k of ['sources', 'result', 'contract', 'worker', 'schedule', 'watch', 'tools', 'advanced', 'delete']) expect(rowOpen(k)).toBe(false);
     // live summaries, not placeholders
     expect(screen.getByTestId('srow-what-summary')).toHaveTextContent('For: understand what gets reach · graded each run');
     await waitFor(() => expect(screen.getByTestId('srow-sources-summary')).toHaveTextContent('2 sources · ≈ 3 credits + ₹2 AI per run'));
@@ -167,6 +168,7 @@ describe('the accordion (BEA-1381)', () => {
     expect(screen.queryByTestId('srow-sources')).toBeNull();
     expect(screen.queryByTestId('srow-watch')).toBeNull();
     expect(screen.queryByTestId('srow-contract')).toBeNull();
+    expect(screen.queryByTestId('srow-worker')).toBeNull(); // BEA-1394: no plan, so nothing to compile
     expect(screen.getByTestId('srow-result')).toBeTruthy();
     expect(screen.getByTestId('srow-delete')).toBeTruthy();
   });

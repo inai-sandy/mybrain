@@ -30,8 +30,15 @@ export type RunnerParityResult = { ok: boolean; version?: number; result?: Parit
 /** A parity measurement is a few seconds of local work; this is only the patience for a stuck one. */
 const PARITY_TIMEOUT_MS = Number(process.env.WORKER_PARITY_TIMEOUT_MS || 3 * 60_000);
 
-/** What one spawn came back as. `waiting` = it parked on a question and exited (BEA-1392 §H). */
-export type RunnerRunResult = { status: 'done' | 'failed' | 'waiting'; rows?: number | null; error?: string | null; waitpointId?: string | null; timedOut?: boolean; kitRefused?: boolean };
+/**
+ * What one spawn came back as. `waiting` = it parked on a question and exited (BEA-1392 §H).
+ *
+ * `notStarted` is the dispatch switch's own field (BEA-1394): the runner refused BEFORE spawning
+ * anything — no worker installed, a kit it cannot run, the job busy on the host, or the runner not
+ * reachable at all. Nothing ran, so nothing was fetched, written or sent, and the run may quietly go
+ * the old way instead of failing. A worker that STARTED and then failed never carries it.
+ */
+export type RunnerRunResult = { status: 'done' | 'failed' | 'waiting'; rows?: number | null; error?: string | null; waitpointId?: string | null; timedOut?: boolean; kitRefused?: boolean; notStarted?: boolean };
 
 /** A worker run's own patience. The runner caps it too; this is the client's side of the same wait. */
 const RUN_TIMEOUT_MS = Number(process.env.WORKER_RUN_TIMEOUT_MS || 30 * 60_000);
@@ -108,14 +115,18 @@ export class WorkerRunnerClient {
       if (!r.ok) {
         let why = `the worker runner answered ${r.status}`;
         try { why = JSON.parse(text)?.error || why; } catch { /* not JSON — the status stands */ }
-        return { status: 'failed', error: why };
+        // A non-200 means the request never became a spawn: bad body, or a runner that is not
+        // willing. Nothing ran, so this is a road that was unavailable, not a run that failed.
+        return { status: 'failed', error: why, notStarted: true };
       }
       const result = lastResult(text);
       if (!result) return { status: 'failed', error: 'The worker runner said nothing about how the run ended.' };
       return result;
     } catch (e: any) {
       this.log.warn(`run ${input.runId} could not be spawned: ${e?.message || e}`);
-      return { status: 'failed', error: `The worker could not be started — ${reasonOf(e)}.` };
+      // The runner is not installed yet (its systemd unit needs root), is down, or timed out on its
+      // way to answering. Either way nothing of ours ran.
+      return { status: 'failed', error: `The worker could not be started — ${reasonOf(e)}.`, notStarted: true };
     }
   }
 
@@ -138,6 +149,27 @@ export class WorkerRunnerClient {
       return { ok: true, version: json.version, result: json.result, log: json.log || null };
     } catch (e: any) {
       return { ok: false, error: `The repair could not be measured — ${reasonOf(e)}.` };
+    }
+  }
+
+  /**
+   * Delete a job's worker folders — every version, the `current` symlink, the briefs and the saved
+   * answers its tests stood on (BEA-1394 §I, "deleting an agent deletes its worker"). Idempotent: a
+   * job with no folder answers ok, because that is already the state the caller wants.
+   */
+  async remove(jobId: string): Promise<{ ok: boolean; removed?: boolean; error?: string }> {
+    try {
+      const r = await fetch(`${RUNNER}/remove`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ jobId }),
+        signal: AbortSignal.timeout(SHORT_TIMEOUT_MS),
+      });
+      const json: any = await r.json().catch(() => null);
+      if (!r.ok || !json?.ok) return { ok: false, error: json?.error || `the worker runner answered ${r.status}` };
+      return { ok: true, removed: !!json.removed };
+    } catch (e: any) {
+      return { ok: false, error: `The worker folder could not be removed — ${reasonOf(e)}.` };
     }
   }
 
@@ -171,7 +203,9 @@ function lastResult(body: string): RunnerRunResult | null {
     try { ev = JSON.parse(lines[i]); } catch { ev = null; }
     if (ev?.type !== 'result') continue;
     const status = ev.status === 'done' || ev.status === 'waiting' ? ev.status : 'failed';
-    return { status, rows: typeof ev.rows === 'number' ? ev.rows : null, error: ev.error ? String(ev.error) : null, waitpointId: ev.waitpointId || null, timedOut: !!ev.timedOut, kitRefused: !!ev.kitRefused };
+    // Every field is read out by hand, so a field the runner grew has to be added HERE too or it is
+    // silently dropped (the BEA-1389 trap, both ways round).
+    return { status, rows: typeof ev.rows === 'number' ? ev.rows : null, error: ev.error ? String(ev.error) : null, waitpointId: ev.waitpointId || null, timedOut: !!ev.timedOut, kitRefused: !!ev.kitRefused, notStarted: !!ev.notStarted };
   }
   return null;
 }

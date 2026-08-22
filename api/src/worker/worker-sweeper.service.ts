@@ -6,20 +6,8 @@ import { AlertsService } from '../push/alerts.service';
 import { WorkerRunnerClient } from './worker-runner.client';
 import { WorkerTokenService } from './worker-token.service';
 
-/**
- * The kit this app is running, told to the runner so it can refuse a worker built for a NEWER one
- * (§F). The kit is a plain file that only reaches the image through the Dockerfile's own copy, so
- * it is read defensively: a missing parts box must never stop the app from booting, and the runner
- * makes the same decision from the worker's own `meta.json` either way.
- */
-function kitVersion(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return String(require('./kit/kit.js').KIT_VERSION || '1');
-  } catch {
-    return '1';
-  }
-}
+// The kit this app is running (§F, the rollback guard) — one copy, shared with the dispatch switch.
+import { kitVersion } from './kit-version';
 
 /** How often the three sweeps run. A minute is fine — nothing here is urgent to the second. */
 export const TICK_MS = 60_000;

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AgentModule } from '../agent/agent.module';
+import { HermesModule } from '../hermes/hermes.module';
 import { PushModule } from '../push/push.module';
 import { SocialModule } from '../social/social.module';
 import { ToolCatalogModule } from '../tools/tool-catalog.module';
@@ -13,6 +14,7 @@ import { WorkerTokenService } from './worker-token.service';
 import { OwnerAskService } from './owner-ask.service';
 import { WorkerSweeperService } from './worker-sweeper.service';
 import { WorkerRepairService } from './worker-repair.service';
+import { WorkerDispatchService } from './worker-dispatch.service';
 
 /**
  * Agent workers (BEA-1387 — `specs/AGENT-WORKERS.md`): the callback API a worker program on the host
@@ -35,11 +37,16 @@ import { WorkerRepairService } from './worker-repair.service';
  * And self-heal (BEA-1393): `WorkerRepairService` catches a failed worker run at `finishRun()`, keeps
  * the answer that broke it, and gives Codex two tries — against saved answers only, never a vendor —
  * with a promotion guard that holds back any repair which changes what the agent returns.
+ *
+ * And the switch that makes any of it run (BEA-1394): `WorkerDispatchService` registers itself on
+ * `HermesBridgeService.startRun()` — the one door every start comes through — and decides, per run,
+ * whether this job goes down the worker road. That is why this module imports HermesModule; nothing
+ * in Hermes imports back, so there is still no cycle.
  */
 @Module({
-  imports: [AgentModule, SocialModule, ToolCatalogModule, PushModule], // PrismaModule + LlmModule are @Global
+  imports: [AgentModule, SocialModule, ToolCatalogModule, PushModule, HermesModule], // PrismaModule + LlmModule are @Global
   controllers: [WorkerController, WorkerBuildController],
-  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService, OwnerAskService, WorkerSweeperService, WorkerRepairService],
-  exports: [RunJournalService, WorkerTokenService, WorkerBuildService, OwnerAskService, WorkerRepairService],
+  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService, OwnerAskService, WorkerSweeperService, WorkerRepairService, WorkerDispatchService],
+  exports: [RunJournalService, WorkerTokenService, WorkerBuildService, OwnerAskService, WorkerRepairService, WorkerDispatchService],
 })
 export class WorkerModule {}

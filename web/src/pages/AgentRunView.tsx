@@ -28,6 +28,10 @@ type Run = {
   error?: string | null;
   startedAt: string;
   endedAt?: string | null;
+  /** Which road this run took: engine (a Codex turn) | worker | plan (BEA-1387). */
+  runKind?: string;
+  /** What this run really cost (BEA-1394): credits off its own tool calls, AI tokens off the run. */
+  cost?: { credits: number; aiTokens: number; calls: number };
 };
 type Grade = { verdict: 'pass' | 'partial' | 'fail'; score: number; criteria?: { text: string; met: boolean }[]; notes?: string };
 
@@ -184,6 +188,19 @@ export function AgentRunView() {
             </div>
             <StatusBadge status={run.status} />
           </header>
+
+          {/* What this run cost (BEA-1394 §I). Until now neither road showed a total anywhere: the
+              credits are summed from this run's own tool calls, the AI tokens from its model steps. */}
+          {!!run.cost && (run.cost.calls > 0 || run.cost.aiTokens > 0) && (
+            <p className="-mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400" data-testid="run-cost">
+              <span className="font-medium text-zinc-600 dark:text-zinc-300">This run cost</span>
+              <span>{run.cost.credits} credit{run.cost.credits === 1 ? '' : 's'}</span>
+              <span aria-hidden>·</span>
+              <span>{run.cost.aiTokens > 0 ? `${run.cost.aiTokens >= 1000 ? `${Math.round(run.cost.aiTokens / 1000)}k` : run.cost.aiTokens} AI tokens` : 'no AI cost'}</span>
+              {run.cost.calls > 0 && (<><span aria-hidden>·</span><span>{run.cost.calls} paid call{run.cost.calls === 1 ? '' : 's'}</span></>)}
+              {run.runKind === 'worker' && (<><span aria-hidden>·</span><span>on its worker</span></>)}
+            </p>
+          )}
 
           {/* Activity / plan */}
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

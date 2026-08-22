@@ -7,6 +7,8 @@
 //   POST /promote {jobId, version, meta?}          -> {ok, version, previous} — the `current` symlink move
 //   POST /parity {jobId, version, harness, files?, timeoutMs?} -> {ok, result, log} — measure one version
 //                                                    in a throwaway copy, with no token and no network
+//   POST /remove {jobId}                           -> {ok, removed} — the whole job folder, when the
+//                                                    owner deletes the agent (BEA-1394 §I)
 //
 // Why it lives on the host and not in the container: the app image has no `child_process` usage at
 // all, and a second container must not write the same SQLite file. This is a sibling of
@@ -326,17 +328,21 @@ async function handleRun(req, res) {
 
   res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
   const emit = (obj) => { try { res.write(JSON.stringify(obj) + '\n'); } catch (e) {} };
-  const finish = (r) => { try { res.end(JSON.stringify({ type: 'result', status: r.status, rows: r.rows === undefined ? null : r.rows, error: r.error || null, ...(r.waitpointId ? { waitpointId: r.waitpointId } : {}), ...(r.output ? { output: r.output } : {}), ...(r.timedOut ? { timedOut: true } : {}), ...(r.kitRefused ? { kitRefused: true } : {}) }) + '\n'); } catch (e) {} };
+  // Every field is written out by hand here, so a new one has to be added in BOTH places or it is
+  // silently dropped on the way to the app (the trap BEA-1389 wrote down). `notStarted` is the
+  // newest: it marks a refusal that happened BEFORE the spawn, so the app knows the worker road was
+  // simply unavailable and the run can go the old way instead of failing (BEA-1394).
+  const finish = (r) => { try { res.end(JSON.stringify({ type: 'result', status: r.status, rows: r.rows === undefined ? null : r.rows, error: r.error || null, ...(r.waitpointId ? { waitpointId: r.waitpointId } : {}), ...(r.output ? { output: r.output } : {}), ...(r.timedOut ? { timedOut: true } : {}), ...(r.kitRefused ? { kitRefused: true } : {}), ...(r.notStarted ? { notStarted: true } : {}) }) + '\n'); } catch (e) {} };
 
   if (live.has(jobId)) {
     const held = live.get(jobId);
-    finish({ status: 'failed', rows: null, error: `This job is already running here (run ${held.runId}) — this start was refused.` });
+    finish({ status: 'failed', rows: null, error: `This job is already running here (run ${held.runId}) — this start was refused.`, notStarted: true });
     return;
   }
 
   const dir = currentDirOf(jobDir);
-  if (!dir) { finish({ status: 'failed', rows: null, error: 'No worker is installed for this job yet.' }); return; }
-  if (!fs.existsSync(path.join(dir, 'worker.mjs'))) { finish({ status: 'failed', rows: null, error: `The installed worker has no worker.mjs (${path.basename(dir)}).` }); return; }
+  if (!dir) { finish({ status: 'failed', rows: null, error: 'No worker is installed for this job yet.', notStarted: true }); return; }
+  if (!fs.existsSync(path.join(dir, 'worker.mjs'))) { finish({ status: 'failed', rows: null, error: `The installed worker has no worker.mjs (${path.basename(dir)}).`, notStarted: true }); return; }
 
   // The worker folders outlive the app image: `deploy.sh` rolls back by re-tagging `mybrain-app:prev`
   // and never touches /srv/mybrain-workers, so a rolled-back app can meet a worker built against a
@@ -345,13 +351,13 @@ async function handleRun(req, res) {
   const meta = readMeta(dir);
   const workerKit = meta && meta.kit != null ? meta.kit : null;
   if (workerKit === null) {
-    finish({ status: 'failed', rows: null, error: `The installed worker (${path.basename(dir)}) has no readable meta.json, so its kit version is unknown — it needs a rebuild.` });
+    finish({ status: 'failed', rows: null, error: `The installed worker (${path.basename(dir)}) has no readable meta.json, so its kit version is unknown — it needs a rebuild.`, notStarted: true });
     return;
   }
   const wantMajor = majorOf(workerKit);
   const haveMajor = majorOf(appKit);
   if (!Number.isFinite(wantMajor) || !Number.isFinite(haveMajor)) {
-    finish({ status: 'failed', rows: null, error: `Could not read the kit versions (worker "${workerKit}", app "${appKit}") — the worker needs a rebuild.` });
+    finish({ status: 'failed', rows: null, error: `Could not read the kit versions (worker "${workerKit}", app "${appKit}") — the worker needs a rebuild.`, notStarted: true });
     return;
   }
   if (wantMajor > haveMajor) {
@@ -360,6 +366,7 @@ async function handleRun(req, res) {
       rows: null,
       error: `This job's worker was built for kit v${wantMajor} and My Brain is on kit v${haveMajor}, so it was not started. The app can be rolled back to an older image; worker folders are not rolled back with it. Rebuild the worker, or run the job the old way.`,
       kitRefused: true,
+      notStarted: true,
     });
     return;
   }
@@ -722,6 +729,44 @@ async function handlePromote(req, res) {
   res.end(JSON.stringify({ ok: true, version, previous, dir }));
 }
 
+// ---------------------------------------------------------------------------------------------
+// POST /remove {jobId} — the housekeeping half of "deleting an agent deletes its worker"
+// (BEA-1394 — `specs/AGENT-WORKERS.md` §I). The app owns the rows; the disk is ours, so it asks.
+//
+// It removes the WHOLE job folder — every version, the `current` symlink, the briefs and the saved
+// answers a build was tested against. Idempotent: a job that has no folder is already in the state
+// the caller wants, so that answers ok. A job with something running here is refused rather than
+// pulled out from under itself — the app deletes the run rows first, so the spawn is already
+// orphaned and will die at its timeout, and a second delete of a folder nobody wants is harmless.
+// ---------------------------------------------------------------------------------------------
+async function handleRemove(req, res) {
+  let body = {};
+  try { body = JSON.parse(await readBody(req)); }
+  catch (e) {
+    const msg = String((e && e.message) || '');
+    if (/too large/.test(msg)) { res.statusCode = 413; try { res.end(JSON.stringify({ ok: false, error: 'request body too large (8MB max)' }), () => req.destroy()); } catch (e2) { try { req.destroy(); } catch (e3) {} } return; }
+    if (/socket|aborted|ECONN|hang up/i.test(msg)) return;
+    res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad body' })); return;
+  }
+  const jobId = String(body.jobId || '');
+  const jobDir = jobDirOf(jobId);
+  // `jobDirOf` is the only path guard there is: the id must match the pattern AND resolve to a direct
+  // child of the workers root. Nothing here ever joins a caller's string onto a path by itself.
+  if (!jobDir) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad or missing jobId' })); return; }
+  if (live.has(jobId)) { res.statusCode = 409; res.end(JSON.stringify({ ok: false, error: `This job is busy here (${live.get(jobId).kind}) — nothing was removed.` })); return; }
+  if (!fs.existsSync(jobDir)) { res.end(JSON.stringify({ ok: true, removed: false, dir: jobDir })); return; }
+  try {
+    fs.rmSync(jobDir, { recursive: true, force: true });
+  } catch (e) {
+    res.statusCode = 500;
+    res.end(JSON.stringify({ ok: false, error: `could not remove the worker folder: ${String((e && e.message) || e)}` }));
+    return;
+  }
+  // The build turn prunes these after every build; a removed folder must not leave one behind either.
+  pruneWorkerTrust();
+  res.end(JSON.stringify({ ok: true, removed: true, dir: jobDir }));
+}
+
 /**
  * Optional shared secret. Off by default, exactly like every other host runner on this VPS — the
  * only thing that can reach 172.18.0.1 is this host and its containers. It is here so the door can
@@ -748,6 +793,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/build') { await handleBuild(req, res); return; }
     if (req.method === 'POST' && req.url === '/promote') { await handlePromote(req, res); return; }
     if (req.method === 'POST' && req.url === '/parity') { await handleParity(req, res); return; }
+    if (req.method === 'POST' && req.url === '/remove') { await handleRemove(req, res); return; }
     res.statusCode = 404;
     res.end(JSON.stringify({ error: 'not found' }));
   } catch (e) {

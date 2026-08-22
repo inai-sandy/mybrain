@@ -243,6 +243,8 @@ export class SocialAgentRunService {
         await step({ label: 'Shaping the rows the way you asked', status: 'running', kind: 'log', nodeId: 'shape' });
         const shaped = await this.shape(plan.shape.prompt, table, existing?.header?.length ? existing.header : null, (n, of) => progress(`shaping batch ${n} of ${of}`));
         try { aiTokens = (await this.llm.tokensSince?.('social-shape', shapeStart)) || 0; } catch { aiTokens = 0; }
+        // …and onto the run itself, so the run screen can show what this run cost (BEA-1394 §I).
+        await this.agent.addAiTokens?.(runId, aiTokens)?.catch?.(() => undefined);
         if (!shaped.ok) { await step({ label: `Could not shape the rows: ${shaped.error}`, status: 'failed', nodeId: 'shape' }); return fail(`Could not shape the rows: ${shaped.error}`); }
         table = { columns: shaped.columns!, rows: shaped.rows!, itemCount: table.itemCount };
         await step({ label: `Shaped ${shaped.rows!.length} row${shaped.rows!.length === 1 ? '' : 's'} into ${shaped.columns!.length} columns${shaped.note ? ` · ${shaped.note}` : ''}${aiTokens ? ` · ${fmtTokens(aiTokens)} AI tokens` : ''}`, status: 'done', nodeId: 'shape' });
@@ -372,7 +374,10 @@ export class SocialAgentRunService {
       }
       if (!fired && condition) {
         await step({ label: `Judging your condition: “${condition.slice(0, 120)}”`, status: 'running', kind: 'log' });
+        const judgeStart = new Date();
         const j = await this.judge(condition, changedDiffs.map((p) => p.diff));
+        // An Alert's judgement is a model step too, so it counts towards the run's cost (BEA-1394 §I).
+        try { await this.agent.addAiTokens?.(runId, (await this.llm.tokensSince?.('social-alert', judgeStart)) || 0); } catch { /* a figure is never worth a run */ }
         if (!j.ok) return fail(`Could not judge the alert condition: ${j.error}`);
         fired = !!j.fires;
         why = j.why || '';
