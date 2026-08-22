@@ -766,6 +766,33 @@ host port, so the unit sets `https://mybrain.1site.ai`; `codex exec --json` anno
 `thread.started`/`thread_id`, not `session_id`; a build's `files` map is checked for `..`/absolute
 paths BEFORE the version folder is made, so a bad request leaves nothing behind.
 
+**A worker knows what "it worked" means, and fails loudly (BEA-1391, agent workers 6/10 —
+`specs/AGENT-WORKERS.md` §E).** BEA-1377 fetched 90 answers, recognised 0 rows, wrote an empty
+Google Sheet, reported success and cost 101 credits. Now every worker folder carries
+**`contract.json`** — `minRows · maxRows · columns · mustHave · freshnessDays · allowEmptyWhen` —
+**written by the app, not by Codex**: `contractFromPlan()` (`api/src/worker/contract.ts`) derives it
+from the same plan the worker is compiled from, the build turn ships it as a file, and the brief
+tells Codex to use it and never edit it (a contract a model invents can be as wrong as the bug it is
+meant to catch). It only asserts what can be KNOWN: `columns` only when the task names them in so
+many words (`columnsNamedIn`), `mustHave` only a link-shaped column of those, `freshnessDays` only
+from a creators block's own `keepDays` — a check that fails a good run would teach the owner to
+ignore the alarm. **`kit.expect(rows, contract)`** runs before the output step (pure, local, free, no
+place in the call order, so a replay reaches the same verdict) and throws `ContractError` with a
+sentence the owner reads on the run screen; the kit **refuses `writeSheet`/`writeDocument` when a
+contract exists and `expect` was never called**, so a forgotten check cannot reopen the hole. **The
+boundary is the whole piece**: `empty:true` alone cannot tell "the vendor had nothing" from "we could
+not read what it sent", so the BEA-1377 tripwire's verdict now rides as **`unrecognised`** on
+`FetchOut` → `POST /api/worker/tool` → the kit's own memory of every fetch (never the worker's story
+about it). Genuinely empty → the run finishes `done` with 0 rows and writes nothing, exactly as
+`nothingFound()` always did; unrecognised → the run FAILS and writes nothing. **The plan runner is
+untouched** — the owner's live jobs behave exactly as before; the contract is the worker road's. The
+owner reads it in the job's Settings: the **"What counts as a good run"** accordion row
+(`contractWords` off `GET /api/social/plan/:agentId`, direct-fetch jobs only — the full Worker tab is
+piece 9). Proved by `kit-contract.spec.ts` (the real controller + real saved answers: a creators job
+whose per-creator payloads arrive as a JSON string fails with "fetched 3 answers but recognised 0
+rows", no sheet, no document, no WhatsApp) and by a real Codex build turn whose own tests cover both
+cases.
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

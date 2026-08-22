@@ -38,6 +38,34 @@ Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-4
     `GET` beside it for the version, the tests, staleness and the last builds. The tap that calls them
     is the Worker tab (piece 9) — a Codex session started silently by every agent create would be a
     surprise, and there is nothing to show it on yet.
+- **6/10 — §E contracts** (BEA-1391): `contract.json` in every worker folder, `kit.expect(rows,
+  contract)` before the output step, `ContractError` with a sentence the owner can read, and the
+  contract in plain words in the job's Settings ("What counts as a good run"). The boundary this
+  piece exists for, proved end to end on saved answers: **an answer we could not read fails the run
+  and writes nothing; an answer that was genuinely empty still finishes `done` with 0 rows.**
+  Deliberate differences from the sketch below:
+  - **the app writes `contract.json`, not Codex.** `contractFromPlan()` (`api/src/worker/
+    contract.ts`) derives it from the same plan the worker is compiled from, the build turn ships it
+    as a file, and the brief tells Codex to use it and never to edit it. A contract a model invents
+    can be exactly as wrong as the bug it is there to catch — and the same function writes the plain
+    words the owner reads, so what he reads IS what runs;
+  - **it only asserts what can be known.** `columns` is filled only when the task names its columns
+    in so many words (`columnsNamedIn`, conservative by design), `mustHave` only from a link-shaped
+    column of those, `freshnessDays` only from a creators block's own `keepDays`. A check that fails
+    a good run would teach the owner to ignore the alarm;
+  - **`unrecognised` is a new field on the fetch, beside `empty`.** The BEA-1377 tripwire already
+    existed inside `fetchCreators` and said the right words on the run; a contract needs the verdict
+    as data, because `empty: true` alone cannot tell "the vendor had nothing" (a good, quiet run)
+    from "we could not read what it sent" (our bug). It rides through `FetchOut` → `POST
+    /api/worker/tool` → the kit's own memory of every fetch, so `kit.expect` is never handed a story
+    about the fetch that differs from what happened;
+  - **the kit refuses to write anything it has not checked.** A worker with a contract that never
+    called `kit.expect` gets a plain failure out of `writeSheet`/`writeDocument`, because a forgotten
+    check would put the design back where BEA-1377 found it;
+  - **the plan runner is untouched.** Its `nothingFound()` still finishes `done`, and the tripwire
+    still only says so out loud there — the owner's six live jobs run exactly as they did. The
+    contract is the worker road's, which is where a run can be failed without changing what he
+    already relies on.
 
 ## The owner's words
 

@@ -51,6 +51,7 @@ export function AgentApp() {
   const [pickingTools, setPickingTools] = useState(false); // this job's own toolbox (BEA-1168)
   const [addingSource, setAddingSource] = useState(false); // another Social source on a direct-fetch job (BEA-1359)
   const [planCost, setPlanCost] = useState<PlanCost | null>(null); // ≈ what one run costs (BEA-1369); today's figure while a source is down (BEA-1375)
+  const [contractWords, setContractWords] = useState<string[] | null>(null); // what "it worked" means, in plain words (BEA-1391)
   const catalog = useCatalog();
   const toolNames: Record<string, string> = Object.fromEntries((catalog?.tools || []).map((t: any) => [t.id, t.name]));
   const [allSkills, setAllSkills] = useState<any[] | null>(null);
@@ -100,9 +101,13 @@ export function AgentApp() {
   const isDirectFetch = !!(a?.toolArgs && typeof a.toolArgs === 'object' && Object.keys(a.toolArgs).length);
   const toolArgsKey = isDirectFetch ? JSON.stringify(a.toolArgs) : '';
   useEffect(() => {
-    if (!isDirectFetch) { setPlanCost(null); return; }
+    if (!isDirectFetch) { setPlanCost(null); setContractWords(null); return; }
     let live = true;
-    fetch(`/api/social/plan/${id}`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live) setPlanCost(d?.cost && Number.isFinite(Number(d.cost.credits)) ? d.cost : null); }).catch(() => { if (live) setPlanCost(null); });
+    fetch(`/api/social/plan/${id}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!live) return;
+      setPlanCost(d?.cost && Number.isFinite(Number(d.cost.credits)) ? d.cost : null);
+      setContractWords(Array.isArray(d?.contractWords) && d.contractWords.length ? d.contractWords : null);
+    }).catch(() => { if (live) { setPlanCost(null); setContractWords(null); } });
     return () => { live = false; };
     /* eslint-disable-next-line */
   }, [id, toolArgsKey]);
@@ -575,6 +580,20 @@ export function AgentApp() {
                 </label>
               </SettingsRow>
 
+              {/* 3b · What counts as a good run ✅ — the contract in plain words (BEA-1391) */}
+              {isDirectFetch && contractWords && (
+                <SettingsRow k="contract" icon="✅" title="What counts as a good run"
+                  summary={contractSummary(contractWords)}
+                  open={openRow === 'contract'} onToggle={toggleRow}>
+                  <ul className="space-y-1.5" data-testid="contract-words">
+                    {contractWords.map((line, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-zinc-600 dark:text-zinc-300"><span className="text-emerald-600 dark:text-emerald-400">✓</span><span>{line}</span></li>
+                    ))}
+                  </ul>
+                  <p className="text-[11px] text-zinc-400">Checked before anything is written. A run that does not pass fails out loud and writes nothing — no half-empty sheet, no "done" with no rows. These checks come from the plan above, so changing the sources or the task changes them too.</p>
+                </SettingsRow>
+              )}
+
               {/* 4 · Schedule ⏰ */}
               <SettingsRow k="schedule" icon="⏰" title="Schedule"
                 summary={scheduleSummary(a)}
@@ -788,6 +807,12 @@ export function sourcesSummary(n: number, cost: PlanCost | null): string {
   if (!cost) return base;
   const ai = typeof cost.aiRupees === 'number' && cost.aiRupees > 0 ? ` + ₹${cost.aiRupees} AI` : '';
   return `${base} · ${creditsText(cost)}${ai} per run`;
+}
+
+/** "N checks before it writes anything" — the contract's own line count (BEA-1391). */
+export function contractSummary(words: string[] | null): string {
+  const n = (words || []).length;
+  return n ? `${n} check${n === 1 ? '' : 's'} before it writes anything` : 'Nothing is checked yet';
 }
 
 export function resultSummary(a: any): string {

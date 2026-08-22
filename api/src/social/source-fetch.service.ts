@@ -11,8 +11,15 @@ export type FetchGuard = (actionId: string) => Promise<string | null>;
 export type FetchCtx = (id: string, args: Record<string, any>) => any;
 /** One readable line on the run screen. */
 export type FetchStep = (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>;
-/** What one source produced: the answer, what it cost, or why it is empty / why the run must stop. */
-export type FetchOut = { r?: ServiceRunResult; credits: number; empty?: boolean; why?: string; stop?: string };
+/**
+ * What one source produced: the answer, what it cost, or why it is empty / why the run must stop.
+ *
+ * `unrecognised` is the BEA-1377 tripwire's verdict (BEA-1391): the calls SUCCEEDED and carried
+ * data, and no shape here read a single row out of it. It rides beside `empty` because the run's
+ * words are the same either way, but a contract must tell the two apart — a genuinely empty vendor
+ * answer is a fine, quiet day; an answer we could not read is our bug and may never write output.
+ */
+export type FetchOut = { r?: ServiceRunResult; credits: number; empty?: boolean; unrecognised?: boolean; why?: string; stop?: string };
 export type FetchOpts = {
   /** " (smarthomeindia)" when several sources share this action (BEA-1374) — so five hashtag steps read as five. */
   hint?: string;
@@ -266,7 +273,9 @@ export class SourceFetchService {
     if (!rawCount && unrecognised) {
       const bug = `fetched ${okCount} answer${okCount === 1 ? '' : 's'} but recognised 0 rows — this is a My Brain bug, not the vendor`;
       await step({ label: `${creators.length} creator${creators.length === 1 ? '' : 's'} · ${bug} · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
-      return { credits, empty: true, why: bug };
+      // `unrecognised` marks it as OUR bug for the contract check (BEA-1391 §E): the run's words are
+      // the same, but a worker may never treat this as "the vendor had nothing" and write anyway.
+      return { credits, empty: true, unrecognised: true, why: bug };
     }
     await step({ label, status: 'done', detail: failures.length ? failures.join('\n').slice(0, 1200) : JSON.stringify(src.find.args).slice(0, 300), nodeId });
     // Fetched fine but nothing kept (every post older than the window, or every account empty): an

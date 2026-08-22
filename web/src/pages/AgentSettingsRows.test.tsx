@@ -1,12 +1,13 @@
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { AgentApp, advancedSummary, goalOf, resultSummary, scheduleSummary, sourcesSummary, toolsSummary, watchSummary, whatSummary } from './AgentApp';
+import { AgentApp, advancedSummary, contractSummary, goalOf, resultSummary, scheduleSummary, sourcesSummary, toolsSummary, watchSummary, whatSummary } from './AgentApp';
 
 /**
  * BEA-1381 — the Settings sheet is an accordion of summary rows (approved mockup at
  * specs/mockups/agent-settings.html):
- *  - eight rows in the mocked order, ONE open at a time, "What it does" open first;
+ *  - the rows in the mocked order, ONE open at a time, "What it does" open first
+ *    (BEA-1391 added "What counts as a good run" after Result, for direct-fetch jobs only);
  *  - every closed row's summary line states the CURRENT values (live, not placeholders);
  *  - engine (non-social) agents get no Sources row and no Watch row;
  *  - drafted fields (task/rubric, source args, watch mode) surface a sticky "Save changes"
@@ -31,6 +32,14 @@ const SOCIAL_AGENT = {
   schedule: { every: 'week', dow: 1, at: '08:00' }, scheduleText: 'Every Monday at 08:00',
   mode: 'run', alertCondition: null, threshold: null, skills: ['sk1'], engine: null, keepDays: null,
 };
+/** What "it worked" means for this job, as the server renders it (BEA-1391 §E). */
+const CONTRACT_WORDS = [
+  'It must find at least 1 row. Fewer than that and the run fails and writes nothing.',
+  'More than 5,000 rows means something ran away, so that fails too.',
+  'It does not check the columns — the task does not name any.',
+  'Finding nothing is fine when every source returned an empty answer — but recognising nothing out of an answer that DID have something in it is a failure, and nothing is written.',
+];
+
 const ENGINE_AGENT = { ...SOCIAL_AGENT, id: 'ag2', tools: [], toolArgs: null, outputDest: 'document', notifyWhatsApp: false, engine: { provider: 'codex', model: 'gpt-5.2' }, keepDays: 30, skills: [] };
 
 function mockApi(agent: any, extra: (url: string, init?: any) => any = () => null) {
@@ -39,7 +48,7 @@ function mockApi(agent: any, extra: (url: string, init?: any) => any = () => nul
     if (x) return x;
     if (url === `/api/agent/agents/${agent.id}` && init?.method === 'PATCH') { const body = JSON.parse(init.body); return { ok: true, json: async () => ({ ...agent, ...body }) }; }
     if (url === `/api/agent/agents/${agent.id}`) return { ok: true, json: async () => agent };
-    if (url === `/api/social/plan/${agent.id}`) return { ok: true, json: async () => ({ plan: {}, cost: { credits: 3, aiTokens: 6000, aiRupees: 2, items: 24, how: '2 sources' } }) };
+    if (url === `/api/social/plan/${agent.id}`) return { ok: true, json: async () => ({ plan: {}, cost: { credits: 3, aiTokens: 6000, aiRupees: 2, items: 24, how: '2 sources' }, contract: { minRows: 1, maxRows: 5000, columns: [], mustHave: [], freshnessDays: null, allowEmptyWhen: 'every source returned an empty answer' }, contractWords: CONTRACT_WORDS }) };
     if (url.startsWith('/api/agent/runs')) return { ok: true, json: async () => [] };
     if (url.startsWith('/api/flows')) return { ok: true, json: async () => ({ flows: [] }) };
     if (url === '/api/skills') return { ok: true, json: async () => ({ skills: [{ id: 'sk1', title: 'Summarise' }] }) };
@@ -102,17 +111,17 @@ describe('the accordion (BEA-1381)', () => {
   beforeEach(() => { vi.restoreAllMocks(); });
   afterEach(() => cleanup());
 
-  it('a direct-fetch job shows all eight rows in the mocked order, "What it does" open, live summaries on the rest', async () => {
+  it('a direct-fetch job shows every row in the mocked order, "What it does" open, live summaries on the rest', async () => {
     mount(SOCIAL_AGENT);
     // The Watch row appears with the job's own answer, one render after the first row — so the
     // whole list is waited for, not just the first of it (this raced under load and failed the
     // ship gate twice; nothing about the page changed).
     await waitFor(() => {
       const ids = Array.from(document.querySelectorAll('[data-testid^="srow-"]:not([data-testid$="-summary"])')).map((el) => el.getAttribute('data-testid'));
-      expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
+      expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-contract', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
     });
     expect(rowOpen('what')).toBe(true);
-    for (const k of ['sources', 'result', 'schedule', 'watch', 'tools', 'advanced', 'delete']) expect(rowOpen(k)).toBe(false);
+    for (const k of ['sources', 'result', 'contract', 'schedule', 'watch', 'tools', 'advanced', 'delete']) expect(rowOpen(k)).toBe(false);
     // live summaries, not placeholders
     expect(screen.getByTestId('srow-what-summary')).toHaveTextContent('For: understand what gets reach · graded each run');
     await waitFor(() => expect(screen.getByTestId('srow-sources-summary')).toHaveTextContent('2 sources · ≈ 3 credits + ₹2 AI per run'));
@@ -135,11 +144,29 @@ describe('the accordion (BEA-1381)', () => {
     expect(rowOpen('schedule')).toBe(false);
   });
 
-  it('an engine job has NO Sources row and NO Watch row — no empty shells', async () => {
+  /**
+   * BEA-1391 §E: the contract in plain words, where the owner can read what his agent checks before
+   * it writes anything. The words are the SERVER's — the page never composes a rule of its own.
+   */
+  it('"What counts as a good run" reads the contract in plain English, straight from the server', async () => {
+    mount(SOCIAL_AGENT);
+    await waitFor(() => expect(screen.getByTestId('srow-contract')).toBeTruthy());
+    expect(screen.getByTestId('srow-contract-summary')).toHaveTextContent('4 checks before it writes anything');
+    fireEvent.click(screen.getByTestId('srow-contract-summary').closest('summary')!);
+    const words = screen.getByTestId('contract-words');
+    expect(words).toHaveTextContent('It must find at least 1 row.');
+    expect(words).toHaveTextContent('recognising nothing out of an answer that DID have something in it is a failure');
+    // plain English only — no JSON, no field names
+    expect(words.textContent).not.toMatch(/minRows|allowEmptyWhen|\{/);
+    expect(contractSummary([])).toBe('Nothing is checked yet');
+  });
+
+  it('an engine job has NO Sources row, NO Watch row and NO contract row — no empty shells', async () => {
     mount(ENGINE_AGENT);
     await waitFor(() => expect(screen.getByTestId('srow-what')).toBeTruthy());
     expect(screen.queryByTestId('srow-sources')).toBeNull();
     expect(screen.queryByTestId('srow-watch')).toBeNull();
+    expect(screen.queryByTestId('srow-contract')).toBeNull();
     expect(screen.getByTestId('srow-result')).toBeTruthy();
     expect(screen.getByTestId('srow-delete')).toBeTruthy();
   });

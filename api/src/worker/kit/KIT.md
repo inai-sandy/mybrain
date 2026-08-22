@@ -21,7 +21,8 @@ await kit.merge(tables)                      // several tables -> one, by the ap
 
 ```js
 { ok: true, label: 'Instagram · Search Profiles (smart home)', credits: 3, empty: false,
-  why: null, stop: null, table: { columns: [...], rows: [[...], ...], itemCount: 12 } }
+  unrecognised: false, why: null, stop: null,
+  table: { columns: [...], rows: [[...], ...], itemCount: 12 } }
 ```
 
 - **Never page by hand.** `pages` is the plan's own number; the app runs every page, de-dupes on the
@@ -29,11 +30,16 @@ await kit.merge(tables)                      // several tables -> one, by the ap
   too — the same call runs the finder and then each creator's action.
 - `empty: true` with `ok: true` is a source that genuinely had nothing (a search that answered
   "not found"). That is **not** a failure: say so in a step and carry on with the other sources.
+- `unrecognised: true` is the opposite, and it matters: the calls **succeeded and carried data**, and
+  no shape in the app read a single row out of it. That is our bug, never a quiet day. `kit.expect`
+  knows the difference — you never have to.
 - `stop` is a reason the run must end (the ceiling, a refused call). `kit.fetchSource` throws in that
   case — let it out, do not swallow it.
 
 `merge(tables)` takes `[{ id: label, table }, …]` and answers one table with a `source` column,
-de-duped across sources on the id column. With one table it answers that table.
+de-duped across sources on the id column. With one table it answers that table. **Only sources that
+brought rows go into it** — an empty source, or one whose table has 0 rows, is left out (that is
+exactly what the plan runner does), and if none brought rows there is nothing to merge at all.
 
 ## Shaping and judging
 
@@ -56,6 +62,27 @@ await kit.notify({ whatsapp, telegram }, { headline, detail, url, title })
 The sheet writer is the app's: it creates the sheet, or appends under the sheet's own header and
 skips rows the sheet already has. Never write the same rows twice "to be safe" — a replayed call
 returns the recorded answer, and a second write with different arguments really would write twice.
+
+## The contract — what "it worked" means
+
+```js
+const contract = JSON.parse(readFileSync(new URL('./contract.json', import.meta.url), 'utf8'));
+const verdict = kit.expect(table, contract);   // -> {ok:true, rows, empty} | throws ContractError
+```
+
+`contract.json` is written by the app from the same plan this worker was compiled from. **Never edit
+it.** Call `kit.expect` **before the output step, on every road**, on the very rows you are about to
+write, and **let a `ContractError` out** — the kit refuses `writeSheet`, `writeDocument` and
+`notify` unless the last check PASSED and it was a check of those same rows.
+
+- `verdict.empty === true` — every source genuinely came back empty. Finish `done` with 0 rows: no
+  write, no message. That is a good run.
+- It **throws** `ContractError` when the rows are not what a good run looks like — too few, too many,
+  a missing column, a `mustHave` column that is blank in most rows, rows older than the window, or the
+  one that matters most: **0 rows out of answers that were not empty**. Let it out; the top-level
+  catch turns it into `kit.fail(reason)` and nothing is written.
+
+It is free and local: no HTTP call, no credits, and no place in the call order.
 
 ## Discipline
 

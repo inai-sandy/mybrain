@@ -100,6 +100,9 @@ export class WorkerController {
           label,
           credits: out.credits,
           empty: !!out.empty,
+          // The BEA-1377 tripwire's verdict rides to the worker, so `kit.expect` can tell "the vendor
+          // had nothing" (a fine, quiet run) from "we could not read what it sent" (a failure).
+          unrecognised: !!out.unrecognised,
           why: out.why || null,
           stop: out.stop || null,
           table: out.r ? tableOf(out.r.data) : null,

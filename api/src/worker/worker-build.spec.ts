@@ -125,7 +125,7 @@ describe('the build brief — what Codex is handed', () => {
           sampleId: 'sample-1',
           capturedAt: '2026-08-22T10:00:00Z',
           creditsEstimated: true,
-          answer: { ok: true, label: 'Instagram · Search Hashtag Posts', credits: 1, empty: false, why: null, stop: null, table: { columns: ['id'], rows: [['p1']], itemCount: 1 } },
+          answer: { ok: true, label: 'Instagram · Search Hashtag Posts', credits: 1, empty: false, unrecognised: false, why: null, stop: null, table: { columns: ['id'], rows: [['p1']], itemCount: 1 } },
         },
       ],
       kit: { version: '1', js: 'exports.makeKit = 1;', doc: '# kit' },
@@ -138,7 +138,7 @@ describe('the build brief — what Codex is handed', () => {
 
   it('writes the kit, its docs, the plan and the saved answers into the folder', () => {
     const req = buildRequest(inputs());
-    expect(Object.keys(req.files).sort()).toEqual(['kit/KIT.md', 'kit/kit.js', 'plan.json', sampleFileName(HASHTAG), 'samples/index.json'].sort());
+    expect(Object.keys(req.files).sort()).toEqual(['kit/KIT.md', 'kit/kit.js', 'plan.json', 'contract.json', sampleFileName(HASHTAG), 'samples/index.json'].sort());
     const index = JSON.parse(req.files['samples/index.json']);
     expect(index.sources).toHaveLength(1);
     expect(index.sources[0]).toMatchObject({ sourceId: HASHTAG, sampleId: 'sample-1', rows: 1 });
@@ -157,6 +157,23 @@ describe('the build brief — what Codex is handed', () => {
     // no key, no token, no cookie ever reaches a worker folder — the run token is minted per spawn
     const all = req.brief + JSON.stringify(req.files);
     expect(all).not.toMatch(/api[_-]?key|MYBRAIN_TOKEN\s*=|Bearer |password|secret[_-]?key/i);
+  });
+
+  /**
+   * The contract goes into the folder as a FILE the app wrote (BEA-1391 §E) — Codex is told to use it
+   * and never to write one. A contract a model invents can be exactly as wrong as the bug it is
+   * supposed to catch, and the owner reads these same words in his Settings.
+   */
+  it('carries the contract, in JSON and in plain words, and tells Codex not to write its own', () => {
+    const req = buildRequest(inputs());
+    const contract = JSON.parse(req.files['contract.json']);
+    expect(contract).toMatchObject({ minRows: 1, allowEmptyWhen: 'every source returned an empty answer' });
+    expect(req.brief).toContain('kit.expect(table, contract)');
+    expect(req.brief).toContain('Do not write it, do not edit it');
+    expect(req.brief).toContain('It must find at least 1 row.');
+    // and the two tests that ARE this piece's acceptance
+    expect(req.brief).toContain('The BEA-1377 shape fails loudly');
+    expect(req.brief).toContain('Every source genuinely empty still finishes');
   });
 
   it('says out loud when a source has no saved answer yet, instead of inventing one quietly', () => {
