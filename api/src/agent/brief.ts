@@ -79,6 +79,12 @@ export type BriefSource = {
   id: string;
   actionId: string;
   args: Record<string, any>;
+  /**
+   * How many pages to ask for: a number, or `"all"` — until the source runs out (BEA-1407/1410).
+   * Without this, "read ALL my emails since yesterday" survives the brief and then dies on the way
+   * into the job, which is the same silent drop this whole redesign exists to end.
+   */
+  pages?: number | 'all';
   /** The look. Absent means nobody has called this action in this conversation — approve refuses. */
   evidence?: LineEvidence;
   /** What the look showed, in one plain sentence, for the screen. */
@@ -188,6 +194,7 @@ export function readSources(raw: any): BriefSource[] {
       id: String(s.id || `s${i + 1}`),
       actionId: String(s.actionId),
       args: s.args && typeof s.args === 'object' && !Array.isArray(s.args) ? s.args : {},
+      ...(s.pages === 'all' || (Number.isFinite(Number(s.pages)) && Number(s.pages) > 0) ? { pages: s.pages === 'all' ? ('all' as const) : Number(s.pages) } : {}),
       ...(s.evidence && s.evidence.callId ? { evidence: { callId: String(s.evidence.callId), ...(s.evidence.sampleId ? { sampleId: String(s.evidence.sampleId) } : {}), ...(s.evidence.actionId ? { actionId: String(s.evidence.actionId) } : {}) } } : {}),
       ...(s.saw ? { saw: String(s.saw) } : {}),
     }));
@@ -324,7 +331,10 @@ export function briefToAgentInput(brief: Brief): {
   const toolArgs: Record<string, any> = {};
   for (const s of brief.sources || []) {
     if (!tools.includes(s.actionId)) tools.push(s.actionId);
-    toolArgs[s.id] = { actionId: s.actionId, args: { ...(s.args || {}) } };
+    // `_pages` is how the runner is told to keep going; `plainArgs` strips it before the vendor
+    // ever sees it. `-1` is ALL_PAGES in `social/plan.ts` — kept as a literal so this file stays pure.
+    const pages = s.pages === 'all' ? -1 : Number(s.pages) > 1 ? Number(s.pages) : 0;
+    toolArgs[s.id] = { actionId: s.actionId, args: { ...(s.args || {}) }, ...(pages ? { _pages: pages } : {}) };
   }
   // The task, in HIS words — what he wants, then what to keep and what to drop. Never reworded.
   const prompt = [...live(brief.sections?.want), ...live(brief.sections?.filter)].map((l) => l.text).join(' ').trim();
