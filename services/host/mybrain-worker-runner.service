@@ -11,11 +11,21 @@ Environment=PATH=/usr/bin:/usr/local/bin:/bin
 # 8768 claude-runner, 8770 agent-helper. Confirmed with `ss -ltnp` before pinning.
 Environment=WORKER_RUNNER_HOST=172.18.0.1
 Environment=WORKER_RUNNER_PORT=8769
+# The workers root. It must exist and be writable by `sandy` BEFORE this starts — step 1 of the
+# install creates it and chowns it. Since BEA-1401 the runner proves it on every /status and refuses
+# every build and run while it cannot use it, instead of answering `ready` with nowhere to put a
+# worker. If you would rather not use root at all, change this to /home/sandy/worker-root and change
+# the README's install line with it — one root, said the same way in all three places.
 Environment=WORKER_ROOT=/srv/mybrain-workers
 # What a worker calls back on. The app container publishes NO host port (Caddy reaches it over the
 # Docker network), so 127.0.0.1:3000 would answer nothing — a worker reaches the app the same way
 # the world does. Checked from the host, 2026-08-22.
 Environment=WORKER_API=https://mybrain.1site.ai
+# The shared secret, REQUIRED since BEA-1401: /build runs a Codex session on text the caller sends,
+# so the door is locked. It is never in git — the file holds one line, WORKER_RUNNER_TOKEN=<value>,
+# and the same value goes in the app's .claude/checks/secrets.env. Without the file the service
+# still starts and says loudly on /status that it is closed, rather than running anonymously.
+EnvironmentFile=-/home/sandy/worker-runner/runner.env
 WorkingDirectory=/home/sandy/worker-runner
 ExecStart=/usr/bin/node /home/sandy/worker-runner/server.js
 Restart=always

@@ -39,7 +39,7 @@ env-overridable: `WORKER_RUNNER_PORT` here, `WORKER_RUNNER_URL` on the app (in `
 
 | Route | What it does |
 | --- | --- |
-| `GET /status` | `{installed, version, loggedIn, ready, workdir, runner, engine, kit, api, workers, running}` — the same keys the codex runner answers, so the engine pill can show it unchanged. |
+| `GET /status` | `{installed, version, loggedIn, ready, reason, locked, workdir, runner, engine, kit, api, workers, running}` — the same keys the codex runner answers, so the engine pill can show it unchanged, plus the two BEA-1401 added. **`ready` is a promise, not a hope**: it is false, with `reason` in plain words, when the workers root cannot be created or written, or when no shared secret is set (every route but this one is then refused). The old code answered `ready:true, workers:0` on a root it could not use — a promoted worker simply went invisible and the next build died on EACCES. |
 | `POST /run {jobId, runId, token, seed?, kit?, timeoutMs?}` | Spawns `node --max-old-space-size=512 worker.mjs` in `<root>/<jobId>/current`, detached. Answers **ndjson**: `{type:'step', step}` per JSON line the worker prints, `{type:'log', line}` for anything else, and a final `{type:'result', status, rows, error}`. |
 | `POST /build {jobId, brief, files?, copyFrom?, model?, timeoutMs?}` | Makes `<root>/<jobId>/vN`, writes the app's `files` into it (the pinned kit, its docs, `plan.json`, the saved answers under `samples/`), writes `BRIEF.md`, runs one fresh `codex exec -s workspace-write -C vN`, then `node --test worker.test.mjs`. Answers `{ok, version, dir, wrote, tests, sessionId, log}`. **It does not promote** — moving `current` is the build turn's call. `copyFrom: <version>` copies that version's folder into the new one first (never its `meta.json`), which is how a **repair** starts from the worker that broke (BEA-1393). |
 | `POST /parity {jobId, version, harness, files?, timeoutMs?}` | Measures ONE version against the saved answers, for the repair loop's promotion guard (BEA-1393). The version folder is **copied** to a throwaway `.parity-*` beside it, the app's `harness` is written in as `.parity.mjs`, the app's `files` (the fixtures and `contract.json`) land on top, and `node .parity.mjs` runs there with **no token and no API address**. Answers `{ok, version, result:{ok, error, rows, columns, rowKeys, calls}, log}`. The copy is deleted before the answer is sent, so a caller that reads the reply never sees leftovers. |
@@ -72,24 +72,37 @@ run) from "the worker ran and failed" (a real failure, and the repair loop's bus
   stderr share one budget) with a line saying so; the run still settles on the worker's own result.
 - **Codex trust entries are pruned** at boot and after every build — a build runs in a new folder
   each time, and `~/.codex/config.toml` would otherwise grow for ever.
+- **Every route but `/status` needs the shared secret** (BEA-1401). `/build` starts a Codex session on
+  text the caller sends; "only this host can reach 172.18.0.1" is a network fact, not a door. A runner
+  started with no `WORKER_RUNNER_TOKEN` answers `401` on all five routes and says so on `/status` —
+  it never quietly runs anonymously.
+- **A build's tests cannot reach the network, and get none of the host's environment** (BEA-1401) —
+  the same guarantee `/parity` has, and true in the same way rather than promised: the child gets the
+  small listed environment `childEnv()` builds (no keys, no `MYBRAIN_*`) and is started with
+  `node --import <a preload> --test worker.test.mjs`, where the preload replaces `fetch`, the `net`,
+  `tls`, `http`, `https` and `dns` entry points with a throw. **The Codex turn itself is NOT
+  isolated**, said plainly rather than implied: `codex exec` is a network process by nature, it needs
+  the host's Codex login, and it is sandboxed by `-s workspace-write` and pinned to the version
+  folder. That is the honest boundary — the model may reach the internet while it writes the worker;
+  the tests that decide whether the worker goes live may not.
 
 ### Environment
 
 | Variable | Default | What it is |
 | --- | --- | --- |
 | `WORKER_RUNNER_HOST` / `WORKER_RUNNER_PORT` | `172.18.0.1` / `8769` | Where it listens (the Docker gateway). |
-| `WORKER_ROOT` | `/srv/mybrain-workers` | The version folders (§D). |
+| `WORKER_ROOT` | `/srv/mybrain-workers` | The version folders (§D). The unit sets the same path; the install below creates it owned by `sandy`. If it cannot be created or written, the runner says so on `/status` (`ready:false`) and refuses every route that needs it — it never pretends. |
 | `WORKER_API` | `http://127.0.0.1:3000` | What a worker calls back on. **On this VPS it must be set** (the unit sets it to `https://mybrain.1site.ai`): the app container publishes no host port at all — Caddy reaches it over the Docker network — so a worker on the host cannot call `127.0.0.1:3000`. Confirmed from the host on 2026-08-22. |
 | `WORKER_TIMEOUT_MS` / `WORKER_MAX_TIMEOUT_MS` | `300000` / `1800000` | Default and ceiling for a run. |
 | `WORKER_BUILD_TIMEOUT_MS` / `WORKER_TEST_TIMEOUT_MS` | `900000` / `120000` | The build turn and its tests. |
 | `WORKER_MEMORY_MB` | `512` | `--max-old-space-size`. |
 | `WORKER_KIT_VERSION` | `1` | Fallback only — the app sends its own kit version on every `/run`. |
 | `WORKER_KIT_DIR` | *(unset)* | A kit copy on the host that `/build` pins into a new version folder. |
-| `WORKER_RUNNER_TOKEN` | *(unset)* | Optional shared secret. When set, `/run` and `/build` need `x-runner-token` with the same value (`/status` stays open). Off by default, like every other host runner here — lock it when piece 5 starts sending real briefs to `/build`, and set the same value on the app. |
+| `WORKER_RUNNER_TOKEN` | *(unset — and then everything is refused)* | **Required** since BEA-1401. `/run`, `/build`, `/promote`, `/parity` and `/remove` all need `x-runner-token` with this exact value; `/status` stays open, because it is the readiness probe, and it reports `locked` and `ready:false` while the secret is missing. The app sends it from `WORKER_RUNNER_TOKEN` in `.claude/checks/secrets.env` → `deploy.sh`. It is never in git: on the host it lives in `/home/sandy/worker-runner/runner.env` (0600), which the unit reads. |
 
 ### Install (needs root — the owner runs this once)
 
-`sandy` has NOPASSWD sudo only for `docker`, so these four steps need the owner:
+`sandy` has NOPASSWD sudo only for `docker`, so these steps need the owner:
 
 ```bash
 # 1. the workers root, owned by the user the service runs as
@@ -101,18 +114,37 @@ sudo chmod 755 /srv/mybrain-workers
 mkdir -p /home/sandy/worker-runner
 cp /home/sandy/mybrain/services/host/worker-runner.server.js /home/sandy/worker-runner/server.js
 
-# 3. the unit
+# 3. the shared secret — the SAME value as WORKER_RUNNER_TOKEN in the app's
+#    .claude/checks/secrets.env. Never in git, on either side.
+printf 'WORKER_RUNNER_TOKEN=%s\n' "$(grep -m1 '^WORKER_RUNNER_TOKEN=' /home/sandy/mybrain/.claude/checks/secrets.env | cut -d= -f2-)" \
+  > /home/sandy/worker-runner/runner.env
+chmod 600 /home/sandy/worker-runner/runner.env
+
+# 4. the unit
 sudo cp /home/sandy/mybrain/services/host/mybrain-worker-runner.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mybrain-worker-runner
 
-# 4. prove it
+# 5. prove it — `ready` must be true, and `reason` must be null
 curl -s http://172.18.0.1:8769/status
 systemctl status mybrain-worker-runner --no-pager
 ```
 
-Until step 1 exists, `/status` answers `installed:false, ready:false` and says so honestly rather
-than creating anything itself.
+Skip step 1 and the runner is up but honest: `installed:false, ready:false` and a `reason` that names
+the folder and the user, with every build and run refused for the same reason. Skip step 3 and it is
+`locked:false, ready:false` and every route but `/status` answers `401`. Neither is a silent failure,
+and neither is a crash loop — while the runner is not ready, a job's run simply goes the plan
+runner's way and says so on the run (the BEA-1394 fallback).
+
+**Until the owner runs this, the runner is started by hand** and uses `/home/sandy/worker-root`
+(`/srv` needs root). That is the one root the live process may use before the install; the unit, this
+README and the spec all name `/srv/mybrain-workers` for after it:
+
+```bash
+cd /home/sandy/worker-runner && WORKER_API=https://mybrain.1site.ai WORKER_ROOT=/home/sandy/worker-root \
+  WORKER_RUNNER_TOKEN="$(grep -m1 '^WORKER_RUNNER_TOKEN=' /home/sandy/mybrain/.claude/checks/secrets.env | cut -d= -f2-)" \
+  setsid nohup node /home/sandy/worker-runner/server.js >> run.log 2>&1 < /dev/null &
+```
 
 ### Updating and rolling back
 

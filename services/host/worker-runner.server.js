@@ -15,13 +15,17 @@
 // `codex-runner` and follows the same discipline — the repo copy in `services/host/` is the source of
 // truth, the live copy sits under /home/sandy, and both are documented in `services/host/README.md`.
 //
-// Three rules it never breaks:
+// Four rules it never breaks:
 //  1. **It never opens the database.** Everything a worker needs goes through the app's /api/worker/*
 //     callback API, with a run-scoped token minted per spawn.
 //  2. **Nothing dangerous comes from the request.** `NODE_OPTIONS`, the memory cap, the API base, the
 //     cwd and the argv are all fixed here; the request supplies only ids, a token and a timeout.
 //  3. **A worker never inherits the host's environment.** The child gets a small, listed env — the
-//     token is the only secret it ever sees, and it arrives per spawn, never on disk.
+//     token is the only secret it ever sees, and it arrives per spawn, never on disk. The build's
+//     tests and the parity measurement get the same treatment, and no network at all (BEA-1401).
+//  4. **It never answers `ready` when it cannot do the job.** A workers root it cannot write and a
+//     missing shared secret are both said out loud on /status and refused on every other route —
+//     silence is the one failure this project is built not to have (BEA-1401).
 const http = require('http');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
@@ -33,8 +37,9 @@ const HOST = process.env.WORKER_RUNNER_HOST || '172.18.0.1';
 // it, and 8765/8767/8768/8770 are the codex/gemini/claude/agent-helper runners). Confirmed free with
 // `ss -ltnp` on 2026-08-22 and pinned here; override with WORKER_RUNNER_PORT either way.
 const PORT = Number(process.env.WORKER_RUNNER_PORT || 8769);
-// Where the version folders live (§D). Created by the install, not by this service — it runs as
-// `sandy` and /srv is root-owned.
+// Where the version folders live (§D). The install creates it (it runs as `sandy` and /srv is
+// root-owned); this service will happily create it too where it can, and REFUSES to work when it
+// cannot — see `rootState()`.
 const ROOT = path.resolve(process.env.WORKER_ROOT || '/srv/mybrain-workers');
 // What a worker calls back on. The app container publishes 3000 on the host.
 const API = (process.env.WORKER_API || 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -49,6 +54,16 @@ const KIT_VERSION = String(process.env.WORKER_KIT_VERSION || '1');
 // Optional: a kit copy on the host that /build pins into a new version folder. Piece 5 owns how the
 // kit gets here; if it is not set or not there, the build simply says so.
 const KIT_DIR = process.env.WORKER_KIT_DIR || '';
+/**
+ * The shared secret, and it is **required** since BEA-1401. `/build` starts a Codex session on text
+ * the caller sends; `/run`, `/promote` and `/remove` start processes and move worker folders around.
+ * "Only this host and its containers can reach 172.18.0.1" is a network fact, not a door — so the
+ * door is now locked, and a runner started without a secret refuses every route but `/status` and
+ * says exactly that (a runner that quietly accepted anonymous builds was the finding).
+ */
+const TOKEN = String(process.env.WORKER_RUNNER_TOKEN || '');
+const NO_TOKEN_REASON =
+  'this runner has no shared secret set (WORKER_RUNNER_TOKEN), so /run, /build, /promote, /parity and /remove are all refused — set the same value here and on the app';
 
 const MAX_LOG_LINES = 2000; // relayed log lines per run — a chatty worker may not eat the host's memory
 const MAX_LINE = 2000;    // characters of any one relayed text line
@@ -131,22 +146,69 @@ function nodeVersion() {
   });
 }
 
+/**
+ * Can this runner actually hold workers? (BEA-1401 — the finding that made this exist.)
+ *
+ * The shipped unit points `WORKER_ROOT` at `/srv/mybrain-workers`, which the owner's install line
+ * creates and chowns. If that step is skipped, the folder is missing and `sandy` cannot make it —
+ * and the old code found out only when a build died on EACCES, while `/status` still said `ready`
+ * and `workers: 0`, so a promoted worker simply went invisible. So the root is PROVED here, on every
+ * status and before every route that needs it: created where we can, then really written to.
+ */
+function rootState() {
+  try {
+    fs.mkdirSync(ROOT, { recursive: true });
+  } catch (e) {
+    // EEXIST from a recursive mkdir means something IS there and is not a folder — the stat below
+    // says that far more plainly than "it does not exist and cannot be created", so fall through.
+    if (!e || e.code !== 'EEXIST') {
+      return { ok: false, reason: `the workers root ${ROOT} does not exist and this service (running as ${userName()}) cannot create it: ${String((e && e.message) || e)}` };
+    }
+  }
+  let stat = null;
+  try { stat = fs.statSync(ROOT); } catch (e) {
+    return { ok: false, reason: `the workers root ${ROOT} cannot be read: ${String((e && e.message) || e)}` };
+  }
+  if (!stat.isDirectory()) return { ok: false, reason: `the workers root ${ROOT} is not a folder` };
+  const probe = path.join(ROOT, `.write-probe-${process.pid}`);
+  try {
+    fs.writeFileSync(probe, 'x');
+    fs.rmSync(probe, { force: true });
+  } catch (e) {
+    return { ok: false, reason: `the workers root ${ROOT} is not writable by ${userName()}: ${String((e && e.message) || e)}` };
+  }
+  return { ok: true, reason: null };
+}
+
+function userName() {
+  try { return os.userInfo().username; } catch (e) { return 'this user'; }
+}
+
 async function status() {
   const version = await nodeVersion();
-  let rootOk = false;
+  const root = rootState();
   let workers = 0;
-  try {
-    rootOk = fs.statSync(ROOT).isDirectory();
-    workers = fs.readdirSync(ROOT).filter((d) => !d.startsWith('.') && fs.existsSync(path.join(ROOT, d, 'current'))).length;
-  } catch (e) { rootOk = false; }
+  if (root.ok) {
+    try {
+      workers = fs.readdirSync(ROOT).filter((d) => !d.startsWith('.') && fs.existsSync(path.join(ROOT, d, 'current'))).length;
+    } catch (e) { workers = 0; }
+  }
   // Codex is only needed by /build, so it is reported but does not decide `ready` — a runner that can
   // run workers is ready even on a host where nobody has logged Codex in.
   const loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json'));
+  // Every reason it cannot work, in plain words. `ready:true` with nothing behind it is the failure
+  // this whole block exists to prevent (BEA-1401).
+  const why = [];
+  if (!root.ok) why.push(root.reason);
+  if (!version) why.push('node could not be run here');
+  if (!TOKEN) why.push(NO_TOKEN_REASON);
   return {
-    installed: rootOk,
+    installed: root.ok,
     version: version || null,
     loggedIn,
-    ready: rootOk && !!version,
+    ready: root.ok && !!version && !!TOKEN,
+    reason: why.length ? why.join(' · ') : null,
+    locked: !!TOKEN,
     workdir: ROOT,
     runner: 'ok',
     engine: 'worker-runner',
@@ -334,6 +396,14 @@ async function handleRun(req, res) {
   // simply unavailable and the run can go the old way instead of failing (BEA-1394).
   const finish = (r) => { try { res.end(JSON.stringify({ type: 'result', status: r.status, rows: r.rows === undefined ? null : r.rows, error: r.error || null, ...(r.waitpointId ? { waitpointId: r.waitpointId } : {}), ...(r.output ? { output: r.output } : {}), ...(r.timedOut ? { timedOut: true } : {}), ...(r.kitRefused ? { kitRefused: true } : {}), ...(r.notStarted ? { notStarted: true } : {}) }) + '\n'); } catch (e) {} };
 
+  // A runner that cannot hold workers says so instead of reporting "no worker is installed" — the
+  // two look identical from the app, and only one of them is the owner's job being missing (BEA-1401).
+  const root = rootState();
+  if (!root.ok) {
+    finish({ status: 'failed', rows: null, error: `The worker runner cannot use its workers folder, so nothing was started — ${root.reason}.`, notStarted: true });
+    return;
+  }
+
   if (live.has(jobId)) {
     const held = live.get(jobId);
     finish({ status: 'failed', rows: null, error: `This job is already running here (run ${held.runId}) — this start was refused.`, notStarted: true });
@@ -403,6 +473,62 @@ function nextVersion(jobDir) {
     }
   } catch (e) { /* the job has no folder yet */ }
   return max + 1;
+}
+
+/**
+ * The environment every child of this runner gets that is NOT a worker: the build's tests and the
+ * parity measurement. Small and listed, exactly like `workerEnv()` — the host's own environment is
+ * full of real keys and none of it is any of their business (BEA-1401).
+ */
+function childEnv() {
+  return {
+    PATH: '/usr/local/bin:/usr/bin:/bin',
+    HOME: os.homedir(),
+    LANG: process.env.LANG || 'C.UTF-8',
+    TZ: process.env.TZ || '',
+    NODE_ENV: 'production',
+    NODE_OPTIONS: '', // fixed here, never inherited
+  };
+}
+
+/**
+ * A preload module that takes the network away from a child (BEA-1401). `/parity` gets this
+ * guarantee from the harness the app writes; a build's tests are written by Codex, so it has to come
+ * from outside them — `node --import <this> --test worker.test.mjs`.
+ *
+ * It lives in a private folder made by THIS process (0700, unique name): a fixed path under /tmp
+ * would be a file another user could put there first, and it is imported into a process of ours.
+ */
+const NO_NETWORK_SOURCE = `// Written by the My Brain worker runner. A build's tests may not reach the network (BEA-1401).
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const refuse = (what) => { throw new Error('These tests may never call anything outside their own folder — ' + what + ' was blocked.'); };
+globalThis.fetch = () => refuse('fetch');
+const net = require('node:net');
+net.Socket.prototype.connect = () => refuse('a socket');
+net.connect = () => refuse('a socket');
+net.createConnection = () => refuse('a socket');
+const tls = require('node:tls');
+tls.connect = () => refuse('a TLS connection');
+for (const [name, mod] of [['http', require('node:http')], ['https', require('node:https')]]) {
+  mod.request = () => refuse('an ' + name + ' request');
+  mod.get = () => refuse('an ' + name + ' request');
+}
+const dns = require('node:dns');
+dns.lookup = () => refuse('a DNS lookup');
+dns.resolve = () => refuse('a DNS lookup');
+if (dns.promises) { dns.promises.lookup = () => refuse('a DNS lookup'); dns.promises.resolve = () => refuse('a DNS lookup'); }
+`;
+
+let noNetworkFile = '';
+function noNetworkUrl() {
+  if (!noNetworkFile) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mybrain-runner-'));
+    try { fs.chmodSync(dir, 0o700); } catch (e) { /* best effort */ }
+    noNetworkFile = path.join(dir, 'no-network.mjs');
+    fs.writeFileSync(noNetworkFile, NO_NETWORK_SOURCE);
+  }
+  return `file://${noNetworkFile}`;
 }
 
 /** Run one command in a folder, detached, killed as a group at the timeout. Never throws. */
@@ -578,7 +704,12 @@ async function handleBuild(req, res) {
     const wrote = fs.existsSync(path.join(dir, 'worker.mjs'));
     let tests = null;
     if (wrote && fs.existsSync(path.join(dir, 'worker.test.mjs'))) {
-      const ran = await runCommand(process.execPath, ['--test', 'worker.test.mjs'], dir, TEST_TIMEOUT, { ...process.env, NODE_OPTIONS: '' });
+      // The tests run in the SAME box `/parity` measures in (BEA-1401): none of the host's own
+      // environment, and no network at all. A generated test that passes because it quietly fetched
+      // something live would be worthless as a promotion gate, and the host's environment is full of
+      // real keys. The Codex turn above is a different thing — it is a network process by nature,
+      // sandboxed by `-s workspace-write` — and that difference is written down in the README.
+      const ran = await runCommand(process.execPath, ['--import', noNetworkUrl(), '--test', 'worker.test.mjs'], dir, TEST_TIMEOUT, childEnv());
       tests = parseTap(ran.stdout + ran.stderr) || { passed: 0, failed: ran.code === 0 ? 0 : 1, at: new Date().toISOString() };
       log.push(ran.timedOut ? 'the tests were stopped at the timeout' : `tests exited ${ran.code}`);
       if (ran.stdout.trim()) log.push(ran.stdout.trim().slice(-4000));
@@ -661,9 +792,9 @@ async function handleParity(req, res) {
     const written = writeFiles(tmp, files);
     if (written.length) log.push(`measured against ${written.length} file${written.length === 1 ? '' : 's'} from the app`);
     const timeoutMs = Math.min(600_000, Math.max(5_000, Number(body.timeoutMs) > 0 ? Number(body.timeoutMs) : PARITY_TIMEOUT));
-    // No token, no API: a parity child cannot call the app, let alone a vendor.
-    const env = { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: os.homedir(), LANG: process.env.LANG || 'C.UTF-8', TZ: process.env.TZ || '', NODE_ENV: 'production', NODE_OPTIONS: '' };
-    const ran = await runCommand(process.execPath, [`--max-old-space-size=${MEMORY_MB}`, PARITY_FILE], tmp, timeoutMs, env);
+    // No token, no API: a parity child cannot call the app, let alone a vendor. (The same small
+    // environment a build's tests get — one function, so the two cannot drift apart.)
+    const ran = await runCommand(process.execPath, [`--max-old-space-size=${MEMORY_MB}`, PARITY_FILE], tmp, timeoutMs, childEnv());
     const result = readParity(ran.stdout);
     if (ran.timedOut) log.push(`the parity run was stopped after ${Math.round(timeoutMs / 1000)}s`);
     if (ran.stderr.trim()) log.push(ran.stderr.trim().slice(-2000));
@@ -768,19 +899,18 @@ async function handleRemove(req, res) {
 }
 
 /**
- * Optional shared secret. Off by default, exactly like every other host runner on this VPS — the
- * only thing that can reach 172.18.0.1 is this host and its containers. It is here so the door can
- * be locked deliberately when piece 5 starts sending real briefs to `/build`, which is the one route
- * that runs a Codex session with a caller's text: set `WORKER_RUNNER_TOKEN` here and send the same
- * value as `x-runner-token` from the app. `/status` stays open — it is a readiness probe.
+ * The shared secret, and it is required (BEA-1401). `/build` runs a Codex session on text the caller
+ * sends and `/run` starts a process, so "nothing but this host can reach 172.18.0.1" is not a door.
+ * Set `WORKER_RUNNER_TOKEN` here and the same value on the app, which sends it as `x-runner-token`.
+ * A runner with no secret set refuses every route but `/status` — it never quietly runs anonymously.
+ * `/status` stays open: it is a readiness probe, and it says the door is unlocked rather than hiding it.
  */
 function allowed(req) {
-  const want = process.env.WORKER_RUNNER_TOKEN || '';
-  if (!want) return true;
+  if (!TOKEN) return false;
   const got = String(req.headers['x-runner-token'] || '');
-  if (got.length !== want.length) return false;
+  if (got.length !== TOKEN.length) return false;
   let same = 0;
-  for (let i = 0; i < want.length; i++) same |= got.charCodeAt(i) ^ want.charCodeAt(i);
+  for (let i = 0; i < TOKEN.length; i++) same |= got.charCodeAt(i) ^ TOKEN.charCodeAt(i);
   return same === 0;
 }
 
@@ -788,8 +918,15 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
     if (req.method === 'GET' && req.url === '/status') { res.end(JSON.stringify(await status())); return; }
+    if (!TOKEN) { res.statusCode = 401; res.end(JSON.stringify({ error: NO_TOKEN_REASON })); return; }
     if (!allowed(req)) { res.statusCode = 401; res.end(JSON.stringify({ error: 'this runner needs its shared token' })); return; }
     if (req.method === 'POST' && req.url === '/run') { await handleRun(req, res); return; }
+    // Everything below writes to the workers root, so a root it cannot use is a plain refusal with
+    // the reason in it — never a half-made version folder, and never a silent success (BEA-1401).
+    if (req.method === 'POST' && ['/build', '/promote', '/parity', '/remove'].indexOf(String(req.url)) >= 0) {
+      const root = rootState();
+      if (!root.ok) { res.statusCode = 503; res.end(JSON.stringify({ ok: false, error: `The worker runner cannot use its workers folder — ${root.reason}.` })); return; }
+    }
     if (req.method === 'POST' && req.url === '/build') { await handleBuild(req, res); return; }
     if (req.method === 'POST' && req.url === '/promote') { await handlePromote(req, res); return; }
     if (req.method === 'POST' && req.url === '/parity') { await handleParity(req, res); return; }
@@ -804,4 +941,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 pruneWorkerTrust();
-server.listen(PORT, HOST, () => console.log(`worker-runner on http://${HOST}:${PORT} — workers in ${ROOT}, callbacks to ${API}, kit v${KIT_VERSION}`));
+server.listen(PORT, HOST, () => {
+  console.log(`worker-runner on http://${HOST}:${PORT} — workers in ${ROOT}, callbacks to ${API}, kit v${KIT_VERSION}`);
+  // Loud at boot, as well as honest on /status: the two ways this service can be up and useless
+  // (BEA-1401). It does not exit — a crash loop hides the reason in a restart storm, and the app's
+  // own fallback reads `ready:false` and simply runs the job the old way, saying so on the run.
+  const root = rootState();
+  if (!root.ok) console.error(`!! worker-runner CANNOT HOLD WORKERS: ${root.reason} — every run and build will be refused until this is fixed`);
+  if (!TOKEN) console.error(`!! worker-runner is UNLOCKED and therefore closed: ${NO_TOKEN_REASON}`);
+});

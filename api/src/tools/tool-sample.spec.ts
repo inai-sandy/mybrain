@@ -11,6 +11,7 @@ import {
   SAMPLE_PROVIDER,
   SECRET_MASK,
   shouldSample,
+  mayKeepFailing,
   TOTAL_BUDGET_MB,
   truncatedNote,
 } from './tool-sample';
@@ -163,6 +164,35 @@ describe('shouldSample', () => {
 
   it('keeps the platform called Threads — a post is not a conversation', () => {
     expect(shouldSample({ actionId: 'svc:threads.user_posts', ...read })).toBe(true);
+  });
+});
+
+describe('mayKeepFailing — the evidence door (BEA-1393, narrowed by BEA-1401)', () => {
+  it('keeps the answer that broke a worker, whichever service it came from', () => {
+    // The opt-in list deliberately does NOT apply here: a repair has to read what broke it.
+    expect(mayKeepFailing('svc:instagram.search_hashtag')).toBe(true);
+    expect(mayKeepFailing('svc:googlesheets.batch_update')).toBe(true);
+    expect(mayKeepFailing('svc:github.list_issues')).toBe(true);
+  });
+
+  it('never keeps anybody\'s messages, broken or not', () => {
+    expect(mayKeepFailing('svc:whatsapp.send_message')).toBe(false);
+    expect(mayKeepFailing('svc:gmail.fetch_emails')).toBe(false);
+    expect(mayKeepFailing('svc:vault.get_secret')).toBe(false);
+    expect(mayKeepFailing('svc:slack.conversations_history')).toBe(false);
+    expect(mayKeepFailing('svc:instagram.direct_messages')).toBe(false);
+  });
+
+  it('nor anybody\'s diary, drive or notes — the seam BEA-1401 closed', () => {
+    // Masking by key name and value shape does not hide a meeting title, an attendee list, a file
+    // name or a page of notes. Evidence from these is simply not kept; the repair still runs on the
+    // error and the contract.
+    expect(mayKeepFailing('svc:googlecalendar.events_list')).toBe(false);
+    expect(mayKeepFailing('svc:googledrive.list_files')).toBe(false);
+    expect(mayKeepFailing('svc:notion.query_database')).toBe(false);
+    expect(mayKeepFailing('svc:dropbox.list_folder')).toBe(false);
+    expect(mayKeepFailing('svc:googlecontacts.list_people')).toBe(false);
+    expect(mayKeepFailing('not-a-service-id')).toBe(false);
   });
 });
 

@@ -63,6 +63,10 @@ export class WorkerDispatchService implements OnModuleInit {
     // Deleting an agent deletes its worker (§I). The rows are the app's to clean up; the folders on
     // the host belong to the runner, so `deleteAgent` asks through this seam and never blocks on it.
     this.agent.setWorkerCleanup?.((jobId: string) => this.forget(jobId));
+    // A finished worker run's journal goes at `finishRun()`, whichever road ended it (BEA-1401).
+    // The worker's own `/finish` is only one of four; the other three are the sweeper's, and by then
+    // the worker process is already gone and can never call anything.
+    this.agent.setJournalCleanup?.((runId: string) => this.journal.forget(runId));
   }
 
   // ---- the decision ----------------------------------------------------------------------------

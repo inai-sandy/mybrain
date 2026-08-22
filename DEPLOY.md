@@ -28,6 +28,12 @@ and nothing pretends to have run.
 What that means in practice after a rollback: the affected jobs fail honestly and stay on their old
 road until the app is forward again or the worker is rebuilt. Nothing to undo by hand.
 
+**One secret has to match on both sides (BEA-1401).** The worker runner now requires
+`WORKER_RUNNER_TOKEN`: `deploy.sh` passes the app's copy from `.claude/checks/secrets.env`, and the
+host runner reads the same value from `/home/sandy/worker-runner/runner.env`. If they ever disagree,
+the runner answers `401`, the dispatch switch reads that as "the worker road was unavailable" and the
+run goes the plan runner's way and says so — a mismatch costs a road, never a run.
+
 **A rebuild is a Codex session, so it is never automatic (BEA-1390).** The build turn runs on the
 owner's tap (`POST /api/agent/agents/:id/worker/build`) and puts a version live only when that
 version's own tests pass — a deploy, a rollback and a restart never build or promote anything. The

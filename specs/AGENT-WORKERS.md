@@ -7,11 +7,16 @@ the road exists, is proven, and converts nothing until he taps the switch in the
 `services/host/mybrain-worker-runner.service` is written but NOT installed
 (`sudo cp services/host/mybrain-worker-runner.service /etc/systemd/system/ && sudo systemctl enable
 --now mybrain-worker-runner`), so the runner is started by hand and dies with the box
-(`WORKER_API=https://mybrain.1site.ai WORKER_ROOT=<a writable dir> node
-services/host/worker-runner.server.js`; the acceptance run used `/home/sandy/worker-root`, because
-`/srv` is not writable without root). Until it is installed,
-a run on the worker road falls back to the plan runner and says so — never a failure — which is
-exactly what BEA-1394 built the fallback for.
+(`WORKER_API=https://mybrain.1site.ai WORKER_ROOT=/home/sandy/worker-root
+WORKER_RUNNER_TOKEN=<the shared secret> node services/host/worker-runner.server.js`; the acceptance
+run used `/home/sandy/worker-root`, because `/srv` is not writable without root). Until it is
+installed, a run on the worker road falls back to the plan runner and says so — never a failure —
+which is exactly what BEA-1394 built the fallback for.
+**Since BEA-1401 the installed unit is safe to install as it stands**: the root it names
+(`/srv/mybrain-workers`, made by step 1 of the install) is proved on every `/status`, and a runner
+that cannot use it — or that has no shared secret — answers `ready:false` with the reason and refuses
+every route instead of pretending. The secret is now required, and lives in
+`.claude/checks/secrets.env` (app) and `/home/sandy/worker-runner/runner.env` (host), never in git.
 Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-44a051754e16>
 
 **Built so far**
@@ -74,7 +79,7 @@ Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-4
     called `kit.expect` gets a plain failure out of `writeSheet`/`writeDocument`, because a forgotten
     check would put the design back where BEA-1377 found it;
   - **the plan runner is untouched.** Its `nothingFound()` still finishes `done`, and the tripwire
-    still only says so out loud there — the owner's six live jobs run exactly as they did. The
+    still only says so out loud there — the owner's nine live jobs run exactly as they did. The
     contract is the worker road's, which is where a run can be failed without changing what he
     already relies on.
 - **7/10 — §H ask and wait** (BEA-1392): `kit.ask` / `kit.trouble` / `kit.checkpoint` with the
@@ -387,6 +392,13 @@ Rules:
 - **Never sampled**: Vault actions; any WhatsApp/Gmail/chat action whose answer contains message
   bodies; anything from a gated send; and any service in a new `NO_SAMPLE_SERVICES` set. Sampling is
   **opt-in per service**, starting with the social read actions the workers actually need.
+- **Failing evidence skips the opt-in list, so its deny list has to be wider** (BEA-1401). A repair
+  must be able to read whatever broke it, whichever service that was, so `mayKeepFailing()` keeps only
+  the privacy half — which left calendars, drives and notes apps open, and masking by key name and
+  value shape does not hide a meeting title or an attendee list. `NO_FAILING_SERVICES`
+  (`googlecalendar`, `googledrive`, `notion`, `dropbox`, contacts, photos, meetings…) is shut on top
+  of `NO_SAMPLE_SERVICES`: evidence from one of those is simply not kept, and the repair still runs
+  on the error and the contract with no payload.
 - **Replay helper**: `ToolSampleService.replay(actionId, argsHash?)` returns the parsed payload for
   tests and repairs. Replay **never** touches a provider.
 
@@ -474,6 +486,15 @@ Rules:
 - Unknown helper, unknown action, expired token, or a token used for a different `runId` → `403`, and
   the run fails honestly.
 - The app never trusts the worker for identity: `agentId`/`runId` come from the token, never the body.
+- **A worker's reach is its own job's reach, and nothing wider** (BEA-1401 — Principle 1, "the worker
+  IS the build"). `{sourceId}` was always checked against the job's plan; `{actionId, args}` was not,
+  so a worker could call any action of any connected service, held only by the credit ceiling and the
+  can't-undo gate. It now has to be one of **this job's** action ids: what its plan really fetches
+  (`planActionIds`) plus its own toolbox (`Agent.tools`, which means exactly "the action ids this job
+  may call" and is recomputed from the sources on every save — BEA-1374). Anything else is a plain
+  `400` naming what the job may call. **There is no exception**: an action a worker genuinely needs
+  belongs on the job, where the owner can see it, the plan can cost it and the flow picture can draw
+  it — a worker that reaches past its plan is a worker nobody can predict from the plan.
 
 ## D. The worker folder
 
@@ -558,6 +579,26 @@ A sibling of `codex-runner`: systemd unit `mybrain-worker-runner`, HTTP on the D
   meet a worker built against a newer kit: the runner refuses to start a worker whose `meta.kit`
   major is above the app's current kit version, fails the run honestly, and the agent falls back to
   the plan runner. State this in `DEPLOY.md` too.
+- **The door is locked** (BEA-1401). `/build` starts a Codex session on text the caller sends, so
+  "only this host can reach the Docker gateway" is a network fact, not a door: `WORKER_RUNNER_TOKEN`
+  is **required**, every route but `/status` answers `401` without it, and a runner started with no
+  secret at all refuses everything and says so rather than running anonymously. The value lives in
+  `.claude/checks/secrets.env` → `deploy.sh` on the app side and in `/home/sandy/worker-runner/runner.env`
+  (0600, read by the unit) on the host — never in git, on either side.
+- **`ready` is a promise** (BEA-1401). `WORKER_ROOT` is proved on every `/status` and before every
+  route that writes: created where it can be, then really written to. A root it cannot use, or a
+  missing secret, means `ready:false` with a plain `reason`, a refusal on every other route and a
+  loud line in the journal at boot. The old code answered `ready:true, workers:0` on an unusable
+  root — the promoted worker went invisible and the first build died on EACCES, which is the one
+  shape of failure this project is built not to have. It does **not** exit: a crash loop hides the
+  reason, and while it is not ready the run simply goes the plan runner's way and says so.
+- **A build's tests run in the same box `/parity` does** (BEA-1401): the small listed environment
+  (none of the host's own, no `MYBRAIN_*`) and no network — `node --import <preload> --test
+  worker.test.mjs`, the preload replacing `fetch` and the `net`/`tls`/`http`/`https`/`dns` entry
+  points with a throw. A green test that quietly fetched something live is not a promotion gate. The
+  **Codex turn itself is not isolated**, and that is said out loud rather than implied: it is a
+  network process by nature, it needs the host's Codex login, and `-s workspace-write -C vN` is what
+  bounds it.
 
 ## G. Self-heal — the state machine
 
@@ -669,6 +710,18 @@ a miss executes for real and appends to the journal. So a re-run costs nothing f
 done, and `writeSheet(append:true)` / `notify()` cannot fire twice. This is the same idea the flow
 runner already uses per node, applied to a script.
 
+**And it is forgotten at `finishRun()`, whichever road ends the run** (BEA-1401). The journal exists
+for exactly one purpose — making a resume free — and a run that has reached a terminal state is never
+resumed, so keeping it means whole fetched tables sitting in the database and in every nightly backup
+after that. It used to be dropped by the worker's own `/finish` alone, which is only one of four
+roads: the stall watchdog, a deadline with no default and an overtaken run all leaked, and those are
+exactly the roads where the worker has already exited and can never call anything. `finishRun()` is
+the one door they all come through, so the drop lives there (registered by `WorkerDispatchService`,
+the same seam as the delete and the repair hook) and it runs **after** the failure hook, which reads
+the very answers it deletes. The two roads that write the run row themselves rather than going
+through `finishRun()` — `cancelRun()` and the boot reconciler's orphan sweep — say the same thing in
+their own line, because "no terminal road leaks" is the rule, not "one function does it".
+
 **Determinism is enforced, not hoped for.** The worker runner freezes `Date.now`, `Math.random` and
 `crypto.randomUUID` in the worker's context and points them at journalled `kit.now()` / `kit.random()`.
 A worker whose call order changes between replays fails loudly with "the worker is not repeatable" —
@@ -741,12 +794,14 @@ steps** after a deploy restart and nobody was told.
 
 ## I. Housekeeping — the things that bite in month two
 
-- **Existing agents do not convert.** The owner's six live agents stay on the plan runner until he
+- **Existing agents do not convert.** The owner's nine live agents stay on the plan runner until he
   taps **Rebuild** on that job. Nothing is migrated automatically, ever. A job with no worker runs
   exactly as it does today.
 - **Deleting an agent deletes its worker.** `deleteAgent` already hand-deletes `SocialWatch` rows
   because there is no FK (CLAUDE.md flags this class of bug). The same hand-kept cleanup covers
-  `/srv/mybrain-workers/<jobId>/` (via the runner), the per-job lock row, `RunJournal` rows and any
+  `/srv/mybrain-workers/<jobId>/` (via the runner), the per-job lock row, `RunJournal` rows, the
+  one-time `ServiceGate` decisions its runs held (BEA-1401 — keyed on the run, no FK; a PERMANENT
+  release is the owner's own /tools setting and is left alone) and any
   open `Waitpoint`. A test asserts nothing is left behind, because this is exactly the bug that gets
   written twice.
 - **The callback token does not sleep.** It is minted per **spawn**, not per run, and revoked when the

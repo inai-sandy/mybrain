@@ -146,6 +146,36 @@ describe('the callback routes', () => {
     expect(WORKER_HELPERS).toEqual(['social-shape', 'social-alert']);
   });
 
+  it('a worker may only call its OWN job\'s actions (BEA-1401)', async () => {
+    // "The worker IS the build": its reach is the job's reach. Before this, `{actionId,args}` was
+    // checked only for the `svc:` prefix, so a worker could reach any action of any connected
+    // service — held back by nothing but the credit ceiling and the can't-undo gate.
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    const { kit } = await spawnKit(world, 'r', 'ag1');
+
+    await expect(kit.tool('svc:github.delete_a_repository', { repo: 'notes' })).rejects.toThrow(/may not call svc:github\.delete_a_repository/i);
+    await expect(kit.tool('svc:gmail.fetch_emails', {})).rejects.toThrow(/only call its own job's actions/i);
+    expect(world.calls).toHaveLength(0); // refused BEFORE anything is run, so nothing is spent
+    expect((await world.journal.list('r')).filter((e: any) => e.fn !== 'seed')).toEqual([]); // nothing recorded either
+
+    // …and the job's own action still goes through, exactly as before.
+    const out: any = await kit.tool(HASHTAG, { hashtag: 'x' });
+    expect(out.ok).toBe(true);
+    expect(world.calls.map((c: any) => c.id)).toEqual([HASHTAG]);
+  });
+
+  it('a job whose toolbox names an action it has no source for may still call it', async () => {
+    // `Agent.tools` means "the action ids this job may call" — a tool the owner put on the job is the
+    // job's, whether or not the plan fetches from it.
+    const extra = 'svc:instagram.user_posts';
+    const world = await makeWorld({
+      job: { ...job(), tools: [HASHTAG, extra] },
+      samples: [...SAMPLES, { actionId: extra, args: { handle: 'a' }, data: { items: [{ id: 'p9' }] } }],
+    });
+    const { kit } = await spawnKit(world, 'r', 'ag1');
+    expect((await kit.tool(extra, { handle: 'a' }) as any).ok).toBe(true);
+  });
+
   it('the fetch stamps progress as it pages, so a slow run is never mistaken for a stuck one', async () => {
     const world = await makeWorld({
       job: { ...job(), toolArgs: { [HASHTAG]: { actionId: HASHTAG, args: { hashtag: 'x' }, _pages: 2 } } },

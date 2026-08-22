@@ -24,6 +24,13 @@ import { PARITY_TOLERANCE, driftOf } from './repair';
 const RUNNER = path.join(__dirname, '..', '..', '..', 'services', 'host', 'worker-runner.server.js');
 const KIT = path.join(__dirname, 'kit', 'kit.js');
 
+/**
+ * The shared secret. Since BEA-1401 it is REQUIRED — every route but `/status` is closed without it —
+ * so every runner this suite starts has one, and the tests that prove the door drive it deliberately.
+ */
+const RUNNER_TOKEN = 'the-shared-secret-for-this-suite';
+const headers = (token: string = RUNNER_TOKEN) => ({ 'content-type': 'application/json', 'x-runner-token': token });
+
 const JOB = { id: 'job1', name: 'Fixture job', tools: [], toolArgs: {}, outputDest: 'document' };
 
 // ---------------------------------------------------------------------------------------------
@@ -79,6 +86,7 @@ async function startRunner(root: string, api: string, extraEnv: Record<string, s
       WORKER_ROOT: root,
       WORKER_API: api,
       WORKER_KIT_VERSION: '1',
+      WORKER_RUNNER_TOKEN: RUNNER_TOKEN,
       ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -150,7 +158,7 @@ describe('the worker runner (BEA-1389)', () => {
   async function run(body: Record<string, any>) {
     const res = await fetch(`${runner.url}/run`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: headers(),
       body: JSON.stringify(body),
     });
     return res;
@@ -262,7 +270,7 @@ describe('the worker runner (BEA-1389)', () => {
   it('refuses a jobId that is not an id, and a job with no worker installed', async () => {
     for (const jobId of ['../etc', 'a/b', '', '.']) {
       const res = await fetch(`${runner.url}/run`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: headers(),
         body: JSON.stringify({ jobId, runId: 'r', token: 't' }),
       });
       expect(res.status).toBe(400);
@@ -286,20 +294,88 @@ describe('the worker runner (BEA-1389)', () => {
     expect(lines[lines.length - 1].line).toMatchObject({ type: 'result', status: 'done', rows: 0 });
   });
 
-  it('can be locked with a shared token, and is open by default', async () => {
-    const locked = await startRunner(root, app.url, { WORKER_RUNNER_TOKEN: 'sesame' });
+  // -------------------------------------------------------------------------------------------
+  // The door, and the promise `ready` makes (BEA-1401). `/build` runs a Codex session on text the
+  // caller sends, so the secret is required rather than optional — and a runner that cannot hold a
+  // worker may never answer `ready`, because that was the one silent failure in this road.
+  // -------------------------------------------------------------------------------------------
+  const ROUTES: [string, any][] = [
+    ['/run', { jobId: 'job1', runId: 'r', token: 't' }],
+    ['/build', { jobId: 'job1', brief: 'write it' }],
+    ['/promote', { jobId: 'job1', version: 1 }],
+    ['/remove', { jobId: 'job1' }],
+  ];
+
+  it('refuses every route but /status without the shared secret', async () => {
+    for (const [route, body] of ROUTES) {
+      const none = await fetch(`${runner.url}${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      expect([route, none.status]).toEqual([route, 401]);
+      const wrong = await fetch(`${runner.url}${route}`, { method: 'POST', headers: headers('not-the-secret-at-all'), body: JSON.stringify(body) });
+      expect([route, wrong.status]).toEqual([route, 401]);
+    }
+    // …and the right one goes through the door and is judged on its own merits.
+    const through = await fetch(`${runner.url}/promote`, { method: 'POST', headers: headers(), body: JSON.stringify({ jobId: 'nope!', version: 1 }) });
+    expect(through.status).toBe(400);
+  });
+
+  it('a runner started with NO secret refuses everything and says so on /status', async () => {
+    const open = await startRunner(root, app.url, { WORKER_RUNNER_TOKEN: '' });
     try {
-      expect((await fetch(`${locked.url}/status`)).status).toBe(200); // the readiness probe stays open
-      const shut = await fetch(`${locked.url}/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jobId: 'job1', runId: 'r', token: 't' }) });
-      expect(shut.status).toBe(401);
-      const open = await fetch(`${locked.url}/run`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-runner-token': 'sesame' },
-        body: JSON.stringify({ jobId: 'nope!', runId: 'r', token: 't' }),
-      });
-      expect(open.status).toBe(400); // through the door, and refused on its own merits
+      const s = await (await fetch(`${open.url}/status`)).json() as any;
+      expect(s.locked).toBe(false);
+      expect(s.ready).toBe(false); // a runner that refuses every route is not ready, whatever else is true
+      expect(s.reason).toMatch(/WORKER_RUNNER_TOKEN/);
+      for (const [route, body] of ROUTES) {
+        const shut = await fetch(`${open.url}${route}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+        expect([route, shut.status]).toEqual([route, 401]);
+      }
     } finally {
-      try { locked.child.kill('SIGKILL'); } catch { /* already gone */ }
+      try { open.child.kill('SIGKILL'); } catch { /* already gone */ }
+    }
+  });
+
+  it('a workers root it cannot use is never `ready` — it says which folder, and refuses', async () => {
+    // A file where the folder should be: it cannot be created, and it cannot be written. Exactly what
+    // the live check found on /srv, where the shipped unit pointed and `sandy` could not create it.
+    const blocked = path.join(os.tmpdir(), `mybrain-blocked-root-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(blocked, 'not a folder');
+    const broken = await startRunner(blocked, app.url);
+    try {
+      const s = await (await fetch(`${broken.url}/status`)).json() as any;
+      expect(s.ready).toBe(false);
+      expect(s.installed).toBe(false);
+      expect(s.workers).toBe(0);
+      expect(String(s.reason)).toContain(blocked);
+
+      // /run answers the honest ndjson result the app parses, marked notStarted, so the run simply
+      // goes the old way instead of failing (the BEA-1394 fallback).
+      const res = await fetch(`${broken.url}/run`, { method: 'POST', headers: headers(), body: JSON.stringify({ jobId: 'job1', runId: 'r', token: 't' }) });
+      const last = (await ndjson(res)).pop()!.line;
+      expect(last).toMatchObject({ type: 'result', status: 'failed', notStarted: true });
+      expect(String(last.error)).toMatch(/workers folder/i);
+
+      // …and the routes that write refuse plainly rather than making half a version folder.
+      for (const route of ['/build', '/promote', '/remove']) {
+        const out = await fetch(`${broken.url}${route}`, { method: 'POST', headers: headers(), body: JSON.stringify({ jobId: 'job1', brief: 'x', version: 1 }) });
+        expect([route, out.status]).toEqual([route, 503]);
+        expect(String(((await out.json()) as any).error)).toMatch(/cannot use its workers folder/i);
+      }
+    } finally {
+      try { broken.child.kill('SIGKILL'); } catch { /* already gone */ }
+      try { fs.rmSync(blocked, { force: true }); } catch { /* best effort */ }
+    }
+  });
+
+  it('makes a workers root it CAN make, rather than sulking about it', async () => {
+    const fresh = path.join(os.tmpdir(), `mybrain-fresh-root-${process.pid}-${Date.now()}`, 'nested');
+    const made = await startRunner(fresh, app.url);
+    try {
+      const s = await (await fetch(`${made.url}/status`)).json() as any;
+      expect(s).toMatchObject({ installed: true, ready: true, reason: null, locked: true, workers: 0 });
+      expect(fs.statSync(fresh).isDirectory()).toBe(true);
+    } finally {
+      try { made.child.kill('SIGKILL'); } catch { /* already gone */ }
+      try { fs.rmSync(path.dirname(fresh), { recursive: true, force: true }); } catch { /* best effort */ }
     }
   });
 
@@ -325,7 +401,29 @@ echo '{"id":"0","msg":{"type":"session_configured","session_id":"fake-session-42
 cat > worker.mjs <<'EOF'
 export async function run(kit) { return { rows: 1 }; }
 EOF
-if [ -f BRIEF.md ] && grep -q "MAKE THE TESTS FAIL" BRIEF.md; then
+if [ -f BRIEF.md ] && grep -q "REPORT WHAT THE TESTS CAN SEE" BRIEF.md; then
+cat > worker.test.mjs <<'EOF'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import net from 'node:net';
+test('what these tests can see', async () => {
+  let fetched = 'no error at all';
+  try { await fetch('http://127.0.0.1:9/never'); } catch (e) { fetched = String(e.message); }
+  let socket = 'no error at all';
+  try { net.connect(9, '127.0.0.1'); } catch (e) { socket = String(e.message); }
+  writeFileSync('seen.json', JSON.stringify({
+    hostSecret: process.env.MYBRAIN_HOST_SECRET ?? null,
+    token: process.env.MYBRAIN_TOKEN ?? null,
+    api: process.env.MYBRAIN_API ?? null,
+    nodeOptions: process.env.NODE_OPTIONS,
+    fetched,
+    socket,
+  }));
+  assert.ok(true);
+});
+EOF
+elif [ -f BRIEF.md ] && grep -q "MAKE THE TESTS FAIL" BRIEF.md; then
 cat > worker.test.mjs <<'EOF'
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -349,7 +447,7 @@ exit 0
 `,
         { mode: 0o755 },
       );
-      buildRunner = await startRunner(root, app.url, { PATH: `${bin}:${process.env.PATH}` });
+      buildRunner = await startRunner(root, app.url, { PATH: `${bin}:${process.env.PATH}`, MYBRAIN_HOST_SECRET: 'this must never reach a build\'s tests' });
     });
 
     afterAll(() => {
@@ -358,9 +456,9 @@ exit 0
     });
 
     const build = async (body: Record<string, any>) =>
-      (await fetch(`${buildRunner.url}/build`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json() as any;
+      (await fetch(`${buildRunner.url}/build`, { method: 'POST', headers: headers(), body: JSON.stringify(body) })).json() as any;
     const promote = async (body: Record<string, any>) => {
-      const res = await fetch(`${buildRunner.url}/promote`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(`${buildRunner.url}/promote`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
       return { status: res.status, body: (await res.json()) as any };
     };
 
@@ -392,6 +490,21 @@ exit 0
 
       // …and it does NOT promote: nothing is live until the app says so.
       expect(fs.existsSync(path.join(root, 'built', 'current'))).toBe(false);
+    });
+
+    it('runs a build\'s tests with no host environment and no network (BEA-1401)', async () => {
+      // The promotion gate is "the tests passed". A test that could quietly fetch something live
+      // would be no gate at all, and the host's own environment is full of real keys — so the test
+      // phase gets exactly what `/parity` gets, and this proves it from INSIDE the test process.
+      const out = await build({ jobId: 'sandboxed', brief: 'Write the worker. REPORT WHAT THE TESTS CAN SEE', files: FILES });
+      expect(out).toMatchObject({ ok: true, version: 1 });
+      const seen = JSON.parse(fs.readFileSync(path.join(root, 'sandboxed', 'v1', 'seen.json'), 'utf8'));
+      expect(seen.hostSecret).toBeNull(); // the runner's own environment does not reach them
+      expect(seen.token).toBeNull();
+      expect(seen.api).toBeNull();
+      expect(seen.nodeOptions).toBe('');
+      expect(String(seen.fetched)).toMatch(/may never call anything outside their own folder/i);
+      expect(String(seen.socket)).toMatch(/may never call anything outside their own folder/i);
     });
 
     it('a build whose tests fail is not ok, and still leaves nothing live', async () => {
@@ -501,7 +614,7 @@ exit 0
     const measure = async (jobId: string, v: number) =>
       (await fetch(`${runner.url}/parity`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: headers(),
         body: JSON.stringify({ jobId, version: v, harness: parityHarness(), files: { ...SAMPLES, 'contract.json': CONTRACT } }),
       })).json() as any;
 
@@ -563,10 +676,10 @@ exit 0
     });
 
     it('refuses a version that is not there, and a request with no harness', async () => {
-      const missing = await fetch(`${runner.url}/parity`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jobId: 'parity', version: 9, harness: 'x' }) });
+      const missing = await fetch(`${runner.url}/parity`, { method: 'POST', headers: headers(), body: JSON.stringify({ jobId: 'parity', version: 9, harness: 'x' }) });
       expect(missing.status).toBe(400);
       expect((await missing.json() as any).error).toMatch(/no worker\.mjs/);
-      const bare = await fetch(`${runner.url}/parity`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jobId: 'parity', version: 1 }) });
+      const bare = await fetch(`${runner.url}/parity`, { method: 'POST', headers: headers(), body: JSON.stringify({ jobId: 'parity', version: 1 }) });
       expect(bare.status).toBe(400);
     });
   });

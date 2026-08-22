@@ -78,7 +78,11 @@ export function fakeAgent(job: any) {
   /** Runs parked on a question, in order — `parkRun(runId, 'worker')` (BEA-1392). */
   const parked: { runId: string; sessionId: string | null }[] = [];
   /** What the real `resolve()` runs after an answer is applied — registered by `OwnerAskService`. */
-  const hooks: { answered: ((runId: string, answer: string, via: string) => any) | null } = { answered: null };
+  const hooks: {
+    answered: ((runId: string, answer: string, via: string) => any) | null;
+    /** What the real `finishRun()` runs on the way out of a worker run (BEA-1401): drop its journal. */
+    journal: ((runId: string) => any) | null;
+  } = { answered: null, journal: null };
   return {
     steps, finished, waitpoints, runKinds, progress, outputs, parked, job,
     parkRun: async (runId: string, sessionId?: string | null) => { parked.push({ runId, sessionId: sessionId ?? null }); },
@@ -114,7 +118,9 @@ export function fakeAgent(job: any) {
     appendStep: async (_runId: string, s: any) => { steps.push(s); },
     stampProgress: async (_runId: string, label: string) => { progress.push(label); },
     setRunKind: async (_runId: string, kind: string) => { runKinds.push(kind); },
-    finishRun: async (_runId: string, p: any) => { finished.push(p); return { status: p?.status || 'done' }; },
+    /** Registered by `WorkerDispatchService` in the app; by `makeWorld` here (BEA-1401). */
+    setJournalCleanup: (h: any) => { hooks.journal = h; },
+    finishRun: async (runId: string, p: any) => { finished.push(p); await hooks.journal?.(runId); return { status: p?.status || 'done' }; },
     attachOutput: async (_runId: string, docId: string) => { outputs.push(docId); },
     getAgent: async (id: string) => (id === job.id ? job : null),
     updateAgent: async (_id: string, patch: any) => { Object.assign(job, patch); return job; },
@@ -239,6 +245,9 @@ export async function makeWorld(opts: {
   const agent = fakeAgent(opts.job);
   const social = new SocialAgentRunService(agent as any, actions as any, llm as any, documents as any, alerts as any, undefined, budget as any, undefined, knowledge as any, sources);
   const journal = new RunJournalService(prisma);
+  // The same registration the app makes at boot (BEA-1401): a worker run's journal is dropped by
+  // `finishRun()`, so every road that ends a run forgets it and not just the worker's own `/finish`.
+  agent.setJournalCleanup((runId: string) => journal.forget(runId));
   const tokens = new WorkerTokenService(journal, agent as any);
   // The REAL question road (BEA-1392): the same service the app registers on the callback
   // controller, with only the WhatsApp send itself faked.

@@ -153,12 +153,19 @@ describe('a worker asks on WhatsApp and carries on when the owner replies', () =
 });
 
 describe('a can\'t-undo call parks the run and asks, instead of failing it', () => {
-  const deleter = async (kit: any) => kit.tool('svc:github.delete_a_repository', { owner: 'inai-sandy', repo: 'old-notes' });
+  const DELETE = 'svc:github.delete_a_repository';
+  const deleter = async (kit: any) => kit.tool(DELETE, { owner: 'inai-sandy', repo: 'old-notes' });
+  /**
+   * The job whose toolbox really holds that delete. Since BEA-1401 a worker may only call its own
+   * job's actions, so a gated call is a call the owner PUT on the job — the gate is about "this
+   * cannot be undone", never about "where did that action come from".
+   */
+  const gatedJob = () => ({ ...job(), tools: [HASHTAG, DELETE] });
 
   it('parks on the gate, messages him, and makes the call only after his yes', async () => {
-    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    const world = await makeWorld({ job: gatedJob(), samples: SAMPLES });
     const reply = inboundRoad(world);
-    world.actions.gated.add('svc:github.delete_a_repository');
+    world.actions.gated.add(DELETE);
 
     await expect(deleter((await spawnKit(world, 'run7', 'ag1')).kit)).rejects.toThrow(WorkerPaused);
     expect(world.alerts.asked[0].question).toContain('cannot be undone');
@@ -170,8 +177,8 @@ describe('a can\'t-undo call parks the run and asks, instead of failing it', () 
     // He said yes, so the second spawn's call goes through — and the gate is not asked again.
     // (The real `ServiceActionsService` reads his recorded approval and lets the call past itself;
     // here the gate is simply lifted, which is the same thing from the worker's side.)
-    world.actions.gated.delete('svc:github.delete_a_repository');
-    world.actions.succeed.add('svc:github.delete_a_repository');
+    world.actions.gated.delete(DELETE);
+    world.actions.succeed.add(DELETE);
     const r = await deleter((await spawnKit(world, 'run7', 'ag1')).kit);
     expect(r.ok).toBe(true);
     expect(world.agent.waitpoints).toHaveLength(1);
@@ -181,9 +188,9 @@ describe('a can\'t-undo call parks the run and asks, instead of failing it', () 
     // The trap this test exists for: the gate's default ("No, stop") is written on the question, but
     // the timeout road has to settle the GATE too. If it only settled the waitpoint, the resumed
     // worker would meet the same gate, park again, and message him every twelve hours for ever.
-    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    const world = await makeWorld({ job: gatedJob(), samples: SAMPLES });
     inboundRoad(world); // registers the answer hook, exactly as the app does at boot
-    world.actions.gated.add('svc:github.delete_a_repository');
+    world.actions.gated.add(DELETE);
 
     await expect(deleter((await spawnKit(world, 'run6', 'ag1')).kit)).rejects.toThrow(WorkerPaused);
     expect(world.alerts.asked).toHaveLength(1);
@@ -198,9 +205,9 @@ describe('a can\'t-undo call parks the run and asks, instead of failing it', () 
   });
 
   it('a no stops that step with his own decision, and never asks twice', async () => {
-    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    const world = await makeWorld({ job: gatedJob(), samples: SAMPLES });
     const reply = inboundRoad(world);
-    world.actions.gated.add('svc:github.delete_a_repository');
+    world.actions.gated.add(DELETE);
 
     await expect(deleter((await spawnKit(world, 'run8', 'ag1')).kit)).rejects.toThrow(WorkerPaused);
     await reply(OWNER_NUMBER, 'no');
@@ -209,6 +216,6 @@ describe('a can\'t-undo call parks the run and asks, instead of failing it', () 
     await expect(deleter((await spawnKit(world, 'run8', 'ag1')).kit)).rejects.toThrow(/said no/i);
     expect(world.agent.waitpoints).toHaveLength(1);
     // Nothing was sent to the vendor on the second pass either.
-    expect(world.calls.filter((c: any) => c.id === 'svc:github.delete_a_repository')).toHaveLength(1);
+    expect(world.calls.filter((c: any) => c.id === DELETE)).toHaveLength(1);
   });
 });
