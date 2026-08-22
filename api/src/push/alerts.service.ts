@@ -130,6 +130,20 @@ export class AlertsService {
     return this.ownerAlert({ headline, detail, path: msg.path, longBody: `${headline}\n\n${detail}` }, { log: 'a question from a run' });
   }
 
+  /**
+   * The self-heal loop's word to the owner (BEA-1393): a worker fixed itself, a repair is waiting for
+   * his decision, or a job has been switched off because two repairs did not work.
+   *
+   * Not behind `alerts.onFailure` and not rate-limited, for the same reason a question is not: these
+   * three messages are the only way he learns that something changed under one of his agents — or
+   * that one has stopped. A swallowed one leaves a job quietly off.
+   */
+  async workerRepair(msg: { headline: string; detail: string; path: string }): Promise<AlertResult> {
+    const headline = clean(msg.headline).slice(0, 120) || 'A worker changed';
+    const detail = clean(msg.detail).slice(0, 900);
+    return this.ownerAlert({ headline, detail, path: msg.path, longBody: `${headline}\n\n${detail}` }, { log: 'a worker repair' });
+  }
+
   /** An automation failed — WhatsApp the owner (if configured), quietly rate-limited. */
   async runFailed(name: string, reason: string, path: string): Promise<AlertResult> {
     const key = name || 'run';

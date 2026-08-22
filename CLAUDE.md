@@ -793,6 +793,46 @@ whose per-creator payloads arrive as a JSON string fails with "fetched 3 answers
 rows", no sheet, no document, no WhatsApp) and by a real Codex build turn whose own tests cover both
 cases.
 
+**A broken worker repairs itself, and it may not change the answer to do it (BEA-1393, agent
+workers 8/10 — `specs/AGENT-WORKERS.md` §G).** The owner's reason for this architecture: *"If a
+micro-service fails, Codex will re-stitch the changes that are required."* `WorkerRepairService`
+(`api/src/worker/worker-repair.service.ts`) is that mechanism. A failed worker run is caught at
+**`AgentService.finishRun()`** through the new `setRunFailedHook()` — the one door every terminal
+state comes through (the worker's own `/finish`, the sweeper's 12-hour deadline, the stall watchdog)
+— and it runs BEFORE the controller drops the run's journal, so the answers that broke it are still
+there: each is kept as `ToolSample(kind:'failing')` with the error, the rule and the contract in the
+payload (`keepFailing()`; `mayKeepFailing()` keeps the privacy half of `shouldSample` to the letter
+and drops the allow-list, because evidence is worth keeping wherever it came from — but nobody's
+messages are). **Two attempts, the owner's number, counted per CAUSE** — `jobId|rule|actionId`
+(`causeOf` in `worker/repair.ts`), where the rule is read out of the failure's own sentence and
+`repair.spec.ts` drives the REAL `checkContract()` to produce every one of them, so the two cannot
+drift; the same cause never re-enters the loop once stopped, a different one still may (a crash
+carries a signature of its message). `onRunFailed` only captures and queues; `tick()` (a minute)
+claims the **BEA-1388 job lock** and drains, so a repair never runs while a run of that job is in
+flight — `RunLockService.renew()` is new, because two Codex turns outlast the 30-minute expiry. A
+repair turn is `POST /build` with the new **`copyFrom`** (the runner copies the version that broke,
+never its `meta.json`) plus `samples/failing.json`, the contract it may not edit, and what the last
+attempt already tried. **The promotion guard is the rule that keeps this trustworthy**: green tests
+are not enough, so the live version and the repair are BOTH run against the same saved answers by
+`POST /parity` — the app writes that harness (`parity-harness.ts`), never Codex, it runs in a
+throwaway copy of the folder with no token, no API address and `fetch` replaced by a throw, and
+`driftOf` holds anything past `PARITY_TOLERANCE` (a tenth of the rows; a column change is never
+inside it; order alone is not a change; unmeasurable is held, never promoted). A held repair waits
+for the owner (`POST /api/agent/agents/:id/worker/repairs/:buildId/accept|decline`; the buttons are
+piece 9's). After two failures the job is paused the one existing way — `enabled:false` AND
+`pausedReason` (`SocialBudgetService.pauseAgent`'s convention) — and `AlertsService.workerRepair()`
+tells him what broke and what was tried, offering "run it the old way"; **nothing here retires a
+job** — that switch is BEA-1394's. Proved for real on 2026-08-22: real Codex built v1, the saved
+answer's `url` was renamed `permalink_url` (a field moving, the BEA-1377 shape), v1 failed loudly
+("Only 0 of 3 rows have a link…"), a real Codex repair wrote v2 that reads both names, 8 tests
+green, promoted — **0 vendor calls**. Named limitation: a job whose columns come out of the AI
+shaping step has no parity baseline (the ruler does not run a model), so the guard falls back to
+"nothing to preserve" for those. Traps: the cap's counter and the "what was already tried" note must
+read the **same** build statuses (`failed|held|promoted` — `COUNTED`); two lists gave one cause three
+Codex turns in review, and a `held` repair also blocks a new one until the owner decides. The
+journal records a call's position and its answer, never its arguments, so the evidence's `args` come
+off the job's own plan (`argsOf`).
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

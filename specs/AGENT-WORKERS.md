@@ -111,6 +111,50 @@ Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-4
     `ServiceGate` row `pending` for ever, so the resumed worker met the same gate, parked again and
     messaged the owner again, every twelve hours. A test now covers exactly that sequence.
 
+- **8/10 — §G self-heal** (BEA-1393): the failed run is caught at `finishRun()` — the one door every
+  terminal state comes through — the answers that broke it are kept as `ToolSample(kind:'failing')`
+  before the journal is dropped, and a repair is queued against a named **cause**. Two attempts, the
+  owner's number, counted per cause; serialised on the BEA-1388 lock; **never a vendor call**; and a
+  promotion guard that holds back any repair which changes the rows. Proved on 2026-08-22 with a real
+  Codex build, a real break and a real repair (below). How the pieces were settled:
+  - **the cause is `jobId|rule|actionId`**, and the rule is read out of the failure's own sentence
+    (`causeOf` in `worker/repair.ts`). Those sentences are written by `checkContract()` in the kit, so
+    `repair.spec.ts` drives that real function to produce every one of them and asserts the rule that
+    comes back — a rule that stopped being recognised would quietly give one break unlimited repairs.
+    A crash carries a signature of its message, so two different crashes are two different causes;
+  - **the ruler is the app's, never Codex's** — `parity-harness.ts` writes a small program that runs a
+    version against the saved answers in a **throwaway copy** of its folder (`POST /parity` on the
+    runner), with no token, no API address and `fetch` replaced by something that throws. Its merge and
+    its shaping step are fixed, deterministic stand-ins on purpose: what is being measured is the
+    WORKER, and both versions are measured with the same ruler. Named limitation: **a job whose columns
+    come out of the AI shaping step cannot have a baseline this way** — the ruler does not run a model —
+    so for those the guard falls back to "there was nothing to preserve" and a green repair goes live;
+  - **the guard's tolerance is a tenth of the rows and not one column** (`driftOf`, `PARITY_TOLERANCE`).
+    A column change is never inside it. Order alone is not a change. A repair that cannot be measured at
+    all is **held**, never promoted — a green tick is not a measurement;
+  - **a repair starts from the version that broke**: `POST /build` gained `copyFrom`, which copies that
+    version's folder (never its `meta.json`) into the new one before the app's files land on top. Codex
+    is handed the worker that broke, the failing answers as `samples/failing.json`, the contract it may
+    not edit, and what the previous attempt already tried;
+  - **the queue is drained on a tick, not inside the failure**. `onRunFailed` only captures and queues;
+    `WorkerRepairService.tick()` claims the job's lock a minute later, so a repair can never run while a
+    run of that job is in flight, and a busy job simply waits for the next tick. `RunLockService.renew()`
+    is new — two Codex turns can outlast the 30-minute expiry;
+  - **the cap counts one list of statuses, read in both places** (`COUNTED` = failed · held ·
+    promoted). The review caught the one real bug in this piece here: the counter and the
+    "what has already been tried" note read different statuses, so a cause that produced a HELD repair
+    got two more fresh Codex turns — three against the owner's two. A held repair also blocks a new one
+    for that cause until he decides, since a fix may already be sitting there waiting for him;
+  - **STOP is the existing convention** (`enabled:false` AND `pausedReason`), and the notice says what
+    broke, what both tries did, and offers "run it the old way". **Nothing here retires a job** — the
+    switch is piece 9's (BEA-1394's dispatch switch), and a job that is off is honestly off.
+  - The proof: a real `codex exec` compiled v1 (7 tests green, promoted); the saved answer's `url` was
+    renamed `permalink_url` — a field moving, the BEA-1377 shape; v1 measured on it failed loudly with
+    "Only 0 of 3 rows have a link…"; the loop named `mustHave` on `svc:instagram.search_hashtag`, kept
+    the failing answer and queued one repair; a real Codex repair session wrote v2 that reads
+    `permalink_url` as well (8 tests green); the guard found no baseline, so v2 was promoted and the
+    `current` symlink moved. **Vendor calls in the whole loop: 0.**
+
 ## The owner's words
 
 > "The entire interview will be taken care of by Sonnet. While creating an agent, the tool will hand

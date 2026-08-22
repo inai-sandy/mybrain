@@ -23,6 +23,18 @@ export type AskInput = {
  */
 export type RunAnswered = (runId: string, answer: string, via: string) => any;
 
+/**
+ * A run on the WORKER road has just failed (BEA-1393, agent workers 8/10). The self-heal loop
+ * registers itself here at boot: `finishRun()` is the one door every terminal state comes through —
+ * the worker's own `/finish` callback, the sweeper's timeout, the stall watchdog — so hooking it
+ * means no road can fail a worker without the evidence being kept.
+ *
+ * It runs BEFORE the callback controller drops the run's journal, and it is awaited so the answers
+ * that broke the run are still there to be read. It must therefore stay cheap: capture, and hand the
+ * repair itself to a later tick. A hook that throws is swallowed — a failed run must not fail twice.
+ */
+export type RunFailed = (runId: string, ctx: { agentId: string | null; error: string; runKind: string }) => any;
+
 const FINISHED = ['done', 'failed', 'cancelled'];
 
 /**
@@ -47,6 +59,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private flowSync: AgentFlowSync | null = null;
   private answered: RunAnswered | null = null;
+  private runFailed: RunFailed | null = null;
 
   // `locks` is optional and LAST: spec harnesses build this service positionally with just Prisma,
   // and every call is `?.`-guarded, so a harness without it behaves exactly as before. (BEA-1388)
@@ -70,6 +83,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    */
   setAnswerHook(hook: RunAnswered | null) {
     this.answered = hook;
+  }
+
+  /**
+   * Register the self-heal loop (BEA-1393). Called once by `WorkerRepairService.onModuleInit` — the
+   * same registration pattern, because WorkerModule imports AgentModule and never the other way.
+   */
+  setRunFailedHook(hook: RunFailed | null) {
+    this.runFailed = hook;
   }
 
   onModuleInit() {
@@ -703,6 +724,16 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // goes AFTER the row is written: a lock freed for a run still marked 'running' would let the next
     // start overlap the one that never actually ended.
     await this.locks?.releaseForRun(id).catch(() => undefined);
+    // A worker that failed is evidence (BEA-1393). This runs before the callback controller drops
+    // the run's journal, so the answers that broke it are still there — and it is swallowed, because
+    // a run that has already failed must not fail a second time on the way out.
+    if ((patch.status ?? 'done') === 'failed' && (run as any).runKind === 'worker' && this.runFailed) {
+      try {
+        await this.runFailed(id, { agentId: run.agentId ?? null, error: String(patch.error || run.error || ''), runKind: 'worker' });
+      } catch {
+        /* the loop says its own piece in its own log; a finish is never held up by it */
+      }
+    }
     return this.shapeRun(updated);
   }
 

@@ -3,8 +3,10 @@
 //
 //   GET  /status                                   -> readiness, same shape as the codex runner's
 //   POST /run   {jobId, runId, token, seed?, timeoutMs?, kit?}  -> ndjson stream, final {type:'result'}
-//   POST /build {jobId, brief, files?, model?, timeoutMs?} -> {ok, version, dir, tests, sessionId, log}
+//   POST /build {jobId, brief, files?, copyFrom?, model?, timeoutMs?} -> {ok, version, dir, tests, sessionId, log}
 //   POST /promote {jobId, version, meta?}          -> {ok, version, previous} — the `current` symlink move
+//   POST /parity {jobId, version, harness, files?, timeoutMs?} -> {ok, result, log} — measure one version
+//                                                    in a throwaway copy, with no token and no network
 //
 // Why it lives on the host and not in the container: the app image has no `child_process` usage at
 // all, and a second container must not write the same SQLite file. This is a sibling of
@@ -505,6 +507,15 @@ async function handleBuild(req, res) {
   try { files = checkFiles(body.files); }
   catch (e) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) })); return; }
 
+  // A repair starts from the version that broke (BEA-1393): its worker.mjs and its tests are copied
+  // into the new folder first, and the app's files land on top. Only a version of THIS job may be
+  // copied, and `meta.json` is left behind — the new version has not been built yet, let alone
+  // promoted, and a stale meta would make the runner's kit check read the wrong worker's number.
+  const copyFrom = body.copyFrom === undefined || body.copyFrom === null ? null : Math.floor(Number(body.copyFrom));
+  if (copyFrom !== null && (!Number.isFinite(copyFrom) || copyFrom < 1)) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad copyFrom' })); return; }
+  const fromDir = copyFrom === null ? null : path.join(jobDir, `v${copyFrom}`);
+  if (fromDir && !fs.existsSync(path.join(fromDir, 'worker.mjs'))) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: `v${copyFrom} has no worker.mjs — there is nothing to start from.` })); return; }
+
   const version = nextVersion(jobDir);
   const dir = path.join(jobDir, `v${version}`);
   const log = [];
@@ -515,6 +526,16 @@ async function handleBuild(req, res) {
       res.statusCode = 500;
       res.end(JSON.stringify({ ok: false, version, error: `could not create ${dir}: ${String((e && e.message) || e)}` }));
       return;
+    }
+    if (fromDir) {
+      try {
+        fs.cpSync(fromDir, dir, { recursive: true, filter: (src) => path.basename(src) !== 'meta.json' && !path.basename(src).startsWith('.') });
+        log.push(`started from v${copyFrom}`);
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, version, error: `could not copy v${copyFrom}: ${String((e && e.message) || e)}` }));
+        return;
+      }
     }
     // The app's own files first (the pinned kit, its docs, the saved answers the tests stand on).
     try {
@@ -566,6 +587,90 @@ async function handleBuild(req, res) {
     res.end(JSON.stringify({ ok, version, dir, wrote, tests, sessionId, timedOut: !!built.timedOut, log: log.join('\n').slice(-20_000) }));
   } finally {
     live.delete(jobId);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// POST /parity — measure ONE version against the saved answers (BEA-1393, the promotion guard).
+//
+// The app sends the harness (it writes the ruler, never Codex) and the saved answers both versions
+// are to be measured on. The version folder itself is never touched: everything happens in a
+// throwaway copy that is deleted afterwards, so a live worker cannot be edited by a measurement.
+//
+// The child gets **no token and no API address**, and the harness replaces `fetch` — a repair loop
+// must be unable to spend a single credit, and this is where that is true rather than promised.
+// ---------------------------------------------------------------------------------------------
+const PARITY_TIMEOUT = Number(process.env.WORKER_PARITY_TIMEOUT_MS || 120_000);
+const PARITY_FILE = '.parity.mjs';
+const PARITY_MARK = 'PARITY_RESULT ';
+
+/** The harness's own line out of whatever the child printed. Anything else is log. */
+function readParity(out) {
+  const lines = String(out || '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const at = lines[i].indexOf(PARITY_MARK);
+    if (at === -1) continue;
+    try { return JSON.parse(lines[i].slice(at + PARITY_MARK.length)); } catch (e) { return null; }
+  }
+  return null;
+}
+
+async function handleParity(req, res) {
+  let body = {};
+  try { body = JSON.parse(await readBody(req)); }
+  catch (e) {
+    const msg = String((e && e.message) || '');
+    if (/too large/.test(msg)) { res.statusCode = 413; try { res.end(JSON.stringify({ ok: false, error: 'request body too large (8MB max)' }), () => req.destroy()); } catch (e2) { try { req.destroy(); } catch (e3) {} } return; }
+    if (/socket|aborted|ECONN|hang up/i.test(msg)) return;
+    res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad body' })); return;
+  }
+  const jobId = String(body.jobId || '');
+  const jobDir = jobDirOf(jobId);
+  const version = Math.floor(Number(body.version));
+  const harness = String(body.harness || '');
+  if (!jobDir) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad or missing jobId' })); return; }
+  if (!Number.isFinite(version) || version < 1) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad or missing version' })); return; }
+  if (!harness.trim()) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'no harness' })); return; }
+  let files = [];
+  try { files = checkFiles(body.files); }
+  catch (e) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) })); return; }
+
+  const dir = path.join(jobDir, `v${version}`);
+  if (!fs.existsSync(path.join(dir, 'worker.mjs'))) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: `v${version} has no worker.mjs — there is nothing to measure.` })); return; }
+  if (live.has(jobId)) { res.statusCode = 409; res.end(JSON.stringify({ ok: false, error: `This job is busy here (${live.get(jobId).kind}) — try again when it settles.` })); return; }
+
+  const tmp = path.join(jobDir, `.parity-v${version}-${process.pid}-${Date.now()}`);
+  const log = [];
+  // It holds the job's slot while it measures, like a run or a build does: a /build for the same job
+  // starting mid-copy would be copying a folder that is being read.
+  live.set(jobId, { runId: `parity-v${version}`, kind: 'parity', startedAt: new Date().toISOString(), kill: () => {} });
+  // The answer is built first and sent LAST, after the copy is gone: a caller that reads the reply
+  // and then looks at the folder must never see the measurement's leftovers (found by its own test).
+  let reply = null;
+  let code = 200;
+  try {
+    fs.cpSync(dir, tmp, { recursive: true, filter: (src) => !path.basename(src).startsWith('.') });
+    fs.writeFileSync(path.join(tmp, PARITY_FILE), harness);
+    const written = writeFiles(tmp, files);
+    if (written.length) log.push(`measured against ${written.length} file${written.length === 1 ? '' : 's'} from the app`);
+    const timeoutMs = Math.min(600_000, Math.max(5_000, Number(body.timeoutMs) > 0 ? Number(body.timeoutMs) : PARITY_TIMEOUT));
+    // No token, no API: a parity child cannot call the app, let alone a vendor.
+    const env = { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: os.homedir(), LANG: process.env.LANG || 'C.UTF-8', TZ: process.env.TZ || '', NODE_ENV: 'production', NODE_OPTIONS: '' };
+    const ran = await runCommand(process.execPath, [`--max-old-space-size=${MEMORY_MB}`, PARITY_FILE], tmp, timeoutMs, env);
+    const result = readParity(ran.stdout);
+    if (ran.timedOut) log.push(`the parity run was stopped after ${Math.round(timeoutMs / 1000)}s`);
+    if (ran.stderr.trim()) log.push(ran.stderr.trim().slice(-2000));
+    reply = result
+      ? { ok: true, version, result, log: log.join('\n').slice(-8000) }
+      : { ok: false, version, error: ran.timedOut ? 'the parity run did not finish in time' : 'the parity run said nothing about what it produced', log: log.join('\n').slice(-8000) };
+  } catch (e) {
+    code = 500;
+    reply = { ok: false, version, error: `the parity run could not be set up: ${String((e && e.message) || e)}` };
+  } finally {
+    live.delete(jobId);
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* a leftover copy is swept by the next one */ }
+    res.statusCode = code;
+    res.end(JSON.stringify(reply || { ok: false, version, error: 'the parity run said nothing' }));
   }
 }
 
@@ -642,6 +747,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/run') { await handleRun(req, res); return; }
     if (req.method === 'POST' && req.url === '/build') { await handleBuild(req, res); return; }
     if (req.method === 'POST' && req.url === '/promote') { await handlePromote(req, res); return; }
+    if (req.method === 'POST' && req.url === '/parity') { await handleParity(req, res); return; }
     res.statusCode = 404;
     res.end(JSON.stringify({ error: 'not found' }));
   } catch (e) {

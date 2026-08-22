@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ParityResult } from './repair';
 
 /** The host service that owns the worker folders (BEA-1389). Overridden in `deploy.sh`. */
 const RUNNER = process.env.WORKER_RUNNER_URL || 'http://172.18.0.1:8769';
@@ -22,6 +23,12 @@ export type RunnerBuildResult = {
 };
 
 export type RunnerPromoteResult = { ok: boolean; version?: number; previous?: string | null; error?: string };
+
+/** What one version produced when it was run against the saved answers (BEA-1393). */
+export type RunnerParityResult = { ok: boolean; version?: number; result?: ParityResult; log?: string | null; error?: string };
+
+/** A parity measurement is a few seconds of local work; this is only the patience for a stuck one. */
+const PARITY_TIMEOUT_MS = Number(process.env.WORKER_PARITY_TIMEOUT_MS || 3 * 60_000);
 
 /** What one spawn came back as. `waiting` = it parked on a question and exited (BEA-1392 §H). */
 export type RunnerRunResult = { status: 'done' | 'failed' | 'waiting'; rows?: number | null; error?: string | null; waitpointId?: string | null; timedOut?: boolean; kitRefused?: boolean };
@@ -65,12 +72,12 @@ export class WorkerRunnerClient {
    * workspace-write -C vN`, then that version's own tests. It does not promote — that is this app's
    * decision, and it is made on the tests.
    */
-  async build(input: { jobId: string; brief: string; files: Record<string, string>; timeoutMs?: number }): Promise<RunnerBuildResult> {
+  async build(input: { jobId: string; brief: string; files: Record<string, string>; copyFrom?: number | null; timeoutMs?: number }): Promise<RunnerBuildResult> {
     try {
       const r = await fetch(`${RUNNER}/build`, {
         method: 'POST',
         headers: this.headers(),
-        body: JSON.stringify({ jobId: input.jobId, brief: input.brief, files: input.files, timeoutMs: input.timeoutMs }),
+        body: JSON.stringify({ jobId: input.jobId, brief: input.brief, files: input.files, copyFrom: input.copyFrom ?? null, timeoutMs: input.timeoutMs }),
         signal: AbortSignal.timeout(input.timeoutMs ? input.timeoutMs + 60_000 : BUILD_TIMEOUT_MS),
       });
       const json: any = await r.json().catch(() => null);
@@ -109,6 +116,28 @@ export class WorkerRunnerClient {
     } catch (e: any) {
       this.log.warn(`run ${input.runId} could not be spawned: ${e?.message || e}`);
       return { status: 'failed', error: `The worker could not be started — ${reasonOf(e)}.` };
+    }
+  }
+
+  /**
+   * Measure ONE version against the saved answers (BEA-1393, the promotion guard). The harness is
+   * the app's (`parity-harness.ts`), the fixtures are the app's, and the version folder is copied
+   * rather than touched — so both versions are measured with the same ruler on the same answers,
+   * and neither measurement can reach a vendor.
+   */
+  async parity(input: { jobId: string; version: number; harness: string; files?: Record<string, string>; timeoutMs?: number }): Promise<RunnerParityResult> {
+    try {
+      const r = await fetch(`${RUNNER}/parity`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ jobId: input.jobId, version: input.version, harness: input.harness, files: input.files || {}, timeoutMs: input.timeoutMs }),
+        signal: AbortSignal.timeout(input.timeoutMs ? input.timeoutMs + 30_000 : PARITY_TIMEOUT_MS),
+      });
+      const json: any = await r.json().catch(() => null);
+      if (!r.ok || !json?.ok) return { ok: false, error: json?.error || `the worker runner answered ${r.status}` };
+      return { ok: true, version: json.version, result: json.result, log: json.log || null };
+    } catch (e: any) {
+      return { ok: false, error: `The repair could not be measured — ${reasonOf(e)}.` };
     }
   }
 

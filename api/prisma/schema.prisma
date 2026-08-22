@@ -769,10 +769,18 @@ model WorkerBuild {
   agentId    String
   /// The version folder this build wrote: `<jobId>/v<version>`.
   version    Int
-  /// building | promoted | failed. `promoted` is only ever written after green tests.
+  /// queued | building | promoted | held | failed. `promoted` is only ever written after green
+  /// tests; `held` is a repair whose tests passed but whose rows moved beyond the tolerance — it is
+  /// built and waiting for the owner, never live (BEA-1393). `queued` is a repair waiting for the
+  /// job's lock.
   status     String    @default("building")
-  /// build (the first worker for this job) | rebuild (the plan changed, or the owner asked again).
+  /// build (the first worker for this job) | rebuild (the plan changed, or the owner asked again) |
+  /// repair (the self-heal loop, after a failed run).
   origin     String    @default("build")
+  /// What broke, for a repair: `jobId|rule|actionId` (BEA-1393). Two attempts are counted against
+  /// this key, so the same failure never re-enters the loop once it has stopped — and a different
+  /// one still may. Null on an ordinary build.
+  cause      String?
   /// Why this build was asked for, in plain words — shown to the owner beside the version.
   reason     String?
   planHash   String
@@ -794,6 +802,7 @@ model WorkerBuild {
 
   @@index([agentId, startedAt])
   @@index([status])
+  @@index([agentId, cause])
 }
 
 /// ONE run at a time per job (BEA-1388, `specs/AGENT-WORKERS.md` §G). Before anything starts a job —

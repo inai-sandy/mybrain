@@ -7,6 +7,7 @@ import {
   FIRST_SWEEP_AFTER_MS,
   isUsable,
   maskPayload,
+  mayKeepFailing,
   PER_ACTION_GOOD,
   PER_AGENT_FAILING,
   RAW_MAX,
@@ -153,6 +154,67 @@ export class ToolSampleService implements OnModuleInit {
       return row?.id || null;
     } catch (e: any) {
       this.log.warn(`could not keep a sample for ${input?.actionId}: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /**
+   * Keep the answer that BROKE a run, with the error and the contract that judged it (BEA-1393 §G).
+   *
+   * The difference from `maybeKeep()` is deliberate and small: this is evidence, not a fixture, so
+   * the "is this worth testing against" allow-list does not apply — but the privacy half does, to
+   * the letter (`mayKeepFailing`). The payload is the whole bundle a repair reads: the answer the
+   * worker really got, the failure, the rule it broke and the contract it was judged by. `pick()`
+   * only ever returns `kind:'good'` rows, so nothing that tests a worker can pick one of these up
+   * by accident.
+   *
+   * Never throws — a run that already failed must not fail twice because a note could not be kept.
+   */
+  async keepFailing(input: {
+    actionId: string;
+    agentId?: string | null;
+    args?: Record<string, any>;
+    answer: any;
+    error: string;
+    rule?: string;
+    contract?: any;
+    note?: string;
+  }): Promise<string | null> {
+    try {
+      if (!mayKeepFailing(input.actionId)) return null;
+      const create = this.prisma?.toolSample?.create;
+      if (!create) return null;
+      const parsed = /^svc:([^.]+)\.(.+)$/.exec(String(input.actionId));
+      const bundle = {
+        answer: input.answer ?? null,
+        failedWith: String(input.error || '').slice(0, 2000),
+        rule: input.rule || null,
+        contract: input.contract || null,
+        capturedAt: new Date().toISOString(),
+      };
+      const raw = Buffer.from(JSON.stringify(maskPayload(bundle)), 'utf8');
+      const over = raw.length > RAW_MAX;
+      const payload = await gzipAsync(over ? raw.subarray(0, RAW_MAX) : raw);
+      if (payload.length > SAMPLE_MAX_BYTES) return null;
+      const args = input.args && typeof input.args === 'object' ? input.args : {};
+      const row = await this.prisma.toolSample.create({
+        data: {
+          service: String(parsed?.[1] || '').toLowerCase(),
+          action: String(parsed?.[2] || ''),
+          actionId: String(input.actionId),
+          agentId: input.agentId || null,
+          argsHash: argsHashOf(args),
+          arguments: JSON.stringify(maskPayload(args)),
+          payload,
+          bytes: payload.length,
+          kind: 'failing',
+          note: over ? truncatedNote(raw.length) : input.note || `kept as evidence: ${String(input.error || '').slice(0, 300)}`,
+        },
+        select: { id: true },
+      });
+      return row?.id || null;
+    } catch (e: any) {
+      this.log.warn(`could not keep the failing answer for ${input?.actionId}: ${e?.message || e}`);
       return null;
     }
   }

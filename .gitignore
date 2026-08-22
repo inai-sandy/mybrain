@@ -17,3 +17,6 @@ secrets.env
 .claude/checks/ship-log.tsv
 .claude/checks/ui-shots/
 .claude/checks/ui-state.json
+
+# git worktrees a session opens live here — never part of the repo (BEA-1392)
+.claude/worktrees/

@@ -102,6 +102,21 @@ export class RunLockService {
     return kept.count > 0 ? { ok: true, holder: got.held.holder } : { ok: false, held: got.held };
   }
 
+  /**
+   * Keep a lock this holder already owns for another `ttlMs` (BEA-1393). The repair loop needs it:
+   * two Codex repair turns back to back can outlast the 30-minute expiry, and a lock that expired
+   * under a repair would let a scheduled run start on a worker that is being replaced. Only the
+   * holder's own row moves, so a lock already taken over by somebody else is untouched — the answer
+   * is `false` and the caller stops.
+   */
+  async renew(holder: string, ttlMs: number = RunLockService.TTL_MS): Promise<boolean> {
+    if (!holder) return false;
+    const r = await this.prisma.jobRunLock
+      .updateMany({ where: { holder }, data: { expiresAt: new Date(Date.now() + Math.max(1, ttlMs)) } })
+      .catch(() => ({ count: 0 }));
+    return (r?.count ?? 0) > 0;
+  }
+
   /** Attach the run to the lock the moment it exists, so a skipped fire can point at it. */
   async attachRun(holder: string, runId: string): Promise<void> {
     await this.prisma.jobRunLock.updateMany({ where: { holder }, data: { runId } }).catch(() => undefined);

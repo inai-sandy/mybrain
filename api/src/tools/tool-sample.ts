@@ -243,6 +243,28 @@ export function shouldSample(c: SampleCandidate): boolean {
   return read;
 }
 
+/**
+ * The other door: **evidence of a break** (BEA-1393, the self-heal loop).
+ *
+ * `shouldSample()` decides what is worth keeping to test AGAINST — a successful, ungated read of an
+ * opted-in public-content service, served by the scraping provider. A failure is a different
+ * question: the answer that broke a worker is the one thing a repair needs to read, whichever
+ * service it came from and however the call went, so the allow-list and the provider check do not
+ * apply here.
+ *
+ * What DOES still apply is the privacy half, and it applies exactly as strictly: a service on
+ * `NO_SAMPLE_SERVICES` (the vault, WhatsApp, Gmail, chat, Telegram…) and anything that reads like
+ * somebody's messages are never stored, broken or not. Evidence is never worth keeping a person's
+ * conversation for.
+ */
+export function mayKeepFailing(actionId: string, service?: string): boolean {
+  const m = /^svc:([^.]+)\.(.+)$/.exec(String(actionId || ''));
+  if (!m) return false;
+  const slug = String(service || m[1] || '').toLowerCase();
+  if (NO_SAMPLE_SERVICES.has(slug)) return false;
+  return !NO_SAMPLE_ACTION_RE.test(m[2]);
+}
+
 // ---- notes -----------------------------------------------------------------------------------
 
 /** How a note starts when the answer was too big to keep whole. `isUsable()` reads this. */

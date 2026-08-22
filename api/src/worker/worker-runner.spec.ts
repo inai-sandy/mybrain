@@ -5,6 +5,8 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { makeWorld } from './worker-harness.testing';
+import { parityHarness } from './parity-harness';
+import { PARITY_TOLERANCE, driftOf } from './repair';
 
 /**
  * The worker runner, over real HTTP, on this machine (BEA-1389, agent workers 4/10).
@@ -427,6 +429,26 @@ exit 0
       expect(fs.existsSync(path.join(root, 'empty', 'current'))).toBe(false);
     });
 
+    it('a repair starts from the version that broke, and never carries its meta.json over (BEA-1393)', async () => {
+      await build({ jobId: 'repairme', brief: 'Write the worker.', files: FILES });
+      await promote({ jobId: 'repairme', version: 1, meta: { jobId: 'repairme', version: 1, kit: '1', planHash: 'sha256:aaa' } });
+      fs.writeFileSync(path.join(root, 'repairme', 'v1', 'notes.txt'), 'something only v1 has');
+
+      // The repair sends only the fresh material; everything else comes from the copy.
+      const out = await build({ jobId: 'repairme', brief: 'Fix the worker.', files: { 'samples/failing.json': '{"failedWith":"x"}' }, copyFrom: 1 });
+      expect(out).toMatchObject({ ok: true, version: 2 });
+      const v2 = path.join(root, 'repairme', 'v2');
+      expect(fs.readFileSync(path.join(v2, 'notes.txt'), 'utf8')).toBe('something only v1 has');
+      expect(fs.existsSync(path.join(v2, 'kit', 'kit.js'))).toBe(true); // the kit came from v1, not the request
+      expect(fs.existsSync(path.join(v2, 'samples', 'failing.json'))).toBe(true);
+      // v1's meta must NOT ride along: v2 has not been promoted, and a copied meta would make the
+      // runner's kit check read the wrong worker's number.
+      expect(fs.existsSync(path.join(v2, 'meta.json'))).toBe(false);
+      // …and the live worker is still v1 until something promotes v2.
+      expect(fs.realpathSync(path.join(root, 'repairme', 'current'))).toBe(fs.realpathSync(path.join(root, 'repairme', 'v1')));
+      expect((await build({ jobId: 'repairme', brief: 'x', files: {}, copyFrom: 9 })).error).toMatch(/v9 has no worker\.mjs/);
+    });
+
     it('a file map that tries to escape the folder is refused, and no folder is left behind', async () => {
       for (const bad of ['../escape.txt', '/etc/passwd', 'a/../../b.txt']) {
         const out = await build({ jobId: 'escape', brief: 'x', files: { [bad]: 'no' } });
@@ -435,6 +457,117 @@ exit 0
       }
       expect(fs.existsSync(path.join(root, 'escape'))).toBe(false);
       expect(fs.existsSync(path.join(root, 'escape.txt'))).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------------------------
+  // The promotion guard's ruler (BEA-1393): both versions run against the same saved answers, in a
+  // throwaway copy, with no token and no network — and what they produce is compared.
+  // -------------------------------------------------------------------------------------------
+  describe('measuring a version against the saved answers (BEA-1393)', () => {
+    const CONTRACT = JSON.stringify({ minRows: 1, maxRows: 5000, columns: [], mustHave: [], freshnessDays: null, allowEmptyWhen: 'every source returned an empty answer' });
+    const SAMPLES = {
+      'samples/index.json': JSON.stringify({ sources: [{ sourceId: 'src-a', file: 'samples/a.json' }] }),
+      'samples/a.json': JSON.stringify({
+        sourceId: 'src-a',
+        answer: { ok: true, sourceId: 'src-a', label: 'A', credits: 1, empty: false, unrecognised: false, why: null, stop: null, table: { columns: ['id', 'link'], rows: [['p1', 'u1'], ['p2', 'u2'], ['p3', 'u3']] } },
+      }),
+    };
+
+    /** One version folder, by hand: the real kit, a contract, the fixtures and a worker. */
+    function version(jobId: string, v: number, body: string, files: Record<string, string> = {}) {
+      const dir = path.join(root, jobId, `v${v}`);
+      fs.mkdirSync(path.join(dir, 'kit'), { recursive: true });
+      fs.copyFileSync(KIT, path.join(dir, 'kit', 'kit.js'));
+      fs.writeFileSync(path.join(dir, 'contract.json'), CONTRACT);
+      for (const [name, text] of Object.entries({ ...SAMPLES, ...files })) {
+        fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+        fs.writeFileSync(path.join(dir, name), text);
+      }
+      fs.writeFileSync(path.join(dir, 'worker.mjs'), body);
+      return dir;
+    }
+
+    const worker = (rows = 'got.table.rows') => `
+      export async function run(kit) {
+        const got = await kit.fetchSource('src-a');
+        const table = { columns: got.table.columns, rows: ${rows} };
+        kit.expect(table);
+        const w = await kit.writeSheet(table, { title: 'Parity' });
+        await kit.finish({ resultText: table.rows.length + ' rows', outputUrl: w.url });
+        return { rows: table.rows.length };
+      }`;
+
+    const measure = async (jobId: string, v: number) =>
+      (await fetch(`${runner.url}/parity`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jobId, version: v, harness: parityHarness(), files: { ...SAMPLES, 'contract.json': CONTRACT } }),
+      })).json() as any;
+
+    it('measures what a version produces — and leaves the version folder exactly as it was', async () => {
+      version('parity', 1, worker());
+      const out = await measure('parity', 1);
+      expect(out.ok).toBe(true);
+      expect(out.result).toMatchObject({ ok: true, rows: 3, columns: ['id', 'link'] });
+      expect(out.result.rowKeys).toHaveLength(3);
+      expect(out.result.calls).toEqual(['tool', 'output', 'finish']);
+
+      // The live folder is not something a measurement may edit, and nothing is left behind.
+      expect(fs.readdirSync(path.join(root, 'parity', 'v1')).sort()).toEqual(['contract.json', 'kit', 'samples', 'worker.mjs']);
+      expect(fs.readdirSync(path.join(root, 'parity')).filter((d) => d.startsWith('.parity'))).toEqual([]);
+    });
+
+    it('a repair that keeps every row is within tolerance; one that drops rows is held for the owner', async () => {
+      version('guard', 1, worker());
+      version('guard', 2, worker('got.table.rows.slice(0, -1)')); // a "fix" that quietly loses a row
+      version('guard', 3, worker()); // the same answer as v1
+
+      const before = (await measure('guard', 1)).result;
+      const changed = (await measure('guard', 2)).result;
+      const same = (await measure('guard', 3)).result;
+
+      expect(driftOf(before, same)).toMatchObject({ within: true, changed: 0 });
+      const drift = driftOf(before, changed);
+      expect(drift.within).toBe(false);
+      expect(drift.changed).toBeGreaterThan(PARITY_TOLERANCE);
+      expect(drift.why).toMatch(/rows are different/);
+    });
+
+    it('a column change is never inside the tolerance, however few rows moved', () => {
+      const before = { ok: true, rows: 2, columns: ['id', 'link'], rowKeys: ['a', 'b'] };
+      const after = { ok: true, rows: 2, columns: ['id', 'url'], rowKeys: ['a', 'b'] };
+      expect(driftOf(before, after)).toMatchObject({ within: false, changed: 1 });
+      expect(driftOf(before, after).why).toMatch(/columns changed/);
+    });
+
+    it('a broken live worker leaves no baseline — there is nothing a repair could quietly change', async () => {
+      version('nobase', 1, 'export async function run(kit) { throw new Error("the field moved"); }');
+      version('nobase', 2, worker());
+      const before = (await measure('nobase', 1)).result;
+      const after = (await measure('nobase', 2)).result;
+      expect(before).toMatchObject({ ok: false });
+      expect(driftOf(before, after)).toMatchObject({ within: true, noBaseline: true });
+    });
+
+    it('a worker that tries to reach the network during a measurement fails, and spends nothing', async () => {
+      version('nonet', 1, `
+        export async function run(kit) {
+          await fetch('http://127.0.0.1:9/never');
+          return { rows: 0 };
+        }`);
+      const out = await measure('nonet', 1);
+      expect(out.ok).toBe(true); // the measurement itself worked — the WORKER is what failed
+      expect(out.result).toMatchObject({ ok: false });
+      expect(out.result.error).toMatch(/may never call anything/i);
+    });
+
+    it('refuses a version that is not there, and a request with no harness', async () => {
+      const missing = await fetch(`${runner.url}/parity`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jobId: 'parity', version: 9, harness: 'x' }) });
+      expect(missing.status).toBe(400);
+      expect((await missing.json() as any).error).toMatch(/no worker\.mjs/);
+      const bare = await fetch(`${runner.url}/parity`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jobId: 'parity', version: 1 }) });
+      expect(bare.status).toBe(400);
     });
   });
 

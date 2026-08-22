@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { WorkerBuildService } from './worker-build.service';
+import { WorkerRepairService } from './worker-repair.service';
 
 /**
  * The owner's door to the build turn (BEA-1390 — `specs/AGENT-WORKERS.md` §C, §D).
@@ -14,7 +15,7 @@ import { WorkerBuildService } from './worker-build.service';
  */
 @Controller('agent/agents/:id/worker')
 export class WorkerBuildController {
-  constructor(private readonly builds: WorkerBuildService) {}
+  constructor(private readonly builds: WorkerBuildService, private readonly repairs: WorkerRepairService) {}
 
   @Get()
   state(@Param('id') id: string) {
@@ -24,5 +25,21 @@ export class WorkerBuildController {
   @Post('build')
   build(@Param('id') id: string, @Body() body: any) {
     return this.builds.build(id, { reason: body?.reason ? String(body.reason).slice(0, 300) : undefined });
+  }
+
+  /**
+   * The owner's half of the promotion guard (BEA-1393). A repair whose tests passed but whose rows
+   * moved is held rather than promoted, and only he decides: **yes** puts that version live,
+   * **no** leaves the worker exactly as it is. The loop can never take this decision itself — that
+   * is the whole point of holding it. (The buttons that call these are the Worker tab's, BEA-1394.)
+   */
+  @Post('repairs/:buildId/accept')
+  accept(@Param('id') id: string, @Param('buildId') buildId: string) {
+    return this.repairs.accept(id, buildId);
+  }
+
+  @Post('repairs/:buildId/decline')
+  decline(@Param('id') id: string, @Param('buildId') buildId: string) {
+    return this.repairs.decline(id, buildId);
   }
 }
