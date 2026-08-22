@@ -49,6 +49,22 @@ export function wantsShaping(prompt?: string | null): boolean {
 }
 
 export const MAX_PAGES = 11;
+
+/**
+ * `pages: ALL_PAGES` — keep asking for the next page until the source runs out (BEA-1407).
+ *
+ * The 11-page cap is a sensible default for a digest, and a wall for "read ALL my emails since
+ * yesterday". The owner asked for exactly that and there was no way to say it: the plan had a
+ * number, and a number is a guess about how much of his life fits on a page.
+ *
+ * "Until it runs out" is still bounded — by the source itself (no next cursor, an empty page, a
+ * repeated page all stop the loop), by `MAX_PAGES_ALL` as a runaway backstop, and by the daily
+ * credit ceiling, which is checked BEFORE every single page.
+ */
+export const ALL_PAGES = -1;
+
+/** The runaway backstop for `ALL_PAGES`. Never reached by a real source; reached, it is said out loud. */
+export const MAX_PAGES_ALL = 200;
 export const MAX_TAKE = 50;
 export const DEFAULT_KEEP_DAYS = 30;
 
@@ -103,9 +119,23 @@ export const CEILING_NOTE = 'The daily Social credit ceiling is checked before e
 
 /** 1..11; anything else (missing, text, 0, 99) → 1 or the cap. */
 export function clampPages(v: any): number {
+  // "all" / ALL_PAGES — until the source runs out. Written as a word by a person, as -1 by the code.
+  if (typeof v === 'string' && v.trim().toLowerCase() === 'all') return ALL_PAGES;
   const n = Math.floor(Number(v));
+  if (n === ALL_PAGES) return ALL_PAGES;
   if (!Number.isFinite(n) || n < 1) return 1;
   return Math.min(n, MAX_PAGES);
+}
+
+/** How many pages this source will really ask for, at most. */
+export function pageCeiling(pages: number): number {
+  return pages === ALL_PAGES ? MAX_PAGES_ALL : pages;
+}
+
+/** "3 pages" · "every page there is" — for a step, a plan card or a build brief. */
+export function pagesText(pages: number): string {
+  if (pages === ALL_PAGES) return 'every page there is';
+  return `${pages} page${pages === 1 ? '' : 's'}`;
 }
 
 /** 1..50 creators; missing → 10. */
@@ -368,12 +398,20 @@ export function estimatePlanCost(plan: AgentPlan, knowledge: Record<string, Cost
   for (const s of plan.sources) {
     if (s.kind === 'source') {
       const c = perCall(s.actionId);
-      const cost = s.pages * c;
+      // "Every page there is" has no number until it runs (BEA-1407). Costing it at a made-up
+      // number would be a guess dressed as an estimate, so it is costed at the ordinary cap and
+      // SAID to be a floor — the daily ceiling is what really bounds it, before every page.
+      const pages = s.pages === ALL_PAGES ? MAX_PAGES : s.pages;
+      const cost = pages * c;
       credits += cost;
       // Today: a failing source answers empty (not_found is not charged) — nothing to count.
       if (!isFailing(knowledge[s.actionId])) nowCredits += cost;
-      items += s.pages * perPage(s.actionId);
-      parts.push(`${shortName(s.actionId)}: ${plural(s.pages, 'page')} × ${plural(c, 'credit')} = ${fmt(cost)}`);
+      items += pages * perPage(s.actionId);
+      parts.push(
+        s.pages === ALL_PAGES
+          ? `${shortName(s.actionId)}: every page there is — at least ${plural(pages, 'page')} × ${plural(c, 'credit')} = ${fmt(cost)} or more, until the source runs out or the daily ceiling stops it`
+          : `${shortName(s.actionId)}: ${plural(s.pages, 'page')} × ${plural(c, 'credit')} = ${fmt(cost)}`,
+      );
     } else {
       const f = perCall(s.find.actionId);
       const t = perCall(s.then.actionId);

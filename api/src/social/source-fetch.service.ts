@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
 import { findList, tableOf } from './rows';
-import { PlanBlock, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pagingOf } from './plan';
+import { ALL_PAGES, PlanBlock, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pageCeiling, pagesText, pagingOf } from './plan';
 import { isEmptySearch, itemsOf, nounOf, unrecognisedAnswer } from './source-fetch';
 
 /** The daily-ceiling guard: a reason means the call was NOT made and the job paused itself. */
@@ -68,7 +68,9 @@ export class SourceFetchService {
     const hint = opts.hint || '';
     const id = src.actionId;
     const nodeId = `src:${src.id}`;
-    const card = src.pages > 1 ? await this.knowledge?.card?.(id).catch(() => null) : null;
+    const wantsAll = src.pages === ALL_PAGES;
+    const ceiling = pageCeiling(src.pages);
+    const card = ceiling > 1 ? await this.knowledge?.card?.(id).catch(() => null) : null;
     const seen = new Set<string>();
     const items: any[] = [];
     let listKey = '';
@@ -78,7 +80,7 @@ export class SourceFetchService {
     let stopNote = '';
     let paging: { param: string; how: 'cursor' | 'page' } | null = null;
     let cursor: any = null;
-    for (let p = 1; p <= src.pages; p++) {
+    for (let p = 1; p <= ceiling; p++) {
       const stop = await guard(id);
       if (stop) return { credits, stop };
       const a = p === 1 ? src.args : { ...src.args, [paging!.param]: cursor };
@@ -113,7 +115,7 @@ export class SourceFetchService {
       let fresh = 0;
       for (const it of list.rows) { const k = dedupeKey(it); if (seen.has(k)) continue; seen.add(k); items.push(it); fresh++; }
       // Still moving: the run is stamped once a page, so slow is never mistaken for stuck.
-      await progress(opts, `fetching ${r.serviceName || id}${hint} — page ${p}${src.pages > 1 ? ` of ${src.pages}` : ''}, ${items.length} item${items.length === 1 ? '' : 's'} so far`);
+      await progress(opts, `fetching ${r.serviceName || id}${hint} — page ${p}${wantsAll ? ' (going until it runs out)' : ceiling > 1 ? ` of ${ceiling}` : ''}, ${items.length} item${items.length === 1 ? '' : 's'} so far`);
       if (p > 1 && fresh === 0) { stopNote = `page ${p} repeated what page ${p - 1} had`; break; }
       if (p === src.pages) break;
       if (p === 1) {
@@ -133,7 +135,19 @@ export class SourceFetchService {
     const over = single ? '' : ` over ${pagesFetched} page${pagesFetched === 1 ? '' : 's'}`;
     // Why fewer pages than asked, in plain words: the vendor does not page this one · that was
     // everything · an empty / repeated page. Nothing when every page asked for was fetched.
-    const note = !stopNote || pagesFetched >= src.pages ? '' : /does not page/.test(stopNote) ? ` · ${stopNote} (${src.pages} pages asked)` : /everything/.test(stopNote) ? ` · ${stopNote}` : ` · stopped early: ${stopNote}`;
+    // "Asked for every page" never reads as "stopped early": running out IS the finish line.
+    const hitTheBackstop = wantsAll && pagesFetched >= ceiling;
+    const note = hitTheBackstop
+      ? ` · stopped at ${ceiling} pages — that is our safety limit, so there may be more`
+      : !stopNote || (!wantsAll && pagesFetched >= src.pages)
+        ? ''
+        : /does not page/.test(stopNote)
+          ? ` · ${stopNote} (${pagesText(src.pages)} asked)`
+          : /everything/.test(stopNote)
+            ? ` · ${stopNote}`
+            : wantsAll
+              ? ` · that was all of them (${stopNote})`
+              : ` · stopped early: ${stopNote}`;
     await step({ label: `Fetched ${first!.serviceName || ''}${first!.actionName ? ` · ${first!.actionName}` : ''}${hint} — ${count} item${count === 1 ? '' : 's'}${over} · ${credits} credit${credits === 1 ? '' : 's'}${note}`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
     // One page: the vendor's whole answer, as always (a profile stays a profile). Several: the
     // de-duped items under the list's own key — the same shape the rows, watch and shaping read.
