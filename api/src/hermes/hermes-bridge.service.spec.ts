@@ -337,6 +337,34 @@ describe('HermesBridgeService (Codex engine)', () => {
     expect(agent.steps.some((s: any) => /resuming/i.test(s.label))).toBe(true);
   });
 
+  it('BEA-1387 resumeTick leaves a worker or a plan run alone — neither may wake up as a live Codex turn', async () => {
+    for (const runKind of ['worker', 'plan']) {
+      const agent = fakeAgent();
+      agent.runs['run-1'] = {
+        id: 'run-1', status: 'running', sessionId: '', runKind, input: 'the task', title: 'T', agentId: null, depth: 'standard',
+        waitpoints: [{ id: 'wp-1', status: 'answered', question: 'Carry on?', answer: 'yes', answeredAt: '2026-08-22T06:00:00Z' }],
+      };
+      agent.listResumable = jest.fn(async () => [agent.runs['run-1']]);
+      const codex = mockCodex({ text: 'this must never run' });
+      await build(agent).resumeTick();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(agent.claimResume).not.toHaveBeenCalled();
+      expect(codex).not.toHaveBeenCalled();
+      expect(agent.finishRun).not.toHaveBeenCalled();
+    }
+    // …and an engine run (no runKind on an old row, or 'engine') is resumed exactly as before.
+    const engine = fakeAgent();
+    engine.runs['run-1'] = {
+      id: 'run-1', status: 'running', sessionId: 'sess-1', input: 'the task', title: 'T', agentId: null, depth: 'standard',
+      waitpoints: [{ id: 'wp-1', status: 'answered', question: 'Colour?', answer: 'blue', answeredAt: '2026-08-22T06:00:00Z' }],
+    };
+    engine.listResumable = jest.fn(async () => [engine.runs['run-1']]);
+    mockCodex({ text: 'done' });
+    await build(engine).resumeTick();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(engine.claimResume).toHaveBeenCalledWith('run-1');
+  });
+
   it('BEA-1077 real runs carry the fresh-context note; flows/evals stay lean', async () => {
     const agent = fakeAgent();
     agent.freshContext = jest.fn(async () => "\n\n[What's fresh in the user's life — today is 2026-07-24]\nOpen tasks: 3.");

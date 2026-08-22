@@ -616,6 +616,33 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(updated);
   }
 
+  /**
+   * "Still moving" (BEA-1387 §H): ONE live line that updates itself, so a long fetch (11 pages with
+   * vendor backoff, 50 creator calls one after the other) is never mistaken for a hang. It replaces
+   * the previous checkpoint instead of appending, so a slow run leaves one line, not fifty, and the
+   * next real step pushes it down the log as usual. Never throws — progress is not worth a run.
+   */
+  async stampProgress(runId: string, label: string) {
+    try {
+      const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
+      if (!run) return;
+      const log = this.parse(run.stepLog, [] as any[]);
+      const entry = { label: String(label).slice(0, 300), status: 'running', kind: 'checkpoint', at: new Date().toISOString() };
+      if (log.length && log[log.length - 1]?.kind === 'checkpoint') log[log.length - 1] = entry;
+      else log.push(entry);
+      await this.prisma.agentRun.update({ where: { id: runId }, data: { stepLog: JSON.stringify(log) } });
+    } catch { /* a progress line that cannot be written is not a reason to stop */ }
+  }
+
+  /**
+   * Which road this run is on (BEA-1387): `engine` (a Codex turn — the default) | `worker` | `plan`.
+   * The Codex resume sweeper only ever resumes an `engine` run; without this a parked worker either
+   * strands for ever or wakes up as a live Codex turn instead of the worker.
+   */
+  async setRunKind(runId: string, kind: 'engine' | 'worker' | 'plan') {
+    await this.prisma.agentRun.update({ where: { id: runId }, data: { runKind: kind } }).catch(() => undefined);
+  }
+
   async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; outputUrl?: string; error?: string; resultText?: string; grade?: string } = {}) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
     if (!run) throw new NotFoundException('Run not found');

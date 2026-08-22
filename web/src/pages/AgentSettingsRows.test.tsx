@@ -104,9 +104,13 @@ describe('the accordion (BEA-1381)', () => {
 
   it('a direct-fetch job shows all eight rows in the mocked order, "What it does" open, live summaries on the rest', async () => {
     mount(SOCIAL_AGENT);
-    await waitFor(() => expect(screen.getByTestId('srow-what')).toBeTruthy());
-    const ids = Array.from(document.querySelectorAll('[data-testid^="srow-"]:not([data-testid$="-summary"])')).map((el) => el.getAttribute('data-testid'));
-    expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
+    // The Watch row appears with the job's own answer, one render after the first row — so the
+    // whole list is waited for, not just the first of it (this raced under load and failed the
+    // ship gate twice; nothing about the page changed).
+    await waitFor(() => {
+      const ids = Array.from(document.querySelectorAll('[data-testid^="srow-"]:not([data-testid$="-summary"])')).map((el) => el.getAttribute('data-testid'));
+      expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
+    });
     expect(rowOpen('what')).toBe(true);
     for (const k of ['sources', 'result', 'schedule', 'watch', 'tools', 'advanced', 'delete']) expect(rowOpen(k)).toBe(false);
     // live summaries, not placeholders

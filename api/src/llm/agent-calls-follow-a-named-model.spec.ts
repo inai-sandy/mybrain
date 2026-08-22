@@ -26,7 +26,9 @@ const SRC = join(__dirname, '..');
 function inScope(): string[] {
   const out: string[] = [];
   // `social` joined in BEA-1357: a Social agent's run is agent work too (its shaping step).
-  for (const dir of ['flows', 'agent', 'hermes', 'social']) {
+  // `worker` joined in BEA-1387: a worker's AI step is agent work, and it runs on OUR model, not
+  // on whatever a generated program felt like asking for.
+  for (const dir of ['flows', 'agent', 'hermes', 'social', 'worker']) {
     for (const f of readdirSync(join(SRC, dir))) {
       const rel = `${dir}/${f}`;
       if (f.endsWith('.ts') && !f.endsWith('.spec.ts') && statSync(join(SRC, rel)).isFile()) out.push(rel);

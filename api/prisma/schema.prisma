@@ -767,6 +767,9 @@ model AgentRun {
   status      String      @default("running") // running | awaiting_input | scheduled | done | failed | cancelled
   input       String? // the prompt/topic (JSON or text)
   sessionId   String? // Hermes session id (the bridge fills this in BEA-618)
+  /// Which road this run is on (BEA-1387): engine (a Codex turn) | worker | plan. The Codex resume
+  /// sweeper only resumes `engine` runs — a parked worker must never wake up as a live Codex turn.
+  runKind     String      @default("engine")
   stepLog     String      @default("[]") // JSON array of step records (mirror of Hermes events)
   learnings   String      @default("[]") // JSON [{text,status:proposed|kept|forgotten,memId?}] — what the run learned (BEA-624)
   outputDocId String? // saved Document id
@@ -1760,4 +1763,31 @@ model TriggerEvent {
 
   @@index([bindingId, createdAt])
   @@index([createdAt])
+}
+
+/// The run journal (BEA-1387, agent workers 2/10 — `specs/AGENT-WORKERS.md` §H).
+///
+/// A worker is an imperative script: when it pauses on a question or a gate it EXITS, and the resume
+/// re-runs it from the top. Every call that costs money or has an effect is recorded here against
+/// the run, keyed by its position in the call order — so a replay returns the recorded value without
+/// touching a vendor, a sheet or the owner's phone. Waiting is only free because of this table.
+model RunJournal {
+  id       String @id @default(uuid())
+  runId    String
+  /// The call's position in the run's call order, from 0. One row per position, ever.
+  seq      Int
+  /// sha256(seq + fn + argsHash) — stable across replays. A replay whose key does not match the
+  /// recorded one means the worker is not repeatable, and it is failed loudly rather than repeated.
+  stepKey  String
+  /// "fetchSource" | "shape" | "writeSheet" | "notify" | "ask" | "seed" | …
+  fn       String
+  /// What the call returned, as JSON, gzipped.
+  result   Bytes
+  /// Stored size in bytes after gzip.
+  bytes    Int      @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([runId, seq])
+  @@index([runId])
 }
