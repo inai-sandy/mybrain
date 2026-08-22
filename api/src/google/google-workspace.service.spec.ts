@@ -66,10 +66,20 @@ describe('the seam itself', () => {
   });
 
   it('hints never probe Google Tasks when no Tasks login exists — no failed row per page open', async () => {
-    const { svc, provider } = build((id) => (id === 'svc:gmail.get_profile' ? { response_data: { emailAddress: 'x' } } : id === 'svc:gmail.fetch_emails' ? { resultSizeEstimate: 3, messages: [] } : { items: [] }), { connected: ['gmail', 'googlecalendar'] });
+    const { svc, provider } = build((id) => (id === 'svc:gmail.get_profile' ? { response_data: { emailAddress: 'x' } } : { items: [] }), { connected: ['gmail', 'googlecalendar'], briefs: [{ day: '2026-08-22', unread: 3 }] });
     const h = await svc.hints();
-    expect(h).toEqual({ connected: true, gmailUnread: 3, calendarNext: null, tasksOpen: null });
+    expect(h).toEqual({ connected: true, gmailUnread: 3, gmailUnreadDay: '2026-08-22', calendarNext: null, tasksOpen: null });
     expect(calls(provider).some((c) => c.id.startsWith('svc:googletasks.'))).toBe(false);
+  });
+
+  it('hints read the unread count from the STORED brief — opening the Google page never calls Gmail (BEA-1399)', async () => {
+    const { svc, provider } = build((id) => (id === 'svc:gmail.get_profile' ? { response_data: { emailAddress: 'x' } } : { items: [] }), { connected: ['gmail'], settings: { 'google.email': 'o@x.io' }, briefs: [{ day: '2026-08-21', unread: 7 }, { day: '2026-08-22', unread: 2 }] });
+    const h = await svc.hints();
+    expect(h.gmailUnread).toBe(2);
+    expect(h.gmailUnreadDay).toBe('2026-08-22');
+    expect(calls(provider).some((c) => c.id.startsWith('svc:gmail.'))).toBe(false);
+    const { svc: none } = build(() => ({}), { connected: ['gmail'], settings: { 'google.email': 'o@x.io' } });
+    expect((await none.hints()).gmailUnread).toBeNull();
   });
 
   it('stops a staged download at the 40 MB cap while streaming, whatever the header says', async () => {
@@ -97,8 +107,41 @@ describe('the seam itself', () => {
     expect(await off.status()).toEqual({ connected: false, email: null, gmail: false, drive: false, calendar: false });
   });
 
-  it('writes a ToolCall row for every real read, on the account it ran on, and none for a status probe', async () => {
-    const { svc, prisma } = build((id) => (id === 'svc:gmail.get_profile' ? { response_data: { emailAddress: 'sandy@kiot.io' } } : { messages: [] }));
+  it('remembers the connected address after ONE counted probe — status() never asks Gmail again (BEA-1399)', async () => {
+    const { svc, provider, toolCalls, settings } = build((id) => (id === 'svc:gmail.get_profile' ? { response_data: { emailAddress: 'sandy@kiot.io' } } : { messages: [] }));
+    expect((await svc.status()).email).toBe('sandy@kiot.io');
+    expect(settings['google.email']).toBe('sandy@kiot.io');
+    expect(toolCalls.filter((r) => r.action === 'svc:gmail.get_profile')).toHaveLength(1); // counted, like every call
+    await svc.status();
+    await svc.status();
+    expect(calls(provider).filter((c) => c.id === 'svc:gmail.get_profile')).toHaveLength(1);
+    // A fresh instance (a restart) reads the remembered address and asks nothing.
+    const again = build(() => ({}), { settings: { 'google.email': 'sandy@kiot.io' } });
+    expect((await again.svc.status()).email).toBe('sandy@kiot.io');
+    expect(again.provider.execute).not.toHaveBeenCalled();
+  });
+
+  it('a failing address probe is not retried on every page open — once, then it backs off (review HIGH)', async () => {
+    const { svc, provider } = build((id) => (id === 'svc:gmail.get_profile' ? { __error: 'boom' } : { messages: [] }));
+    expect((await svc.status()).email).toBeNull();
+    await svc.status();
+    await svc.status();
+    expect(calls(provider).filter((c) => c.id === 'svc:gmail.get_profile')).toHaveLength(1);
+  });
+
+  it('a reconnected Gmail (different account id) learns the new address once — never shows the old one (review MEDIUM)', async () => {
+    const { svc, provider, settings } = build((id) => (id === 'svc:gmail.get_profile' ? { response_data: { emailAddress: 'new@x.io' } } : {}), {
+      settings: { 'google.email': 'old@x.io', 'google.emailAccount': 'ca_previous' },
+    });
+    expect((await svc.status()).email).toBe('new@x.io');
+    expect(settings['google.email']).toBe('new@x.io');
+    expect(settings['google.emailAccount']).toBe('ca_gmail');
+    await svc.status();
+    expect(calls(provider).filter((c) => c.id === 'svc:gmail.get_profile')).toHaveLength(1);
+  });
+
+  it('writes a ToolCall row for every real read, on the account it ran on', async () => {
+    const { svc, prisma } = build(() => ({ messages: [] }), { settings: { 'google.email': 'sandy@kiot.io' } });
     await svc.status();
     expect(prisma.toolCall.create).not.toHaveBeenCalled();
     await svc.gmailImportantForDay('2026-08-13');
@@ -123,5 +166,77 @@ describe('the seam itself', () => {
     await svc.calendar();
     for (const c of calls(provider)) expect(c.id).toMatch(/^svc:[a-z0-9_]+\.[a-z0-9_]+$/);
     expect(calls(provider).map((c) => c.id)).toEqual(['svc:gmail.fetch_emails', 'svc:googledrive.find_file', 'svc:googlecalendar.events_list']);
+  });
+});
+
+describe('the Gmail daily cap and counter (BEA-1399)', () => {
+  const today = () => new Date();
+
+  it('refuses the call past the cap with a plain sentence, writes it down, and never reaches the vendor', async () => {
+    const { svc, provider, toolCalls } = build(() => ({ messages: [] }), {
+      settings: { 'gmail.dailyCap': '2', 'google.email': 'o@x.io' },
+      toolCalls: [
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: true, createdAt: today() },
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: true, createdAt: today() },
+      ],
+    });
+    await expect(svc.gmailImportantForDay('2026-08-22')).rejects.toThrow('gmail-cap:2:2');
+    expect(provider.execute).not.toHaveBeenCalled();
+    const last = toolCalls[toolCalls.length - 1];
+    expect(last).toEqual(expect.objectContaining({ service: 'gmail', ok: false, error: 'gmail-cap' }));
+  });
+
+  it('rows that never reached the vendor (cap, not-connected) and yesterday\'s rows do not count', async () => {
+    const yesterday = new Date(Date.now() - 36 * 3600_000);
+    const { svc, provider } = build(() => ({ messages: [] }), {
+      settings: { 'gmail.dailyCap': '2', 'google.email': 'o@x.io' },
+      toolCalls: [
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: false, error: 'gmail-cap', createdAt: today() },
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: false, error: 'not-connected', createdAt: today() },
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: true, createdAt: yesterday },
+        { service: 'googledrive', action: 'svc:googledrive.find_file', ok: true, createdAt: today() },
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: true, createdAt: today() },
+      ],
+    });
+    await svc.gmailImportantForDay('2026-08-22'); // 1 real call today + this one = 2 = the cap, allowed
+    expect(provider.execute).toHaveBeenCalledTimes(1);
+    await expect(svc.gmailImportantForDay('2026-08-22')).rejects.toThrow('gmail-cap:2:2');
+  });
+
+  it('cap 0 means no cap; the default is 60', async () => {
+    const { svc, provider } = build(() => ({ messages: [] }), { settings: { 'gmail.dailyCap': '0', 'google.email': 'o@x.io' }, toolCalls: Array.from({ length: 500 }, () => ({ service: 'gmail', action: 'svc:gmail.fetch_emails', ok: true, createdAt: today() })) });
+    await svc.gmailImportantForDay('2026-08-22');
+    expect(provider.execute).toHaveBeenCalledTimes(1);
+    const { svc: dflt } = build(() => ({ messages: [] }), { settings: { 'google.email': 'o@x.io' } });
+    expect((await dflt.gmailUsage()).cap).toBe(60);
+  });
+
+  it('the cap is a Setting the owner can change; nonsense is refused', async () => {
+    const { svc, settings } = build(() => ({}), {});
+    expect(await svc.setGmailCap(120)).toBe(120);
+    expect(settings['gmail.dailyCap']).toBe('120');
+    await expect(svc.setGmailCap(-1)).rejects.toThrow();
+    await expect(svc.setGmailCap(Number.NaN)).rejects.toThrow();
+  });
+
+  it('usage counts today\'s real Gmail calls by action and names the next scheduled read', async () => {
+    const { svc } = build(() => ({ messages: [] }), {
+      settings: { 'gmail.dailyCap': '60', 'google.email': 'o@x.io' },
+      toolCalls: [
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: true, createdAt: today() },
+        { service: 'gmail', action: 'svc:gmail.fetch_message_by_message_id', ok: true, createdAt: today() },
+        { service: 'gmail', action: 'svc:gmail.fetch_message_by_message_id', ok: true, createdAt: today() },
+        { service: 'gmail', action: 'svc:gmail.fetch_emails', ok: false, error: 'gmail-cap', createdAt: today() },
+      ],
+    });
+    const u = await svc.gmailUsage();
+    expect(u.calls).toBe(3);
+    expect(u.cap).toBe(60);
+    expect(u.tz).toBe('Asia/Kolkata');
+    expect(u.byAction).toEqual([{ action: 'fetch_message_by_message_id', n: 2 }, { action: 'fetch_emails', n: 1 }]);
+    expect(u.schedule).toEqual({ early: '21:00', final: '23:30' });
+    expect(['today', 'tomorrow']).toContain(u.next.day);
+    expect(['21:00', '23:30']).toContain(u.next.time);
+    expect(u.day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

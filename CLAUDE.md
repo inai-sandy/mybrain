@@ -138,6 +138,35 @@ by-name search. Docs/Sheets/Slides/Tasks/Meet/Chat are their own toolkits (`goog
 "connect it in /tools" until they are. The catalog has NO Google group of its own any more — the bare
 `gmail`/`calendar`/`drive` ids stay in `AGENT_TOOLS` only so flows saved before this keep dispatching.
 
+**Gmail is read at 21:00 and 23:30 local, and at no other time in the background (BEA-1399).** Composio
+counts every call and the owner's quota is small. Before this, the Daily Brief's 60-second ticker called
+`google.status()` every minute — a `GET_PROFILE` every 30 min that was kept OUT of the ToolCall log on
+purpose (`quiet: true`) and a 5-min Composio metadata refresh — and a missing yesterday-brief made it retry
+the whole read every minute. Now `GmailBriefService.briefTick()` checks the CLOCK first (`gmail-schedule.ts`:
+`EARLY_AT`/`FINAL_AT`, the owner's numbers): 21:00 = the early pass (full read, Telegram, email memory; the
+mails are kept in `gmailbrief.earlyMetas`), 23:30 = the final pass (`gmailImportantSince(day, earlyAt)` —
+only what arrived after the early read; nothing new → unread refreshed, no push; new → re-summarise early +
+new, push again, sync only the new); no early pass behind it → the full read. Each window is tried ONCE
+(markers `gmailbrief.earlyDone/earlyAt/nightlyDone`, set even on failure) and a missed night is caught up
+once the next day (`gmailbrief.catchupTried`). A failed list read FAILS the pass — it never writes "no
+important emails" about a day it did not read. `status()` reads the remembered address (Setting
+`google.email`, learned by ONE counted probe); there are no quiet calls any more — every Gmail call is a
+ToolCall row. **Pages are stored-only**: `getForDay` never reads Gmail for a missing day, the Gmail page
+does not auto-build today on open (it says when the brief is written and offers "Refresh now" — an
+explicit, counted call), `hints.gmailUnread` comes from the stored brief. **The cap**: `gmail.dailyCap`
+Setting (default 60, 0 = off) is enforced inside the ONE call path `GoogleWorkspaceService.call()` for
+toolkit gmail, counted from local midnight (`startOfLocalDay`) over ToolCall rows that reached the vendor
+(`gmail-cap` / `not-connected` rows do not count); past it the call is written down as `gmail-cap` and
+throws `gmail-cap:<calls>:<cap>` → the controller's plain sentence. `GET /api/google/gmail/usage` and
+`PUT /api/google/gmail/cap` feed `GmailUsageLine` (Google home + Settings → Google, editable there).
+Traps: a spec harness needs `prisma.setting` + `toolCall.findMany` + `gmailBrief.findFirst/update` now
+(`google-workspace.testing.ts` `build()` carries them); `nowSeconds()` exists so a spec can pin the clock;
+the cap is a count-then-call, so two Gmail calls fired together (`readDay()`'s unread + list) can land at
+cap+1 — accepted for a daily cap, not a bug to "fix" with a lock; a failed address probe backs off 6 h in
+memory (`emailProbeFailedAt`) and the address is keyed to the account id (`google.emailAccount`), so a
+reconnect learns the new address once; `startOfLocalDay` reads the zone offset at `now` (an hour off on a
+DST-change day in a DST zone — IST has none).
+
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
 `api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
 API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).

@@ -4,7 +4,8 @@ import { DocumentsService } from '../documents/documents.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ComposioProvider } from '../tools/composio.provider';
 import { ExecuteResult, ServiceAccount, ServiceProvider, serviceToolId } from '../tools/service-provider';
-import { collectAttachments, extractBody, headerMap, importantDayQuery, safeFilename, stripQuoted, unreadDayQuery } from './gmail-parse';
+import { collectAttachments, extractBody, headerMap, importantDayQuery, importantSinceQuery, safeFilename, stripQuoted, unreadDayQuery } from './gmail-parse';
+import { EARLY_AT, FINAL_AT, nextWindow, startOfLocalDay } from './gmail-schedule';
 
 /**
  * Google Workspace through the ServiceProvider seam (BEA-1351). Design: `specs/TOOLS.md` → step 7.
@@ -86,8 +87,18 @@ const SERVICE_MAP: { key: string; label: string; unsupported?: boolean }[] = [
 const MAX_BYTES = 40 * 1024 * 1024;
 /** How long we give the provider to build a Drive export or fetch a big attachment. */
 const BINARY_TIMEOUT_MS = 120_000;
-/** How long the connected email address is remembered before it is asked for again. */
-const PROFILE_TTL_MS = 30 * 60 * 1000;
+/** Where the connected Gmail address is remembered — read once, kept until the account changes. (BEA-1399) */
+const EMAIL_SETTING = 'google.email';
+const EMAIL_ACCOUNT_SETTING = 'google.emailAccount';
+/** A failed address probe is not retried before this — a page open must never become a Gmail call each. */
+const EMAIL_RETRY_MS = 6 * 60 * 60 * 1000;
+/** The Gmail daily call cap Setting, its default, and what a call past it is recorded as. (BEA-1399) */
+const CAP_SETTING = 'gmail.dailyCap';
+const DEFAULT_CAP = 60;
+const CAP_ERROR = 'gmail-cap';
+/** Rows in the flight recorder that never reached the vendor — they are not calls and are not counted. */
+const NOT_A_CALL = new Set([CAP_ERROR, 'not-connected']);
+const DEFAULT_TZ = 'Asia/Kolkata';
 /** Rough size of a response, for the log — a number, never the content. */
 function safeSize(data: any): string {
   try {
@@ -108,7 +119,8 @@ export type GmailMeta = { id: string; threadId: string; from: string; subject: s
 @Injectable()
 export class GoogleWorkspaceService {
   private readonly logger = new Logger(GoogleWorkspaceService.name);
-  private profile: { at: number; email: string | null } | null = null;
+  /** When the last address probe failed (in memory — a restart may try once more, which is bounded by the cap). */
+  private emailProbeFailedAt = 0;
 
   // Optional deps go LAST — spec files build this service positionally with fewer args.
   constructor(
@@ -147,14 +159,134 @@ export class GoogleWorkspaceService {
     return { connected: st.connected, email: st.email, project: null, services };
   }
 
-  /** The address of the connected Gmail account, remembered for a few minutes. */
+  /**
+   * The address of the connected Gmail account. Remembered in a Setting after ONE counted probe and
+   * never asked for again — before this it was re-probed every 30 min by a ticker nobody read,
+   * and the probe was kept out of the flight recorder while Composio counted every one. (BEA-1399)
+   */
   private async connectedEmail(): Promise<string | null> {
-    if (this.profile && Date.now() - this.profile.at < PROFILE_TTL_MS) return this.profile.email;
-    // A status probe is not a read the owner asked for — it stays out of the flight recorder.
-    const d = await this.call('gmail', 'GET_PROFILE', {}, { quiet: true });
-    const email = String(d?.response_data?.emailAddress || d?.emailAddress || '').trim() || null;
-    this.profile = { at: Date.now(), email };
+    return this.rememberEmail();
+  }
+
+  /**
+   * Read the remembered address, or learn it once (a counted GET_PROFILE) and keep it, together with
+   * the account it belongs to — a reconnected Gmail (a different account id at /tools) is learned
+   * again, so the old address is never shown for the new login. A probe that FAILS is not retried for
+   * `EMAIL_RETRY_MS`: the pages call status() on every open, and a bad hour must not become a Gmail
+   * call per page view eating the cap the scheduled reads need.
+   */
+  async rememberEmail(): Promise<string | null> {
+    const account = await this.account('gmail');
+    if (!account) return null;
+    const [saved, savedFor] = await Promise.all([this.setting(EMAIL_SETTING), this.setting(EMAIL_ACCOUNT_SETTING)]);
+    if (saved && (!savedFor || savedFor === account.id)) return saved;
+    if (Date.now() - this.emailProbeFailedAt < EMAIL_RETRY_MS) return null;
+    let email: string | null = null;
+    try {
+      const d = await this.call('gmail', 'GET_PROFILE', {});
+      email = String(d?.response_data?.emailAddress || d?.emailAddress || '').trim() || null;
+    } catch {
+      email = null;
+    }
+    if (!email) {
+      this.emailProbeFailedAt = Date.now();
+      return null;
+    }
+    await this.setSetting(EMAIL_SETTING, email);
+    await this.setSetting(EMAIL_ACCOUNT_SETTING, String(account.id || ''));
     return email;
+  }
+
+  private async setting(key: string): Promise<string | null> {
+    try {
+      const row = await this.prisma?.setting?.findUnique?.({ where: { key } });
+      return row?.value ? String(row.value) : null;
+    } catch {
+      return null;
+    }
+  }
+  private async setSetting(key: string, value: string): Promise<void> {
+    try {
+      await this.prisma?.setting?.upsert?.({ where: { key }, create: { key, value }, update: { value } });
+    } catch {
+      /* a missing Settings table in a harness is not an error */
+    }
+  }
+  private async tz(): Promise<string> {
+    return (await this.setting('tasks.tz')) || DEFAULT_TZ;
+  }
+  private dayKey(tz: string, d = new Date()): string {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    } catch {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  private localHM(tz: string, d = new Date()): string {
+    try {
+      return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    } catch {
+      return d.toISOString().slice(11, 16);
+    }
+  }
+
+  // ---- the Gmail daily cap and counter (BEA-1399) ------------------------------------------
+
+  /** The cap (calls per local day). 0 = no cap. */
+  async gmailCap(): Promise<number> {
+    const raw = await this.setting(CAP_SETTING);
+    const n = raw == null ? NaN : Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_CAP;
+  }
+  async setGmailCap(cap: number): Promise<number> {
+    if (!Number.isFinite(cap) || cap < 0 || cap > 100_000) throw new Error('The cap must be a whole number of calls per day (0 = no cap).');
+    const n = Math.floor(cap);
+    await this.setSetting(CAP_SETTING, String(n));
+    return n;
+  }
+
+  /** Today's real Gmail calls (rows that reached the vendor), newest first. */
+  private async gmailCallsToday(): Promise<{ action: string; ok: boolean; createdAt: Date }[]> {
+    const since = startOfLocalDay(await this.tz());
+    try {
+      const rows: any[] = (await this.prisma?.toolCall?.findMany?.({ where: { service: 'gmail', createdAt: { gte: since } }, select: { action: true, ok: true, error: true, createdAt: true } })) || [];
+      return rows
+        .filter((r) => !r?.error || !NOT_A_CALL.has(String(r.error)))
+        .map((r) => ({ action: String(r.action || ''), ok: !!r.ok, createdAt: new Date(r.createdAt) }))
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    } catch {
+      return [];
+    }
+  }
+
+  /** The counter the Google page and Settings show: calls today, the cap, what they were, and the next scheduled read. */
+  async gmailUsage(): Promise<{ day: string; tz: string; calls: number; cap: number; byAction: { action: string; n: number }[]; last: string | null; schedule: { early: string; final: string }; next: { time: string; day: 'today' | 'tomorrow' } }> {
+    const tz = await this.tz();
+    const [rows, cap] = await Promise.all([this.gmailCallsToday(), this.gmailCap()]);
+    const by = new Map<string, number>();
+    for (const r of rows) {
+      const short = r.action.replace(/^svc:gmail\./, '');
+      by.set(short, (by.get(short) || 0) + 1);
+    }
+    const byAction = [...by.entries()].map(([action, n]) => ({ action, n })).sort((a, b) => b.n - a.n || a.action.localeCompare(b.action));
+    return {
+      day: this.dayKey(tz),
+      tz,
+      calls: rows.length,
+      cap,
+      byAction,
+      last: rows[0]?.createdAt?.toISOString?.() || null,
+      schedule: { early: EARLY_AT, final: FINAL_AT },
+      next: nextWindow(this.localHM(tz)),
+    };
+  }
+
+  /** Throws `gmail-cap:<calls>:<cap>` when today's count has reached the cap. */
+  private async assertUnderGmailCap(): Promise<void> {
+    const cap = await this.gmailCap();
+    if (!cap) return;
+    const calls = (await this.gmailCallsToday()).length;
+    if (calls >= cap) throw new Error(`${CAP_ERROR}:${calls}:${cap}`);
   }
 
   // ---- Gmail --------------------------------------------------------------------------------
@@ -174,6 +306,11 @@ export class GoogleWorkspaceService {
   /** The "important" emails received on a local day — Promotions/Social/Updates + Chats excluded. */
   async gmailImportantForDay(day: string, max = 25): Promise<GmailMeta[]> {
     return this.gmailMetas(importantDayQuery(day), max);
+  }
+
+  /** The same, but only what arrived after `sinceEpochSeconds` — the final pass's read. (BEA-1399) */
+  async gmailImportantSince(day: string, sinceEpochSeconds: number, max = 25): Promise<GmailMeta[]> {
+    return this.gmailMetas(importantSinceQuery(day, sinceEpochSeconds), max);
   }
 
   /** Search Gmail and return up to `max` distinct matching threads (newest message per thread). */
@@ -514,16 +651,26 @@ export class GoogleWorkspaceService {
   // ---- Live hints for the launcher grid (cheap, best-effort) ------------------------------
 
   /** Small glance-able numbers for the Google tile grid. Never throws — missing bits come back null. */
-  async hints(): Promise<{ connected: boolean; gmailUnread: number | null; calendarNext: { summary: string; start: string | null } | null; tasksOpen: number | null }> {
+  async hints(): Promise<{ connected: boolean; gmailUnread: number | null; gmailUnreadDay: string | null; calendarNext: { summary: string; start: string | null } | null; tasksOpen: number | null }> {
     const st = await this.status();
-    if (!st.connected) return { connected: false, gmailUnread: null, calendarNext: null, tasksOpen: null };
-    const [gmailUnread, calendarNext, tasksOpen] = await Promise.all([
-      this.gmailUnreadCount().catch(() => null),
+    if (!st.connected) return { connected: false, gmailUnread: null, gmailUnreadDay: null, calendarNext: null, tasksOpen: null };
+    const [brief, calendarNext, tasksOpen] = await Promise.all([
+      // The unread count comes from the STORED brief (the 21:00 / 23:30 read) — opening the page never calls Gmail. (BEA-1399)
+      this.latestBrief(),
       this.calendar().then((evs) => (evs[0] ? { summary: evs[0].summary, start: evs[0].start } : null)).catch(() => null),
       // Google Tasks is its own login; with none connected there is nothing to count and no call to log.
       this.account('tasks').then((a) => (a ? this.tasks().then((lists) => lists.reduce((n, l) => n + l.tasks.length, 0)) : null)).catch(() => null),
     ]);
-    return { connected: true, gmailUnread, calendarNext, tasksOpen };
+    return { connected: true, gmailUnread: brief ? brief.unread : null, gmailUnreadDay: brief ? brief.day : null, calendarNext, tasksOpen };
+  }
+
+  private async latestBrief(): Promise<{ day: string; unread: number | null } | null> {
+    try {
+      const row = await this.prisma?.gmailBrief?.findFirst?.({ orderBy: { day: 'desc' }, select: { day: true, unread: true } });
+      return row ? { day: String(row.day), unread: Number.isFinite(Number(row.unread)) ? Number(row.unread) : null } : null;
+    } catch {
+      return null;
+    }
   }
 
   // ---- Google Tasks -------------------------------------------------------------------------
@@ -599,16 +746,26 @@ export class GoogleWorkspaceService {
    * Throws `Error('not-connected:<toolkit>')` when that service has no working account at `/tools`
    * — the controller turns it into a sentence that says which one to connect. Every other failure throws
    * the provider's own reason. Every attempt is written to `ToolCall`, success or not, including
-   * the ones that never reach the provider (`quiet` probes excepted).
+   * the ones that never reach the provider — there are no quiet calls (BEA-1399): Composio counts
+   * every one, so the owner's log must too. A Gmail call past today's cap is refused here, written
+   * down as `gmail-cap`, and throws `gmail-cap:<calls>:<cap>`.
    */
-  async call(service: string, action: string, args: Record<string, any>, opts: { timeoutMs?: number; quiet?: boolean } = {}): Promise<any> {
+  async call(service: string, action: string, args: Record<string, any>, opts: { timeoutMs?: number } = {}): Promise<any> {
     const toolkit = TOOLKIT[service] || service;
     const actionId = serviceToolId(toolkit, action);
     const account = await this.account(service);
     if (!account) {
       // Written down like every other attempt, including the ones that never leave the building.
-      if (!opts.quiet) await this.record({ actionId, service: toolkit, args, ok: false, ms: 0, error: 'not-connected' });
+      await this.record({ actionId, service: toolkit, args, ok: false, ms: 0, error: 'not-connected' });
       throw new Error(`not-connected:${toolkit}`);
+    }
+    if (toolkit === 'gmail') {
+      try {
+        await this.assertUnderGmailCap();
+      } catch (e: any) {
+        await this.record({ actionId, service: toolkit, accountId: account.id, args, ok: false, ms: 0, error: CAP_ERROR });
+        throw e;
+      }
     }
     const started = Date.now();
     const p: ServiceProvider = this.provider as any;
@@ -616,7 +773,7 @@ export class GoogleWorkspaceService {
       .execute(actionId, args, { connectionId: account.id, timeoutMs: opts.timeoutMs })
       .catch((e: any): ExecuteResult => ({ ok: false, error: String(e?.message || e) }));
     const ms = res?.ms ?? Date.now() - started;
-    if (!opts.quiet) await this.record({ actionId, service: toolkit, accountId: account.id, args, ok: !!res?.ok, ms, error: res?.ok ? undefined : res?.error, data: res?.data });
+    await this.record({ actionId, service: toolkit, accountId: account.id, args, ok: !!res?.ok, ms, error: res?.ok ? undefined : res?.error, data: res?.data });
     if (!res?.ok) throw new Error(this.plainReason(res?.error, service));
     return res.data;
   }

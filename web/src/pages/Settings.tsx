@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { GmailUsageLine } from './google/GmailUsageLine';
 import { TasksSettings } from './settings/TasksSettings';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { ListChecks, User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, Newspaper, type LucideIcon } from 'lucide-react';
@@ -3153,6 +3154,7 @@ function GoogleCard() {
             <Step ok={!!s.drive}>Drive connected</Step>
             <Step ok={!!s.calendar}>Calendar connected</Step>
           </ul>
+          {s.gmail && <GmailUsageLine editable className="mt-3" />}
           {(!s.gmail || !s.drive || !s.calendar) && (
             <div className="mt-3 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2.5 space-y-1.5">
               <p className="text-zinc-600 dark:text-zinc-300 font-medium">Something is not connected yet.</p>
