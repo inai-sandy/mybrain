@@ -11,7 +11,17 @@ import { RunJournalService } from './run-journal.service';
  */
 export const TOKEN_TTL_MS = 20 * 60_000;
 
-export type WorkerIdentity = { runId: string; agentId: string | null; expiresAt: number };
+export type WorkerIdentity = {
+  runId: string;
+  agentId: string | null;
+  expiresAt: number;
+  /**
+   * A TRIAL spawn (BEA-1408): the same program, on the owner's real account, but nothing it does may
+   * leave the building. No sheet, no document, no message. The identity carries it rather than the
+   * body, exactly like `runId` — a worker must not be able to talk its own way out of trial mode.
+   */
+  trial?: boolean;
+};
 export type WorkerSpawn = WorkerIdentity & {
   token: string;
   /** The worker's frozen clock + random seed for this RUN (the same across every spawn of it). */
@@ -44,7 +54,7 @@ export class WorkerTokenService {
    * A token for one spawn of one run. Marks the run as a worker run first, so the Codex resume
    * sweeper leaves it alone from the moment it exists, and hands back the run's recorded seed.
    */
-  async mint(runId: string, agentId: string | null, opts: { ttlMs?: number } = {}): Promise<WorkerSpawn> {
+  async mint(runId: string, agentId: string | null, opts: { ttlMs?: number; trial?: boolean } = {}): Promise<WorkerSpawn> {
     // The worker road takes the job lock here (BEA-1388) — the one moment every spawn passes through,
     // including the resume after a pause, whose lock may well have timed out while the owner slept.
     // A job somebody else is running is refused outright: no token, so no worker.
@@ -52,11 +62,13 @@ export class WorkerTokenService {
       const claim = await this.locks?.claimForRun(agentId, runId, { reason: 'a worker run' });
       if (claim && !claim.ok) throw new JobBusyError(claim.held, 'This job');
     }
-    await this.agent?.setRunKind?.(runId, 'worker')?.catch?.(() => undefined);
+    // A TRIAL is its own kind of run (BEA-1408): it must never be mistaken for a real one on the
+    // history screen, and nothing it does may leave the building.
+    await this.agent?.setRunKind?.(runId, opts.trial ? 'trial' : 'worker')?.catch?.(() => undefined);
     const seed = await this.journal.seed(runId);
     const token = randomBytes(32).toString('hex');
     const expiresAt = Date.now() + Math.max(1, opts.ttlMs ?? TOKEN_TTL_MS);
-    this.live.set(token, { runId, agentId: agentId || null, expiresAt });
+    this.live.set(token, { runId, agentId: agentId || null, expiresAt, trial: !!opts.trial });
     this.sweep();
     return { token, runId, agentId: agentId || null, expiresAt, seed };
   }

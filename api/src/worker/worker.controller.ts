@@ -14,6 +14,7 @@ import { planActionIds, planFromAgent, sourceHint, sourceLabel, clampPages } fro
 import { tableOf } from '../social/rows';
 import { RunJournalService } from './run-journal.service';
 import { WorkerTokenGuard } from './worker-token.guard';
+import { TrialService } from './trial.service';
 import { WorkerTokenService } from './worker-token.service';
 
 /**
@@ -66,6 +67,7 @@ export class WorkerController {
     private readonly alerts?: AlertsService,
     private readonly owner?: OwnerAskService, // the question's road to the owner's phone (BEA-1392)
     private readonly gates?: ServiceGatesService,
+    private readonly trials?: TrialService, // holds a trial's rows and message instead of writing/sending (BEA-1408)
   ) {}
 
   // ---- fetching ------------------------------------------------------------------------------
@@ -273,12 +275,28 @@ export class WorkerController {
   }
 
   private async write(req: any, body: any) {
-    const { runId, agentId } = who(req);
+    const { runId, agentId, trial } = who(req);
     const seq = seqOf(body);
     const job = await this.job(agentId);
     const step = this.stepper(runId);
     const kind = String(body?.kind || 'document');
     const title = String(body?.title || job?.name || 'Agent result').slice(0, 200);
+
+    // A TRIAL writes nothing (BEA-1408). It holds the rows for the screen and says so on the run, so
+    // he can see exactly what would have been saved without a single row landing anywhere.
+    if (trial) {
+      const table = kind === 'sheet' ? asTable(body?.table) : { columns: [], rows: [] as any[][] };
+      const markdown = kind === 'sheet' ? '' : String(body?.markdown || '');
+      await this.trials?.hold?.(runId, { kind, title, table, markdown });
+      await step({
+        label: kind === 'sheet'
+          ? `Trial — ${table.rows.length} row${table.rows.length === 1 ? '' : 's'} ready for your sheet. Nothing was written.`
+          : 'Trial — the document is ready. Nothing was saved.',
+        status: 'done',
+        nodeId: 'output',
+      });
+      return { ok: true, trial: true, url: null, id: null, created: false, skipped: 0, nothingNew: false, rows: table.rows.length, docId: null };
+    }
 
     if (kind === 'sheet') {
       const table = asTable(body?.table);
@@ -309,7 +327,7 @@ export class WorkerController {
    */
   @Post('notify')
   async notify(@Req() req: any, @Body() body: any) {
-    const { runId, agentId } = who(req);
+    const { runId, agentId, trial } = who(req);
     const seq = seqOf(body);
     const job = await this.job(agentId);
     const step = this.stepper(runId);
@@ -328,6 +346,14 @@ export class WorkerController {
     const wantTelegram = !!body?.telegram;
     if (!wantWhatsApp && !wantTelegram) throw new BadRequestException('Say where the message goes: whatsapp, telegram, or both.');
     const title = String(body?.title || job?.name || 'Your agent').slice(0, 120);
+
+    // A TRIAL sends nothing, to anybody (BEA-1408). The message is kept exactly as it would arrive
+    // and drawn on screen; sending it is his tap, to his own number, and nowhere else.
+    if (trial) {
+      await this.trials?.holdMessage?.(runId, message || `${headline}${detail ? `\n\n${detail}` : ''}`);
+      await step({ label: 'Trial — your message is ready. It was NOT sent.', status: 'done', nodeId: 'notify' });
+      return { ok: true, trial: true, whatsapp: null, telegram: null };
+    }
 
     const hit = await this.journal.once(runId, seq, 'notify', { headline, detail, url, message, whatsapp: wantWhatsApp, telegram: wantTelegram }, async () => {
       const out: any = { ok: false, whatsapp: null, telegram: null };
@@ -621,10 +647,11 @@ function nodeIdOf(seq: number): string {
 }
 
 /** The identity the guard put on the request. Never read from the body — that is the whole rule. */
-function who(req: any): { runId: string; agentId: string | null } {
+function who(req: any): { runId: string; agentId: string | null; trial: boolean } {
   const w = req?.worker;
   if (!w?.runId) throw new BadRequestException('No worker run on this request.');
-  return { runId: w.runId, agentId: w.agentId || null };
+  // `trial` comes off the TOKEN, never the body (BEA-1408) — a worker cannot argue its way out of it.
+  return { runId: w.runId, agentId: w.agentId || null, trial: !!w.trial };
 }
 
 /** Where this call sits in the run's call order. The worker counts; the app records against it. */

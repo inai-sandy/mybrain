@@ -813,7 +813,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    * The Codex resume sweeper only ever resumes an `engine` run; without this a parked worker either
    * strands for ever or wakes up as a live Codex turn instead of the worker.
    */
-  async setRunKind(runId: string, kind: 'engine' | 'worker' | 'plan') {
+  /** `trial` (BEA-1408) is a rehearsal: it never wrote or sent anything, and history must say so. */
+  async setRunKind(runId: string, kind: 'engine' | 'worker' | 'plan' | 'trial') {
     await this.prisma.agentRun.update({ where: { id: runId }, data: { runKind: kind } }).catch(() => undefined);
   }
 

@@ -346,11 +346,13 @@ describe('deleting an agent takes its briefs with it', () => {
       agentArea: { delete: async () => ({}) },
       setting: { delete: async () => ({}) },
       agentBrief: { deleteMany: async (a: any) => { deleted.push(a); return { count: 2 }; } },
+      agentTrial: { deleteMany: async (a: any) => { deleted.push(a); return { count: 1 }; } },
     };
     const { AgentAreasService } = await import('./agent-areas.service');
     const svc: any = new (AgentAreasService as any)(prisma);
     await svc.remove('area-1');
-    expect(deleted).toEqual([{ where: { areaId: 'area-1' } }]);
+    // Briefs AND trials — both are hand-kept, both hold a whole conversation or a whole rehearsal.
+    expect(deleted).toEqual([{ where: { areaId: 'area-1' } }, { where: { areaId: 'area-1' } }]);
   });
 
   it('a store without the table does not break the delete', async () => {

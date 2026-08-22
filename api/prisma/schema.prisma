@@ -1914,3 +1914,41 @@ model AgentBrief {
   @@index([areaId, version])
   @@index([areaId, status])
 }
+
+/// One trial run of a brief (BEA-1408, "Brief First") — the second gate.
+///
+/// Nine hours were lost because the owner approved a *description* of an agent. A description can
+/// lie; a result cannot. So before an agent can be created from a brief, the program that would be
+/// saved runs once, for real, on his own account — and writes nothing, sends nothing, saves nothing.
+/// He looks at the actual rows and the actual message, and only then is Create possible.
+///
+/// Keyed to the brief VERSION it proved: editing the brief invalidates the trial, because what he
+/// looked at is no longer what would run.
+model AgentTrial {
+  id           String @id @default(uuid())
+  areaId       String
+  briefId      String
+  briefVersion Int
+  /// The draft job the trial ran on: a real Agent row, `enabled:false` until he taps Create.
+  agentId      String?
+  runId        String?
+  /// building | running | passed | failed
+  status       String  @default("building")
+  /// What it really fetched — capped, for the screen only. Never an output.
+  rows         String  @default("[]")
+  columns      String  @default("[]")
+  rowCount     Int     @default(0)
+  /// The message exactly as it would arrive. NOT sent — drawn on screen.
+  message      String  @default("")
+  credits      Int     @default(0)
+  aiTokens     Int     @default(0)
+  /// What the success check said, in the owner's own words. Empty until it has run.
+  verdict      String  @default("")
+  /// Why it failed, plainly. Empty on a pass.
+  error        String  @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([areaId, briefVersion])
+  @@index([agentId])
+}
