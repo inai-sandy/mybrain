@@ -300,6 +300,8 @@ A sibling of `codex-runner`: systemd unit `mybrain-worker-runner`, HTTP on the D
 - It **never touches the database** — everything goes through the app.
 - **Port 8766 is a proposal, not a fact.** Nothing in the repo references it, but confirm with
   `ss -ltnp` on the VPS before pinning it; the runner URL is env-overridable either way.
+  **It was taken** (the retired gws-runner still listens on it, and 8765/8767/8768/8770 are the
+  codex/gemini/claude/agent-helper runners): the runner is pinned to **8769**.
 - **The worker folders outlive the app image.** `deploy.sh` rolls back by re-tagging
   `mybrain-app:prev`, which does not touch `/srv/mybrain-workers`. A rolled-back app may therefore
   meet a worker built against a newer kit: the runner refuses to start a worker whose `meta.kit`
@@ -451,6 +453,17 @@ const answer = await kit.ask({
    carries on from where it was.
 6. If `deadlineHours` passes with no reply, the run resumes with `ifNoAnswer` and says so in a step —
    or fails honestly when no default was given. A question is never left open for ever.
+
+**A parked run must not hold the schedule** (decided 2026-08-22, after BEA-1388). The per-job lock
+expires in 30 minutes; a question waits up to 12 hours. So a weekly agent parked on a question will
+have its lock expire and its next scheduled run will start normally — that is deliberate, because a
+question the owner has not seen must never silently stop his agent from running again.
+
+The consequence has to be handled, not discovered: when a late answer resumes a parked run, the
+resumed run **checks whether a newer run of the same job has finished since it parked**. If one has,
+it finishes honestly — "a newer run already did this; your answer arrived too late" — writing no
+rows, appending to no Sheet and sending no message. Journalled steps make this safe: the resumed run
+replays what it did, sees the world moved on, and stops. A test covers exactly this sequence.
 
 **Matching rule, stated because it will bite:** an owner reply arriving while a waitpoint is open is
 treated as the answer to that waitpoint, not as a contact reply. Only one owner waitpoint may be open

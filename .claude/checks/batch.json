@@ -4,8 +4,8 @@
   "issues": [
     { "id": "BEA-1386", "title": "1/10 ToolSample - keep whole vendor answers", "status": "done", "sha": "8ddf72b" },
     { "id": "BEA-1387", "title": "2/10 kit v1 + callback API + run journal + runKind", "status": "done", "sha": "cab2d83", "note": "shipped 650bd06 with routes mounted at /api/api/worker; fixed and re-shipped as cab2d83 — verify routes over HTTP, not just in tests" },
-    { "id": "BEA-1388", "title": "3/10 per-job run lock", "status": "in_progress" },
-    { "id": "BEA-1389", "title": "4/10 worker runner (host service)", "status": "pending" },
+    { "id": "BEA-1388", "title": "3/10 per-job run lock", "status": "done", "sha": "5f4015c" },
+    { "id": "BEA-1389", "title": "4/10 worker runner (host service)", "status": "in_progress" },
     { "id": "BEA-1390", "title": "5/10 the build turn (Codex compiles the plan)", "status": "pending" },
     { "id": "BEA-1391", "title": "6/10 contracts - fail loudly", "status": "pending" },
     { "id": "BEA-1392", "title": "7/10 ask and wait (WhatsApp question + resume)", "status": "pending" },

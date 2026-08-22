@@ -696,6 +696,48 @@ the schedule. Proved against a REAL SQLite file (`api/src/agent/run-lock.spec.ts
 holder) and over real HTTP on a running app: three simultaneous `POST /api/agent/agents/:id/run` →
 one 201, two 409, exactly one `AgentRun` row, lock row gone the moment the run ended.
 
+**A worker is a process on the HOST, and the runner is the only thing that may start one (BEA-1389,
+agent workers 4/10 — `specs/AGENT-WORKERS.md` §F).** `services/host/worker-runner.server.js` +
+`services/host/mybrain-worker-runner.service`, a sibling of `codex-runner` with the same
+versioned-copy discipline (repo copy is the truth, live copy at `/home/sandy/worker-runner/server.js`,
+install written down in `services/host/README.md`). It lives outside the container because the app
+image has no `child_process` usage at all and a second container must not write the same SQLite file.
+**The port is 8769, not the design's proposed 8766** — 8766 is still held by the retired gws-runner,
+and 8765/8767/8768/8770 are the codex/gemini/claude/agent-helper runners (`ss -ltnp`, 2026-08-22);
+`WORKER_RUNNER_PORT` here and `WORKER_RUNNER_URL` in `deploy.sh` override it on both sides.
+`POST /run {jobId, runId, token, seed?, kit?, timeoutMs?}` spawns `node --max-old-space-size=512
+worker.mjs` in `<root>/<jobId>/current`, **detached** so a timeout `SIGKILL`s the whole group, and
+answers **ndjson**: `{type:'step', step}` for every JSON line the worker prints, `{type:'log', line}`
+for anything else, and a final `{type:'result', status, rows, error}`. The steps the owner reads do
+NOT come down this stream — `kit.step()` posts them to `/api/worker/step` — this stream is the
+runner's own play-by-play and its verdict. **Nothing dangerous comes from the request**: `NODE_OPTIONS`
+is emptied by the runner, argv/heap/cwd are fixed, there is no shell, and the child does **not**
+inherit the host environment — the run token is the only secret it ever sees, minted per spawn by
+`WorkerTokenService`, never written into the worker folder. A malformed request is a plain 400; a
+request that is fine but cannot run (no worker installed, kit too new, job already running here) is a
+200 ndjson stream whose ONE line is the honest failed result, so the app has one road to parse.
+**Kit refusal is the rollback guard**: `deploy.sh` re-tags `mybrain-app:prev` and never touches
+`/srv/mybrain-workers`, so a rolled-back app can meet a newer worker — a `meta.kit` major above the
+app's kit is refused BEFORE the spawn with `kitRefused:true` and a plain sentence (also in DEPLOY.md).
+`POST /build {jobId, brief}` is the plumbing piece 5 drives (new `vN`, pin the kit, `BRIEF.md`, one
+fresh `codex exec -s workspace-write -C vN`, then `node --test worker.test.mjs` parsed from TAP) and
+it deliberately does **not** promote — moving `current` is the build turn's decision. `GET /status`
+answers the codex runner's keys (`installed/version/loggedIn/ready/workdir/runner/engine`) so the
+engine pill works unchanged; Codex being logged in is reported but does not decide `ready`, because
+only `/build` needs it. It NEVER opens the database. Trust entries under the workers root are pruned
+from `~/.codex/config.toml` at boot and after every build. Proof: `api/src/worker/worker-runner.spec.ts`
+runs the real file as its own process against the real controller + real tokens over a real listener
+(streaming, timeout kill, kit refusal, the child's own environment, traversal, one-run-per-job), and
+it was driven by hand on the VPS on 172.18.0.1:8769 with `curl -N` before shipping. Traps: watch
+**`res`** for the client going away, not `req` — a fully-read request stream closes the moment its
+body is consumed, so a `req.on('close')` kill would kill every worker the instant it started; the
+result line the runner writes is built field by field, so a new field (like `kitRefused`) has to be
+added there too or it is silently dropped; steps, logs and stderr share ONE 2,000-line relay budget
+(a flood of JSON is exactly as expensive as a flood of text) and an oversized body needs
+`req.destroy()` after its 413, or the paused socket strands the connection (BEA-838, again). There is
+an off-by-default shared secret (`WORKER_RUNNER_TOKEN` + `x-runner-token`) for the day piece 5 sends
+real briefs to `/build` — that is the one route that runs a Codex session on a caller's text.
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.
