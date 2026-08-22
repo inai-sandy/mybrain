@@ -121,6 +121,8 @@ export class GoogleWorkspaceService {
   private readonly logger = new Logger(GoogleWorkspaceService.name);
   /** When the last address probe failed (in memory — a restart may try once more, which is bounded by the cap). */
   private emailProbeFailedAt = 0;
+  /** The probe in flight, shared by every caller that arrives while it runs — one call, not N. (BEA-1412) */
+  private emailProbe: Promise<string | null> | null = null;
 
   // Optional deps go LAST — spec files build this service positionally with fewer args.
   constructor(
@@ -176,6 +178,11 @@ export class GoogleWorkspaceService {
    * call per page view eating the cap the scheduled reads need.
    */
   async rememberEmail(): Promise<string | null> {
+    if (!this.emailProbe) this.emailProbe = this.rememberEmailOnce().finally(() => { this.emailProbe = null; });
+    return this.emailProbe;
+  }
+
+  private async rememberEmailOnce(): Promise<string | null> {
     const account = await this.account('gmail');
     if (!account) return null;
     const [saved, savedFor] = await Promise.all([this.setting(EMAIL_SETTING), this.setting(EMAIL_ACCOUNT_SETTING)]);
