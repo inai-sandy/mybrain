@@ -20,8 +20,14 @@ const { makeKit } = require('./kit/kit.js');
  * the same ones, which is what makes the parity suite mean something.
  */
 
-/** A saved answer: one action + one exact set of arguments → one whole payload. */
-export type SampleFixture = { actionId: string; args: Record<string, any>; data: any };
+/**
+ * A saved answer: one action + one exact set of arguments → one whole payload.
+ *
+ * `notFound` is the other real answer a vendor gives: the call went through and there was nothing
+ * there (Scrape Creators answers `404 not_found` for a search with no posts). It carries no payload,
+ * so there is nothing to save — the fake provider answers it the way the real one does.
+ */
+export type SampleFixture = { actionId: string; args: Record<string, any>; data?: any; notFound?: boolean };
 
 export function fakePrisma() {
   const journal = new Map<string, any>();
@@ -101,7 +107,9 @@ export async function makeWorld(opts: {
 }) {
   const prisma = fakePrisma();
   const store = new ToolSampleService(prisma);
+  const notFound = new Set<string>();
   for (const s of opts.samples) {
+    if (s.notFound) { notFound.add(`${s.actionId}:${argsHashOf(plainArgs(s.args))}`); continue; }
     await store.maybeKeep({ actionId: s.actionId, args: s.args, data: s.data, ok: true, readOnly: true, method: 'GET', providerKind: 'social' });
   }
 
@@ -113,7 +121,10 @@ export async function makeWorld(opts: {
       if (id === 'svc:googlesheets.create_google_sheet1') { sheets.created.push(ctx.args.title); return { ok: true, data: { spreadsheetId: 'SHEET_1' } }; }
       if (id === 'svc:googlesheets.batch_update') { sheets.writes.push(ctx.args); return { ok: true, data: { totalUpdatedRows: ctx.args.values.length } }; }
       if (id === 'svc:googlesheets.batch_get') return { ok: true, data: { valueRanges: [{ values: [] }, { values: [] }] } };
-      const data = await store.replay(id, argsHashOf(plainArgs(ctx?.args || {})));
+      const hash = argsHashOf(plainArgs(ctx?.args || {}));
+      // The vendor's "there is nothing here" — a real answer, not a broken call.
+      if (notFound.has(`${id}:${hash}`)) return { ok: false, notFound: true, error: 'not_found', credits: 0, serviceName: 'Instagram', actionName: nameOf(id) };
+      const data = await store.replay(id, hash);
       if (data === null) return { ok: false, error: `no saved answer for ${id} with ${JSON.stringify(ctx?.args)}`, credits: 0 };
       return { ok: true, credits: 1, serviceName: 'Instagram', actionName: nameOf(id), data };
     },

@@ -4,6 +4,7 @@ import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
 import { AgentPlan, PlanCost, estimatePlanCost, planActionIds, planFromAgent } from './plan';
 import { SocialWatchStore } from './social-watch.store';
 import { SocialService } from './social.service';
+import { WorkerContract, contractFromPlan, contractInWords } from '../worker/contract';
 
 /**
  * The Social section's routes (BEA-1356). Thin on purpose: every answer is `SocialService`'s, and
@@ -26,14 +27,17 @@ export class SocialController {
    * finder + one per creator), AI tokens for the shaping step. The job page shows "≈ N credits per run".
    */
   @Get('plan/:agentId')
-  async plan(@Param('agentId') agentId: string): Promise<{ plan: AgentPlan; cost: PlanCost }> {
+  async plan(@Param('agentId') agentId: string): Promise<{ plan: AgentPlan; cost: PlanCost; contract: WorkerContract; contractWords: string[] }> {
     const agent = await this.agents?.getAgent?.(String(agentId || ''));
     if (!agent) throw new NotFoundException('No such agent');
     const plan = planFromAgent(agent);
     const cards = await this.knowledge?.lookup?.(planActionIds(plan)).catch(() => []);
     // name + health too (BEA-1375): the estimate says what the run costs TODAY while a source is down.
     const knowledge = Object.fromEntries((cards || []).map((c) => [c.actionId, { name: c.name, cost: c.cost, paging: c.paging, health: c.health }]));
-    return { plan, cost: estimatePlanCost(plan, knowledge) };
+    // What "it worked" means for this job (BEA-1391 §E) — derived from the same plan, so the words
+    // the owner reads in Settings are the rules a worker built from this plan really checks.
+    const contract = contractFromPlan(plan);
+    return { plan, cost: estimatePlanCost(plan, knowledge), contract, contractWords: contractInWords(contract) };
   }
 
   /** The grid page in one answer: key state, balance, today's spend, the ceiling, every platform. */

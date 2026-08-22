@@ -48,6 +48,21 @@ class WorkerFailed extends Error {
 }
 
 /**
+ * Thrown by `kit.expect()` when the rows do not match what this job's `contract.json` says a good
+ * answer looks like (BEA-1391, §E). It carries a sentence the owner can read — "fetched 90 answers,
+ * recognised 0 rows" — because the run screen is where this lands.
+ */
+class ContractError extends Error {
+  constructor(reason, facts) {
+    super(reason);
+    this.name = 'ContractError';
+    this.failed = true;
+    this.contract = true;
+    this.facts = facts || null;
+  }
+}
+
+/**
  * Build the kit for one spawn.
  *
  * `api`, `token`, `runId` and `seed` come from the environment the worker runner sets
@@ -66,6 +81,21 @@ function makeKit(opts) {
   // the position IS the identity of the call, so it may never depend on what came back.
   let seq = 0;
   const rand = mulberry32(seed.random >>> 0);
+
+  // What this job's contract says a good answer is (BEA-1391 §E). Given by the caller (the app's own
+  // tests) or read off `contract.json` beside this folder, which the build turn always writes.
+  // A `contract.json` that EXISTS and cannot be read is not "no contract" — it is a broken worker,
+  // and it says so at the first check instead of quietly running unchecked.
+  const loaded = o.contract !== undefined ? { contract: normaliseContract(o.contract), error: null } : loadContract();
+  const contract = loaded.contract;
+  const contractError = loaded.error;
+  // What every source really answered — remembered by the kit, so `kit.expect()` cannot be handed a
+  // story about the fetch that does not match what happened. A replayed call returns its recorded
+  // value, so the memory rebuilds identically on a resume.
+  const fetches = [];
+  // The last PASSING check, and the rows it passed. A bare "expect was called once" would let a
+  // swallowed `ContractError`, or a check of some other table, still reach the output.
+  let passed = null;
 
   const post = async (route, body) => {
     const answer = await call(route, body);
@@ -93,6 +123,7 @@ function makeKit(opts) {
       if (o2 && o2.pages !== undefined) body.pages = o2.pages;
       const r = await post('tool', body);
       if (r.stop) throw new WorkerFailed(r.stop);
+      remember(String(sourceId), r);
       return r;
     },
 
@@ -100,6 +131,7 @@ function makeKit(opts) {
     async tool(actionId, args) {
       const r = await post('tool', { seq: seq++, actionId: String(actionId), args: args || {} });
       if (r.stop) throw new WorkerFailed(r.stop);
+      remember(String(actionId), r);
       return r;
     },
 
@@ -128,6 +160,7 @@ function makeKit(opts) {
 
     /** The rows → the job's Google Sheet: create, or append under the sheet's own columns. */
     async writeSheet(table, o2) {
+      guardChecked(table);
       const r = await post('output', { seq: seq++, kind: 'sheet', table, title: (o2 && o2.title) || undefined, append: o2 ? o2.append : undefined });
       if (!r.ok) throw new WorkerFailed(r.error || 'the rows could not be written to the sheet');
       return r;
@@ -135,6 +168,9 @@ function makeKit(opts) {
 
     /** The result → Documents, where every other run's output lands. */
     async writeDocument(doc) {
+      // A document is written from prose, not from a table, so the rows cannot be matched — but the
+      // check must still have happened and passed.
+      guardChecked();
       const r = await post('output', { seq: seq++, kind: 'document', title: doc.title, markdown: doc.markdown });
       if (!r.ok) throw new WorkerFailed(r.error || 'the document could not be saved');
       return r;
@@ -142,6 +178,8 @@ function makeKit(opts) {
 
     /** Tell the owner: WhatsApp (template first, Meta's real verdict, Telegram if refused) and/or Telegram. */
     async notify(where, what) {
+      // Telling the owner "here are your rows" is an output too — the same check stands in front of it.
+      guardChecked();
       return post('notify', {
         seq: seq++,
         whatsapp: !!(where && where.whatsapp),
@@ -154,6 +192,35 @@ function makeKit(opts) {
     },
 
     // ---- discipline ----------------------------------------------------------------------------
+
+    /** What this job's `contract.json` says a good answer looks like. Null when there is none. */
+    contract,
+
+    /**
+     * Check the rows against the contract — **before the output step, every time** (BEA-1391 §E).
+     *
+     * Answers `{ ok:true, rows, empty }` when they pass, and throws `ContractError` with a sentence
+     * the owner can read when they do not. Free and local: no call, no credits, no place in the call
+     * order, so a replay checks the same rows and reaches the same verdict.
+     *
+     * The one judgement it makes that nothing else can: **0 rows out of an answer that was not empty
+     * is a failure** (the BEA-1377 run: 90 answers fetched, 0 rows recognised, an empty sheet
+     * written, success reported), while 0 rows because every source genuinely had nothing is a fine
+     * run that finishes `done` — exactly as the plan runner has always behaved.
+     */
+    expect(table, c) {
+      if (contractError) throw new WorkerFailed(contractError);
+      // A contract given here that is not a contract falls back to the folder's own, rather than
+      // turning the check off: `kit.expect(rows, undefined)` may never mean "check nothing".
+      const use = (c === undefined ? contract : normaliseContract(c)) || contract;
+      const t = asTable(table);
+      passed = null;
+      if (!use) return { ok: true, rows: t.rows.length, empty: !t.rows.length };
+      const verdict = checkContract(t, use, fetches, seed.now);
+      if (!verdict.ok) throw new ContractError(verdict.reason, { rows: verdict.rows, sources: fetches.slice() });
+      passed = fingerprint(t);
+      return verdict;
+    },
 
     /** One readable line on the run screen. Journalled, so a resumed run does not repeat its log. */
     async step(label, status, detail) {
@@ -222,7 +289,216 @@ function makeKit(opts) {
     },
   };
 
+  /** What one source answered, kept for `kit.expect` — never what the worker says about it. */
+  function remember(id, r) {
+    const rows = (r && r.table && Array.isArray(r.table.rows) && r.table.rows.length) || 0;
+    fetches.push({
+      id,
+      label: (r && r.label) || id,
+      // The plan runner's own rule, to the letter (`runPlan`: `out.empty || (out.why && mode ===
+      // 'run')`): a source the vendor had nothing for, AND a source that fetched fine and kept
+      // nothing (every post older than the window) are both EMPTY sources — a quiet day, not a
+      // failure. Only the tripwire below takes that back.
+      empty: !!(r && (r.empty || (r.why && !rows))),
+      // The tripwire (BEA-1377): the calls succeeded and carried data, and no shape here read a
+      // single row out of it. That is OUR bug, so it is NOT an empty source, whatever else it says.
+      unrecognised: !!(r && r.unrecognised),
+      why: (r && r.why) || null,
+      rows,
+    });
+  }
+
+  /**
+   * A worker with a contract may not write or send anything it has not checked. Codex writes the
+   * call, and a forgotten `kit.expect()` — or one whose `ContractError` was swallowed, or one run on
+   * some other table — would put the whole design back where BEA-1377 found it. So the kit checks
+   * three things itself rather than trusting the generated code to remember:
+   * a contract that could be read, a check that PASSED, and a check of the very rows going out.
+   */
+  function guardChecked(table) {
+    if (contractError) throw new WorkerFailed(contractError);
+    if (!contract) return;
+    if (!passed) {
+      throw new WorkerFailed('This worker has a contract and these rows did not pass it — call kit.expect(table) before writing or sending anything, and let a ContractError out. (contract.json says what a good answer looks like.)');
+    }
+    if (table !== undefined && fingerprint(asTable(table)) !== passed) {
+      throw new WorkerFailed('These are not the rows kit.expect() checked — check the very rows you are about to write.');
+    }
+  }
+
   return kit;
+}
+
+/** The contract as it is written in `contract.json`, with every field made safe to read. */
+function normaliseContract(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const list = (v) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : []);
+  const num = (v, dflt) => (Number.isFinite(Number(v)) ? Number(v) : dflt);
+  return {
+    minRows: Math.max(0, num(raw.minRows, 1)),
+    maxRows: Math.max(1, num(raw.maxRows, 5000)),
+    columns: list(raw.columns),
+    mustHave: list(raw.mustHave),
+    freshnessDays: raw.freshnessDays ? num(raw.freshnessDays, null) : null,
+    allowEmptyWhen: raw.allowEmptyWhen === undefined || raw.allowEmptyWhen === null ? 'every source returned an empty answer' : String(raw.allowEmptyWhen),
+  };
+}
+
+/**
+ * `contract.json` sits beside this kit folder, written by the build turn.
+ *
+ * **No file** is "nothing to check" — the app's own tests load this kit, and a worker built before
+ * contracts existed has none. **A file that cannot be read** is the opposite: it is a broken worker,
+ * and it must fail loudly at the first check, because silently running unchecked is exactly the hole
+ * this piece closes.
+ */
+function loadContract() {
+  // eslint-disable-next-line
+  const { readFileSync } = require('fs');
+  // eslint-disable-next-line
+  const { join } = require('path');
+  const file = join(__dirname, '..', 'contract.json');
+  let raw = null;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return { contract: null, error: null }; // no contract in this folder
+    return { contract: null, error: `This worker's contract.json could not be read (${String((e && e.message) || e).slice(0, 160)}), so nothing can be checked — the run stopped instead of writing something nobody checked.` };
+  }
+  let parsed = null;
+  try {
+    parsed = normaliseContract(JSON.parse(raw));
+  } catch (e) {
+    return { contract: null, error: `This worker's contract.json is not readable JSON (${String((e && e.message) || e).slice(0, 160)}) — the run stopped instead of writing something nobody checked.` };
+  }
+  if (!parsed) return { contract: null, error: 'This worker\'s contract.json does not hold a contract — the run stopped instead of writing something nobody checked.' };
+  return { contract: parsed, error: null };
+}
+
+/**
+ * The rows a check passed, in a form the next write can be compared against: the columns, how many
+ * rows, and the ends of the table. Cheap on a big table, and enough to catch "checked one table,
+ * wrote another".
+ */
+function fingerprint(t) {
+  const rows = t.rows || [];
+  const ends = rows.length ? JSON.stringify([rows[0], rows[rows.length - 1]]).slice(0, 500) : '';
+  return `${(t.columns || []).join('|')}#${rows.length}#${ends}`;
+}
+
+/** Rows as they cross into `expect`: a table, an array of arrays, or an array of plain objects. */
+function asTable(t) {
+  if (Array.isArray(t)) {
+    const columns = [];
+    const rows = [];
+    for (const r of t) {
+      if (Array.isArray(r)) { rows.push(r); continue; }
+      if (r && typeof r === 'object') {
+        for (const k of Object.keys(r)) if (!columns.includes(k)) columns.push(k);
+        rows.push(r);
+      }
+    }
+    // Rows given as objects are turned into cells under the columns they share.
+    const cells = rows.map((r) => (Array.isArray(r) ? r : columns.map((c) => r[c])));
+    return { columns, rows: cells };
+  }
+  const columns = t && Array.isArray(t.columns) ? t.columns.map((c) => String(c)) : [];
+  const rows = t && Array.isArray(t.rows) ? t.rows.filter((r) => Array.isArray(r) || (r && typeof r === 'object')) : [];
+  return { columns, rows: rows.map((r) => (Array.isArray(r) ? r : columns.map((c) => r[c]))) };
+}
+
+/** At least half the rows must carry a `mustHave` column, or the column is not really there. */
+const MUST_HAVE_MIN_SHARE = 0.5;
+/** A column name that reads like a date, for the freshness check. */
+const DATE_COLUMN_RE = /(^|_)(date|time|timestamp|taken_at|posted|published|created|updated)/i;
+
+/**
+ * The whole judgement, pure and exported so the app's own tests can drive it without a worker.
+ *
+ * Order matters: the tripwire first, because "0 rows" from an answer that had something in it must
+ * never be excused by `allowEmptyWhen`. That is the difference between the BEA-1377 failure and a
+ * genuinely quiet day, and it is the whole point of this piece.
+ */
+function checkContract(table, contract, sources, now) {
+  const rows = table.rows || [];
+  const columns = table.columns || [];
+  const at = typeof now === 'number' ? now : Date.now();
+  const list = sources || [];
+
+  if (!rows.length) {
+    const broken = list.filter((s) => s.unrecognised);
+    if (broken.length) {
+      const why = broken.map((s) => `${s.why || 'the answer carried data but no rows were recognised'}${list.length > 1 ? ` (${s.label})` : ''}`).join('; ');
+      return no(`${cap(why)}. Nothing was written: this is not an empty day at the vendor, it is a bug here.`, rows.length);
+    }
+    const answered = list.filter((s) => !s.empty);
+    if (answered.length) {
+      const who = answered.map((s) => s.label).join(', ');
+      return no(`Nothing usable came back: ${answered.length} source${answered.length === 1 ? '' : 's'} answered (${who}) but recognised 0 rows. Nothing was written.`, rows.length);
+    }
+    if (!list.length) return no('Nothing was fetched at all, so there is nothing to write.', rows.length);
+    if (String(contract.allowEmptyWhen).toLowerCase() === 'never') {
+      return no(`Every source came back empty, and this job says finding nothing is never all right.`, rows.length);
+    }
+    // Every source genuinely had nothing: the run finishes done with 0 rows, exactly as the plan
+    // runner's `nothingFound()` has always done. Not a failure — the vendor was asked and said no.
+    return { ok: true, rows: 0, empty: true, why: `every source came back empty (${list.map((s) => s.label).join(', ')})` };
+  }
+
+  if (rows.length < contract.minRows) {
+    return no(`Only ${rows.length} row${rows.length === 1 ? '' : 's'} came through, and this job needs at least ${contract.minRows}. Nothing was written.`, rows.length);
+  }
+  if (rows.length > contract.maxRows) {
+    return no(`${rows.length} rows is more than the ${contract.maxRows} this job should ever produce — something ran away, so nothing was written.`, rows.length);
+  }
+
+  const missing = contract.columns.filter((c) => !columns.some((have) => sameName(have, c)));
+  if (missing.length) {
+    return no(`The rows are missing the column${missing.length === 1 ? '' : 's'} this job asks for: ${missing.join(', ')} (it has ${columns.join(', ') || 'no columns'}). Nothing was written.`, rows.length);
+  }
+
+  for (const need of contract.mustHave) {
+    const i = columns.findIndex((c) => sameName(c, need));
+    if (i === -1) return no(`The rows have no ${need} column at all. Nothing was written.`, rows.length);
+    const filled = rows.filter((r) => notBlank(r[i])).length;
+    if (filled < Math.ceil(rows.length * MUST_HAVE_MIN_SHARE)) {
+      return no(`Only ${filled} of ${rows.length} rows have a ${need} — that column is empty in most rows, so the rows are not usable. Nothing was written.`, rows.length);
+    }
+  }
+
+  if (contract.freshnessDays) {
+    const i = columns.findIndex((c) => DATE_COLUMN_RE.test(String(c)));
+    if (i !== -1) {
+      const stamps = rows.map((r) => whenOf(r[i])).filter((t) => t !== null);
+      const cutoff = at - contract.freshnessDays * 24 * 60 * 60 * 1000;
+      if (stamps.length && !stamps.some((t) => t >= cutoff)) {
+        const newest = new Date(Math.max.apply(null, stamps)).toISOString().slice(0, 10);
+        return no(`Every row is older than the last ${contract.freshnessDays} days (the newest is from ${newest}). Nothing was written.`, rows.length);
+      }
+    }
+  }
+
+  return { ok: true, rows: rows.length, empty: false };
+}
+
+function no(reason, rows) { return { ok: false, reason, rows }; }
+function cap(s) { return String(s).charAt(0).toUpperCase() + String(s).slice(1); }
+function sameName(a, b) {
+  const n = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return !!n(a) && n(a) === n(b);
+}
+function notBlank(v) {
+  if (v === null || v === undefined) return false;
+  return String(v).trim() !== '';
+}
+
+/** A cell as a moment: epoch seconds, epoch milliseconds, or anything `Date` can read. */
+function whenOf(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) return n > 1e11 ? n : n * 1000;
+  const t = Date.parse(String(v));
+  return Number.isFinite(t) ? t : null;
 }
 
 /**
@@ -304,3 +580,6 @@ exports.makeKit = makeKit;
 exports.installDeterminism = installDeterminism;
 exports.WorkerPaused = WorkerPaused;
 exports.WorkerFailed = WorkerFailed;
+exports.ContractError = ContractError;
+exports.checkContract = checkContract;
+exports.normaliseContract = normaliseContract;

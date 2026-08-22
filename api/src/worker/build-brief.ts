@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { AgentPlan, PlanBlock, sourceLabel, sourceActionId } from '../social/plan';
 import { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { cardText } from '../agent/thinking-builder';
+import { WorkerContract, contractFromPlan, contractInWords } from './contract';
 
 /**
  * The build turn's brief (BEA-1390, agent workers 5/10 — `specs/AGENT-WORKERS.md` §C, §D).
@@ -29,7 +30,7 @@ export type BuildSample = {
   sampleId: string;
   capturedAt?: string | null;
   /** Exactly what `POST /api/worker/tool` answers for this source, built from the saved answer. */
-  answer: { ok: boolean; label: string; credits: number; empty: boolean; why: string | null; stop: null; table: any };
+  answer: { ok: boolean; label: string; credits: number; empty: boolean; unrecognised: boolean; why: string | null; stop: null; table: any };
   /** The credits are the card's typical cost, not a measured one — said out loud in `index.json`. */
   creditsEstimated: boolean;
 };
@@ -101,10 +102,14 @@ export function sampleFileName(sourceId: string): string {
 /** The whole build request: the folder's files and the brief Codex is given. */
 export function buildRequest(inp: BuildInputs): BuildRequest {
   const planHash = planHashOf(inp.plan);
+  // What "it worked" means for this job (BEA-1391 §E). Derived from the plan by the app, never
+  // invented by the model, and the same words the owner reads in the job's Settings.
+  const contract = contractFromPlan(inp.plan);
   const files: Record<string, string> = {
     'kit/kit.js': inp.kit.js,
     'kit/KIT.md': inp.kit.doc,
     'plan.json': JSON.stringify(inp.plan, null, 2),
+    'contract.json': JSON.stringify(contract, null, 2),
   };
 
   const index: any = {
@@ -148,7 +153,7 @@ export function buildRequest(inp: BuildInputs): BuildRequest {
   }
   files['samples/index.json'] = JSON.stringify(index, null, 2);
 
-  return { brief: briefText(inp, planHash, index), files, planHash, sampleIds: inp.samples.map((s) => s.sampleId) };
+  return { brief: briefText(inp, planHash, index, contract), files, planHash, sampleIds: inp.samples.map((s) => s.sampleId) };
 }
 
 function cardFor(cards: ToolKnowledge[], actionId: string): ToolKnowledge | undefined {
@@ -169,6 +174,7 @@ export function planInWords(plan: AgentPlan): string {
   lines.push(plan.merge ? `Then merge the ${plan.sources.length} tables with \`kit.merge\`.` : 'There is one source, so there is nothing to merge.');
   lines.push(plan.shape ? `Then shape the rows: \`kit.shape(table, { prompt })\` with the task below.` : 'There is NO AI step: the task is "keep every result as fetched", so the rows go out as they came in.');
   if (plan.watch) lines.push(`This job is a ${plan.watch.mode} — piece 6/7 territory; for now fetch, merge and write as a plain run and say so in a step.`);
+  lines.push('Then check the rows against the contract: `kit.expect(table)` — BEFORE any write, every time.');
   lines.push(
     plan.output.kind === 'sheet'
       ? `Then write the rows to the job's Google Sheet: \`kit.writeSheet(table, { title, append: ${!!plan.output.append} })\`${plan.output.sheetId ? ' (the job already has a sheet — the app knows which)' : ''}.`
@@ -180,7 +186,7 @@ export function planInWords(plan: AgentPlan): string {
   return lines.join('\n');
 }
 
-function briefText(inp: BuildInputs, planHash: string, index: any): string {
+function briefText(inp: BuildInputs, planHash: string, index: any, contract: WorkerContract): string {
   const { plan } = inp;
   const cards = (inp.cards || []).map((c) => cardText(c)).join('\n\n');
   const withSamples = index.sources.filter((s: any) => s.file);
@@ -224,6 +230,38 @@ vendor, never read a key, never write outside this folder.
 
 ${cards || '(no fact cards were available for this plan — go by the plan and the saved answers)'}
 
+## What counts as a good run — \`contract.json\`
+
+The folder already has \`contract.json\`. **Do not write it, do not edit it, do not second-guess it** —
+it came from the same plan you are compiling, and the owner reads it in plain words in his Settings:
+
+${contractInWords(contract).map((l) => `- ${l}`).join('\n')}
+
+\`\`\`json
+${JSON.stringify(contract, null, 2)}
+\`\`\`
+
+Read it and check the rows against it **before the output step, on every road**:
+
+\`\`\`js
+const contract = JSON.parse(readFileSync(new URL('./contract.json', import.meta.url), 'utf8'));
+const verdict = kit.expect(table, contract);   // throws ContractError when the rows are not good
+if (verdict.empty) { await kit.step('Nothing found — every source came back empty', 'done'); return await kit.finish({ resultText: '0 rows — nothing to write' }); }
+\`\`\`
+
+- \`kit.expect\` is **free and local**: no call, no credits, no place in the call order.
+- It answers \`{ ok:true, rows, empty }\`. \`empty:true\` means every source genuinely had nothing —
+  finish \`done\` with 0 rows, write nothing, message nobody. That is a good run, not a failure.
+- It **throws** \`ContractError\` otherwise. Let it out: the worker's own top-level catch turns it into
+  \`kit.fail(reason)\`, the run fails with a sentence the owner can read, and **nothing is written**.
+- **Never catch a \`ContractError\` yourself.** The kit refuses \`writeSheet\`, \`writeDocument\` and
+  \`notify\` unless the last check PASSED and it was a check of the same rows — so a swallowed error,
+  a forgotten call, or checking one table and writing another all end the run instead of writing.
+
+This exists because of one real run: it fetched 90 answers, recognised 0 rows, wrote an empty Google
+Sheet, said "done" and cost 101 credits. A quiet success with no rows is the worst thing this program
+can do.
+
 ## The saved answers your tests stand on
 
 \`samples/index.json\` lists one entry per source. ${withSamples.length ? `${withSamples.length} of them ${withSamples.length === 1 ? 'has' : 'have'} a real saved answer in \`samples/\`: the file's \`answer\` field is **exactly** what \`kit.fetchSource(sourceId)\` returns for that source — the masked answer a real call gave, put through the app's own row builder.` : 'None of them has a real saved answer yet.'}
@@ -265,6 +303,8 @@ documents.
 3. **Every source empty**: nothing is written, nobody is messaged, and the run finishes honestly saying it found nothing.
 4. **A refused call fails the run**: a \`tool\` answer with \`stop\` set (the credit ceiling) ends the run with that reason — the worker never writes a half table or invents rows.
 5. **The call order never depends on what came back** — the same calls, in the same order, whatever the answers hold.
+6. **The BEA-1377 shape fails loudly**: a source that answers \`{ ok:true, empty:true, unrecognised:true, why:'fetched 90 answers but recognised 0 rows — this is a My Brain bug, not the vendor', table:null }\` must end the run **failed**, with that reason on it, and **no \`output\` call at all**. Assert the \`output\` route was never called.
+7. **Every source genuinely empty still finishes \`done\`**: sources answering \`{ ok:true, empty:true, unrecognised:false, table:null }\` write nothing, message nobody, and the run finishes \`done\` with 0 rows. Assert \`finish\` was called with \`status:'done'\`.
 
 Use \`node:test\` and \`node:assert/strict\`. Keep the tests readable: an owner may open them.
 

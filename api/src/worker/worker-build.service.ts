@@ -225,6 +225,7 @@ export class WorkerBuildService implements OnModuleInit {
           label: sourceLabel(block, plan.sources),
           credits,
           empty: false,
+          unrecognised: false,
           why: null,
           stop: null,
           table: tableOf(picked.data),
