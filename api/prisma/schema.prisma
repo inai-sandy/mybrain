@@ -1952,3 +1952,41 @@ model AgentTrial {
   @@index([areaId, briefVersion])
   @@index([agentId])
 }
+
+/// What a tool taught us by being used (BEA-1409, "Brief First").
+///
+/// The know-how a builder reads had three sources: the vendor's schema, real saved answers, and 35
+/// notes a human typed by hand. The Gmail trap — `max_results` defaults to 1 — was in that third
+/// pile, and it only got there AFTER it cost the owner a night. A tool nobody has used has no notes
+/// at all, so the first agent on it is guaranteed to be wrong.
+///
+/// A lesson is derived mechanically from one request and its answer. **No model ever writes one**,
+/// and it carries structure only — a parameter name, a count, the name of a paging marker — never a
+/// value out of anybody's data. That is what makes it safe to learn from Gmail and WhatsApp, whose
+/// answers are deliberately never kept.
+model ToolLesson {
+  id       String @id @default(uuid())
+  actionId String
+  service  String
+  /// Stable within an action, so seeing the same thing again raises `timesSeen` instead of adding a row.
+  key      String
+  /// silent-default | more-pages | cap-hit | ignored-argument | single-object
+  kind     String
+  /// Plain English. Shown to the owner on the tool card and handed to Codex in the build brief.
+  text     String
+  /// The parameter it is about, when it is about one.
+  param    String?
+  /// The `ToolCall` row that proves it. Always present — every real call writes one.
+  callId   String?
+  /// The whole saved answer, when this service is one we may keep. Often absent, on purpose.
+  sampleId String?
+  timesSeen Int      @default(1)
+  firstSeenAt DateTime @default(now())
+  lastConfirmedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([actionId, key])
+  @@index([actionId])
+  @@index([lastConfirmedAt])
+}

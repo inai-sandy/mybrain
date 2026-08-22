@@ -6,6 +6,7 @@ import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { WhatsAppProvider } from './whatsapp.provider';
 import { ExecuteResult, parseServiceToolId, ServiceAccount, ServiceAction, ServiceProvider } from './service-provider';
 import { GatePause, PendingGate, ServiceGatesService } from './service-gates.service';
+import { ToolLessonService } from './tool-lesson.service';
 import { ToolSampleService } from './tool-sample.service';
 import { SAMPLE_PROVIDER } from './tool-sample';
 
@@ -128,6 +129,7 @@ export class ServiceActionsService {
     // The sample store (BEA-1386). Optional and last: it only ever ADDS a stored copy of an answer
     // that already ran, so a harness without it behaves exactly as this service always did.
     private readonly samples?: ToolSampleService,
+    private readonly lessons?: ToolLessonService, // what using a tool taught us (BEA-1409)
   ) {
     this.gates = gates || new ServiceGatesService(prisma, provider);
   }
@@ -323,6 +325,19 @@ export class ServiceActionsService {
       // public content. Only the public-scraping provider's answers may be kept.
       providerKind: this.social && (p as any) === (this.social as any) ? SAMPLE_PROVIDER : 'other',
     });
+    // What this call TAUGHT us (BEA-1409). Derived mechanically from what was asked and what came
+    // back — structure only, never a value — so it works for Gmail and WhatsApp too, whose answers
+    // are deliberately never kept, and which are therefore exactly the ones with no hand notes.
+    await this.lessons?.learn?.({
+      actionId,
+      service,
+      args,
+      asked: ctx.args && typeof ctx.args === 'object' ? (ctx.args as any) : undefined,
+      schema: (action as any)?.schema,
+      data: res.data,
+      callId,
+      sampleId,
+    }).catch(() => undefined);
     say(`   ✅ ${name}: ${action.name} — done in ${(ms / 1000).toFixed(1)}s`);
     return {
       ok: true,
