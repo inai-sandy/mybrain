@@ -323,3 +323,34 @@ describe('the pure parts', () => {
     expect(said).toContain('no date on it');
   });
 });
+
+/**
+ * Deleting an agent must leave nothing behind (BEA-1406). `AgentBrief` has no foreign key — the same
+ * hand-kept rule as `SocialWatch` and `RunJournal` — and each brief holds a whole conversation.
+ */
+describe('deleting an agent takes its briefs with it', () => {
+  it('sweeps every brief for that agent, and nobody else\'s', async () => {
+    const deleted: any[] = [];
+    const prisma: any = {
+      agent: { findMany: async () => [] },
+      agentArea: { delete: async () => ({}) },
+      setting: { delete: async () => ({}) },
+      agentBrief: { deleteMany: async (a: any) => { deleted.push(a); return { count: 2 }; } },
+    };
+    const { AgentAreasService } = await import('./agent-areas.service');
+    const svc: any = new (AgentAreasService as any)(prisma);
+    await svc.remove('area-1');
+    expect(deleted).toEqual([{ where: { areaId: 'area-1' } }]);
+  });
+
+  it('a store without the table does not break the delete', async () => {
+    const prisma: any = {
+      agent: { findMany: async () => [] },
+      agentArea: { delete: async () => ({}) },
+      setting: { delete: async () => ({}) },
+    };
+    const { AgentAreasService } = await import('./agent-areas.service');
+    const svc: any = new (AgentAreasService as any)(prisma);
+    await expect(svc.remove('area-1')).resolves.toEqual({ ok: true, jobsDeleted: 0 });
+  });
+});

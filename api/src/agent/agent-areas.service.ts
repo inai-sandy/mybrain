@@ -859,6 +859,10 @@ export class AgentAreasService {
     // each holds up to 40 messages and they would pile up forever — the same "cleanup happens in one
     // place and not the parallel one" shape that caused today's task bugs.
     await Promise.resolve((this.prisma as any).setting?.delete?.({ where: { key: this.jobKey(id) } })).catch(() => undefined);
+    // Its briefs go too (BEA-1405/1406). `AgentBrief` has no foreign key — same hand-kept rule as
+    // `SocialWatch` and `RunJournal` — and each one holds a whole conversation, so leaving them
+    // behind would pile up transcripts nothing can ever read again.
+    await Promise.resolve((this.prisma as any).agentBrief?.deleteMany?.({ where: { areaId: id } })).catch(() => undefined);
     return { ok: true, jobsDeleted: opts.withJobs ? jobs.length : 0 };
   }
 
