@@ -1,7 +1,7 @@
 {
   "startedAt": "2026-08-22T17:55:00Z",
-  "status": "running",
-  "note": "Brief First \u2014 replacing the 8-box agent form with a brief the owner reads and approves, a program Codex builds from the brief plus the WHOLE transcript, and a real trial run before Create. Plan: https://claude.ai/code/artifact/5c17fc65-a717-43b3-9bc6-4221968b0d94 \u00b7 briefs in specs/briefs/. Owner decisions 2026-08-22: the full conversation goes to Codex (not a summary), with the approved brief on top as the decider; struck lines are marked, never deleted; a trial run shows the real message on screen and never delivers it unless he taps send. Strictly in order \u2014 1405 (model+interview) then 1406 (screen), 1407 (Codex) then 1408 (trial gate), 1409 (self-learning), and 1410 is the proof on his real email agent. The nine existing agents are untouched and keep running the old road.",
+  "status": "complete",
+  "note": "Brief First \u2014 BUILT, PROVED ON HIS REAL INBOX, LIVE. Six pieces (BEA-1405 to 1410) plus BEA-1414 filed for a flaky test. The 8-box form is no longer what an agent is made from: a brief in his own words, every line tagged your-words/looked/my-guess, four rules enforced in CODE (look before you plan, write the message down, say what \"it worked\" means, his words must be in it), Codex building from the brief plus the WHOLE conversation with killed ideas marked, and a TRIAL RUN that writes nothing and sends nothing standing between the brief and Create. Plus: the app now learns each tool by trying it (ToolLesson), so the Gmail-style trap is found by the machine instead of by a human after a disaster. PROVED: 15 real emails read (the old agent read 1), a real grouped WhatsApp summary instead of \"finished \u00b7 5 rows\", 0 documents written, 0 messages sent, 0 credits. The gate caught FOUR defects across four runs, two of them bugs in code written the same day. NOT DONE: he has not tapped Create \u2014 canCreate is true and the decision is his; \"send it to my phone\" is not wired; his old agent is untouched and still runs the old way.",
   "issues": [
     {
       "id": "BEA-1405",
@@ -32,12 +32,17 @@
     {
       "id": "BEA-1409",
       "title": "5/6 the app learns each tool by trying it",
-      "status": "pending"
+      "status": "done",
+      "sha": "fd1b495",
+      "note": "learned its first real fact live: Instagram paging, from one call, with nobody typing"
     },
     {
       "id": "BEA-1410",
       "title": "6/6 rebuild the nightly email agent the new way (the proof)",
-      "status": "pending"
+      "status": "done",
+      "sha": "0b9a6c3",
+      "note": "4 real Codex builds + 4 real runs on his inbox; caught 4 defects (2 of them mine, in code written today); nothing written, nothing sent, 0 credits; the final Create tap is HIS"
     }
-  ]
+  ],
+  "completedAt": "2026-08-22T20:20:00Z"
 }
