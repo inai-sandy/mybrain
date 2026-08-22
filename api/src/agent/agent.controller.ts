@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException, NotFoundException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
 import { AgentsImportService } from './agents-import.service';
 import { AgentAreasService, AreaTool } from './agent-areas.service';
@@ -141,62 +141,71 @@ export class AgentController {
   // The screen that draws these is BEA-1406. Every route answers the whole brief, so the screen
   // never has to stitch two answers together and can never show a half-updated page.
 
+  /**
+   * The brief this agent is working on — the newest version, or a fresh draft. A deleted agent gets
+   * a plain "not found" rather than a new brief nobody can ever reach.
+   */
+  private async currentBrief(id: string) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const latest = await this.briefs.latest(id);
+    if (latest) return latest;
+    try {
+      return await this.briefs.draft(id);
+    } catch (e: any) {
+      throw new NotFoundException(String(e?.message || 'That agent is gone.'));
+    }
+  }
+
   @Get('areas/:id/brief')
   async brief(@Param('id') id: string) {
-    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
-    const brief = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
-    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+    const brief = await this.currentBrief(id);
+    return { brief, refusals: await this.briefs!.whyNot(brief.id) };
   }
 
   @Post('areas/:id/brief')
   async briefUpdate(@Param('id') id: string, @Body() body: { name?: string; sections?: any; sources?: any; delivery?: any; transcript?: any }) {
-    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
-    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
-    const brief = await this.briefs.update(current.id, body || {});
-    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+    const current = await this.currentBrief(id);
+    const brief = await this.briefs!.update(current.id, body || {});
+    return { brief, refusals: await this.briefs!.whyNot(brief.id) };
   }
 
   @Post('areas/:id/brief/line')
   async briefAddLine(@Param('id') id: string, @Body() body: { section?: string; text?: string; origin?: string }) {
-    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
-    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const current = await this.currentBrief(id);
     const section = String(body?.section || '') as any;
     // A line added by hand is HIS unless the caller says otherwise — the safe default for a screen.
     const origin = body?.origin === 'ai' || body?.origin === 'tool' ? (body.origin as any) : 'owner';
-    const brief = await this.briefs.addLine(current.id, section, String(body?.text || ''), origin);
-    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+    const brief = await this.briefs!.addLine(current.id, section, String(body?.text || ''), origin);
+    return { brief, refusals: await this.briefs!.whyNot(brief.id) };
   }
 
   @Patch('areas/:id/brief/line/:lineId')
   async briefEditLine(@Param('id') id: string, @Param('lineId') lineId: string, @Body() body: { text?: string }) {
-    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
-    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
-    const brief = await this.briefs.editLine(current.id, lineId, String(body?.text || ''));
-    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+    const current = await this.currentBrief(id);
+    const brief = await this.briefs!.editLine(current.id, lineId, String(body?.text || ''));
+    return { brief, refusals: await this.briefs!.whyNot(brief.id) };
   }
 
   /** Kill a line, or bring it back. It is marked, never deleted. */
   @Post('areas/:id/brief/line/:lineId/strike')
   async briefStrike(@Param('id') id: string, @Param('lineId') lineId: string, @Body() body: { struck?: boolean }) {
-    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
-    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
-    const brief = await this.briefs.strike(current.id, lineId, body?.struck !== false);
-    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+    const current = await this.currentBrief(id);
+    const brief = await this.briefs!.strike(current.id, lineId, body?.struck !== false);
+    return { brief, refusals: await this.briefs!.whyNot(brief.id) };
   }
 
   /** Look at a source for real, and write down what it actually showed. Rule one. */
   @Post('areas/:id/brief/look')
   async briefLook(@Param('id') id: string, @Body() body: { actionId?: string; args?: Record<string, any>; sourceId?: string }) {
-    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
-    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const current = await this.currentBrief(id);
     const actionId = String(body?.actionId || '');
     const args = body?.args || {};
-    const { view, saw, evidence } = await this.briefs.look(id, actionId, args);
+    const { view, saw, evidence } = await this.briefs!.look(id, actionId, args);
     // A refused or failed look records nothing: an unproved source must stay unproved.
     const brief = evidence
-      ? await this.briefs.noteSource(current.id, { id: String(body?.sourceId || actionId), actionId, args, evidence, saw })
+      ? await this.briefs!.noteSource(current.id, { id: String(body?.sourceId || actionId), actionId, args, evidence, saw })
       : current;
-    return { brief, view, refusals: await this.briefs.whyNot(brief.id) };
+    return { brief, view, refusals: await this.briefs!.whyNot(brief.id) };
   }
 
   /** The call a "looked" line leans on — one tap turns a claim into something he can check. */
@@ -210,9 +219,8 @@ export class AgentController {
 
   @Post('areas/:id/brief/approve')
   async briefApprove(@Param('id') id: string) {
-    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
-    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
-    const out = await this.briefs.approve(current.id);
+    const current = await this.currentBrief(id);
+    const out = await this.briefs!.approve(current.id);
     return { ok: out.ok, brief: out.brief || current, refusals: out.refusals || [] };
   }
 

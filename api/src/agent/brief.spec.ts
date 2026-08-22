@@ -36,6 +36,10 @@ function store() {
           return found.sort((a, b) => b.version - a.version)[0] || null;
         },
       },
+      agentArea: {
+        // Every area in these tests exists; the "gone" case has its own test below.
+        findUnique: async ({ where }: any) => (where.id === 'gone' ? null : { id: where.id }),
+      },
       toolCall: {
         findMany: async ({ where }: any) => calls.filter((c) => where.id.in.includes(c.id)).map((c) => ({ id: c.id })),
       },
@@ -278,6 +282,12 @@ describe('the brief', () => {
     expect((await svc.get(id))!.sections.filter.length).toBe(0);
     // And the new version starts from the old one — he edits, he does not retype.
     expect(latest!.sections.want[0].text).toBe(OWNER_WANT);
+  });
+
+  it('an agent that is gone gets no new brief', async () => {
+    // Found while proving the delete sweep: asking for the brief of a deleted agent used to make one.
+    await expect(svc.draft('gone')).rejects.toThrow(/gone/i);
+    expect(s.rows.length).toBe(0);
   });
 
   it('one draft per agent — a reload cannot fork the brief in two', async () => {

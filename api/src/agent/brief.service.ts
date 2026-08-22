@@ -108,6 +108,11 @@ export class BriefService {
    * a reloaded page or a second turn of the conversation cannot fork the brief in two.
    */
   async draft(areaId: string, name = ''): Promise<Brief> {
+    // An agent that is gone gets no new brief. Without this, asking for the brief of a deleted agent
+    // quietly makes one — found while proving the delete sweep works, which is exactly the kind of
+    // orphan that sweep exists to prevent.
+    const area = await this.prisma?.agentArea?.findUnique?.({ where: { id: String(areaId) }, select: { id: true } });
+    if (area === null) throw new Error('That agent is gone.');
     const open = await this.prisma?.agentBrief?.findFirst?.({ where: { areaId: String(areaId), status: 'draft' }, orderBy: [{ version: 'desc' }, { createdAt: 'desc' }] });
     if (open) return this.shape(open);
     const last = await this.latest(areaId);
