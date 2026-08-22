@@ -123,9 +123,16 @@ function Line({ line, onEdit, onStrike, onProof, busy }: {
 
   return (
     <li className="group flex items-start gap-2 rounded-lg px-1 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800/40" data-testid="brief-line">
-      <OriginTag origin={line.origin} />
       <div className="min-w-0 flex-1">
-        <p className={`whitespace-pre-wrap break-words text-sm leading-snug ${line.struck ? 'text-zinc-400 line-through dark:text-zinc-500' : 'text-zinc-800 dark:text-zinc-100'}`}>{line.text}</p>
+        {/*
+          The tag runs INLINE with the first line of text rather than in a column beside it. On a
+          phone a column of its own left the sentence about 160px wide — seven lines of text with
+          half the screen empty. Inline, the text uses the whole width and the tag still reads first.
+        */}
+        <p className="text-sm leading-snug">
+          <OriginTag origin={line.origin} />{' '}
+          <span className={`whitespace-pre-wrap break-words align-middle ${line.struck ? 'text-zinc-400 line-through dark:text-zinc-500' : 'text-zinc-800 dark:text-zinc-100'}`}>{line.text}</span>
+        </p>
         {line.evidence?.callId && onProof && (
           <button
             data-testid="line-proof"
@@ -320,7 +327,8 @@ export function BriefView({ brief, refusals, busy, approving, onEdit, onStrike, 
         </section>
       )}
 
-      <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+      {/* `pr-16` on a phone keeps the button clear of the floating chat bubble, which sits bottom-right. */}
+      <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 py-3 pl-4 pr-16 backdrop-blur sm:pr-4 dark:border-zinc-800 dark:bg-zinc-900/95">
         {approved ? (
           <p data-testid="brief-approved" className="flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-300">
             <Check className="h-4 w-4" />You approved this. Next it gets built, and you see it run once before anything is saved.
