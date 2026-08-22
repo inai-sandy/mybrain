@@ -1,7 +1,25 @@
 # Agent workers — Codex builds a small program per agent, and repairs it when it breaks
 
-**Status: SPEC for the owner's approval — nothing built.** Written 2026-08-22.
+**Status: approved and being built.** Written 2026-08-22.
 Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-44a051754e16>
+
+**Built so far**
+- **1/10 — §A `ToolSample`** (BEA-1386): whole vendor answers kept, masked and gzipped.
+- **2/10 — §B kit v1, §C the callback API, §H the journal** (BEA-1387): the fetch extracted into
+  `SourceFetchService` and `runPlan()` switched onto it; `/api/worker/*` behind `WorkerTokenGuard`
+  with per-spawn tokens; `RunJournal` with stable step keys; `AgentRun.runKind` and a `resumeTick()`
+  that skips non-engine runs; frozen `Date.now`/`Math.random`/`crypto.randomUUID`; automatic
+  checkpoints inside the fetch loops; the parity suite and the replay tests.
+  Three deliberate differences from the sketch below, each for a stated reason:
+  - **there is no `kit.creatorsFirst(find, then)`** — a creators block is fetched by its **source
+    id**, like any other source. The plan already holds the block, and a worker has no database to
+    describe one from;
+  - **`kit.merge` has its own route** (`POST /api/worker/merge`, pure and not journalled), because
+    `mergeTables()` may not be re-implemented inside a worker;
+  - **`kit.expect` and `kit.watchDiff` are not built yet** — contracts are piece 6, and nothing
+    dispatches a Watch on the worker road until a build turn can write one.
+  The worker's clock is the moment the RUN started (journalled at `seq -1`), not the moment of the
+  spawn: a question that waits two days must not move "the last 30 days" under the worker.
 
 ## The owner's words
 

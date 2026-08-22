@@ -255,7 +255,7 @@ export class ToolSampleService implements OnModuleInit {
         if (!agents.has(key)) agents.set(key, []);
         agents.get(key).push(r);
       } else {
-        const key = `${r.actionId} ${r.argsHash}`;
+        const key = `${r.actionId}|${r.argsHash}`;
         if (!shapes.has(key)) shapes.set(key, []);
         shapes.get(key).push(r);
       }

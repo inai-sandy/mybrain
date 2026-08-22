@@ -617,6 +617,47 @@ provider to reach** — a repair loop costs nothing. `setPinned()` is the hook f
 `samples/index.json` (nothing registers one until the workers land; a hook that throws makes the sweep
 delete nothing that pass).
 
+**A worker calls back in, and every call it makes is journalled (BEA-1387, agent workers 2/10 —
+`specs/AGENT-WORKERS.md` §B, §C, §H).** The fetch now lives in ONE place: `SourceFetchService`
+(`api/src/social/source-fetch.service.ts`) holds `fetchSource`/`fetchCreators` exactly as they were,
+and `runPlan()` was switched onto it in the same issue — two copies of paging is the failure this
+whole design exists to prevent. `SocialAgentRunService` builds one for itself when a harness leaves
+it out (the `ServiceActionsService.gates` pattern), so every positional spec still works; the pure
+helpers (`itemsOf`, `unrecognisedAnswer`, `isEmptySearch`, `nounOf`) moved to `social/source-fetch.ts`
+and are re-exported from the runner. **The callback API** is `api/src/worker/` — `POST /api/worker/
+{tool,merge,ai,step,output,notify,ask,finish}`, `@Public()` so the global `AuthGuard` steps aside,
+behind `WorkerTokenGuard`, which accepts ONLY a run-scoped token: an owner's browser session (cookie
+or EMO device token) reaches nothing, and `runId`/`agentId` come off the token, never the body.
+Tokens are minted per **spawn** (`WorkerTokenService`, in memory, 20 min, revoked at finish AND at a
+pause — a token's life is minutes, never the days a question waits) and minting sets
+`AgentRun.runKind='worker'`. `POST /tool {sourceId}` does the **whole paged, de-duped fetch
+server-side** (a worker has no database, so it can never decide paging that depends on know-how
+cards); `POST /ai` runs the app's own `shape()` when it is given rows, and otherwise only the
+allow-listed helpers (`social-shape`, `social-alert`); `POST /output` goes through the new shared
+`writeRowsToSheet()`/`writeDocument()` that `runPlan()` now uses too. **The journal** (`RunJournal`,
+migration `20260822120000_run_journal`) is what makes waiting free: every effectful call is
+`once(runId, seq, fn, args)` keyed by `stepKey = sha256(seq + fn + argsHash)`, so a resumed worker
+re-runs from the top and its earlier calls return recorded values — zero repeat fetches, zero repeat
+sheet writes, zero repeat messages — and a call order that CHANGED between replays throws
+`NOT_REPEATABLE` instead of doing a step twice. `seq -1` holds the run's seed (frozen `now` +
+random), so `installDeterminism()` can point the worker's `Date.now`, `new Date()`, `Math.random`
+and `crypto.randomUUID` at it and two spawns take the same road. **`AgentRun.runKind`**
+(`engine|worker|plan`, default `engine`) and `HermesBridgeService.resumeTick()` now skips anything
+that is not `engine` — without it a parked worker either strands for ever (`sessionId` null) or
+wakes as a live Codex turn (`sessionId` `''`). **The kit** is `api/src/worker/kit/kit.js` — plain
+CommonJS with named exports so a generated ESM `worker.mjs` can `import { makeKit }` from it (proved
+by a test that really loads it in Node); every function is a thin call back in, so parity is by
+construction and the **parity suite** (`kit-parity.spec.ts`) proves it: the same saved `ToolSample`s
+→ the same rows out of the worker and out of `runPlan()`. Deliberate differences from the §B sketch:
+there is no `kit.creatorsFirst(find, then)` — a creators block is fetched by its **source id** like
+any other source, because the plan already holds it; `kit.merge` has its own tiny route because
+`mergeTables()` may not be re-implemented in a worker; `kit.watchDiff`/`kit.expect` are NOT here
+(contracts are piece 6). Automatic checkpoints are `AgentService.stampProgress()` — ONE live line
+that updates itself (never fifty), stamped every page and every creator by the fetcher itself, which
+is what the piece-7 stall watchdog will read. Traps: `SocialAgentRunService`'s constructor gained
+`sources?` LAST; the worker routes are exercised in-process (`worker-harness.testing.ts`) because
+the worker runner is piece 4 — nothing spawns a process yet.
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

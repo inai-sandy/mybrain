@@ -191,6 +191,10 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     const runs = await this.agent.listResumable().catch(() => [] as any[]);
     for (const run of runs) {
       if (this.resuming.has(run.id)) continue;
+      // Engine runs only (BEA-1387). A worker or a plan run parks and resumes on its own road; if
+      // this swept one it would build a Codex "continue the task…" prompt and start a LIVE engine
+      // turn in place of the worker — the run would look answered and do something else entirely.
+      if ((run.runKind || 'engine') !== 'engine') continue;
       const sessionId = run.sessionId || undefined; // read before the claim clears the marker
       if (!(await this.agent.claimResume(run.id).catch(() => false))) continue;
       this.resuming.add(run.id);

@@ -9,6 +9,7 @@ import { SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
 import { SocialController } from './social.controller';
 import { SocialService } from './social.service';
+import { SourceFetchService } from './source-fetch.service';
 
 /**
  * Social (BEA-1356) — the section where social data gets USED. It sits above the tool catalog
@@ -23,7 +24,7 @@ import { SocialService } from './social.service';
 @Module({
   imports: [ToolCatalogModule, AgentModule, DocumentsModule, PushModule, TelegramModule], // PrismaModule + LlmModule are @Global
   controllers: [SocialController],
-  providers: [SocialService, SocialAgentRunService, SocialBudgetService, SocialWatchStore],
-  exports: [SocialService, SocialAgentRunService, SocialBudgetService, SocialWatchStore],
+  providers: [SocialService, SocialAgentRunService, SocialBudgetService, SocialWatchStore, SourceFetchService],
+  exports: [SocialService, SocialAgentRunService, SocialBudgetService, SocialWatchStore, SourceFetchService],
 })
 export class SocialModule {}

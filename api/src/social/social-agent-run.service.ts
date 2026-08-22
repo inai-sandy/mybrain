@@ -8,10 +8,12 @@ import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
 import { Diff, KEY_FIELDS, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
-import { ENVELOPE, LIST_KEYS, findList, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, unwrap, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
-import { AgentPlan, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pagingOf, planFromAgent, sourceActionId, sourceHint, sourceLabel, thresholdOf } from './plan';
+import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
+import { AgentPlan, planFromAgent, sourceActionId, sourceHint, sourceLabel, thresholdOf } from './plan';
 import { BudgetCheck, SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
+import { SourceFetchService } from './source-fetch.service';
+import { nounOf } from './source-fetch';
 import { KEEP_AS_FETCHED, isDirectFetchAgent, wantsShaping } from './social-flow';
 
 /**
@@ -48,6 +50,8 @@ import { KEEP_AS_FETCHED, isDirectFetchAgent, wantsShaping } from './social-flow
 export { KEEP_AS_FETCHED };
 /** `Agent.threshold` → a Threshold — lives in `plan.ts` since BEA-1369; re-exported so imports keep working. */
 export { thresholdOf };
+/** The pure part of a fetch — moved to `source-fetch.ts` with the fetcher (BEA-1387); re-exported so imports keep working. */
+export { isEmptySearch, itemsOf, nounOf, unrecognisedAnswer } from './source-fetch';
 
 /**
  * How many items one shaping call is shown, and how many calls a run may make. 30 a batch: the
@@ -75,6 +79,13 @@ const SHEET_TAB = 'Sheet1';
 export class SocialAgentRunService {
   private readonly log = new Logger('SocialAgentRun');
 
+  /**
+   * The ONE fetcher, shared with the worker road (BEA-1387). Never optional in effect: a harness
+   * that builds this service positionally without it gets one built here over the same actions and
+   * cards, so the fetch behaves identically either way — the `ServiceActionsService.gates` pattern.
+   */
+  private readonly sources: SourceFetchService;
+
   constructor(
     private readonly agent: AgentService,
     private readonly actions: ServiceActionsService,
@@ -86,7 +97,10 @@ export class SocialAgentRunService {
     private readonly budget?: SocialBudgetService, // the daily credit ceiling (BEA-1358)
     private readonly watches?: SocialWatchStore, // what a Watch/Alert saw last time (BEA-1358)
     private readonly knowledge?: ToolKnowledgeService, // the know-how cards: how an action pages, which field is the date (BEA-1369)
-  ) {}
+    sources?: SourceFetchService, // the shared fetcher (BEA-1387)
+  ) {
+    this.sources = sources || new SourceFetchService(actions, knowledge);
+  }
 
   /**
    * Is this job a direct fetch? Every tool is a `svc:` id AND each has pinned arguments. A job with
@@ -118,6 +132,11 @@ export class SocialAgentRunService {
     // `nodeId` names the step's node on the job's drawn flow (BEA-1366: `social-flow.ts` ids —
     // `src:<svc id>`, `merge`, `shape`, `watch`, `write`, `notify`) so the picture can badge what happened.
     const step = (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => this.agent.appendStep(runId, s).catch(() => undefined);
+    // Still moving — one line that updates itself, so a long fetch is never mistaken for a hang
+    // (BEA-1387 §H). Written by the fetcher, not by the caller's memory.
+    const progress = (label: string) => this.agent.stampProgress?.(runId, label)?.catch(() => undefined);
+    // This run is on the plan road, so the Codex resume sweeper leaves it alone (BEA-1387).
+    await this.agent.setRunKind?.(runId, 'plan')?.catch(() => undefined);
     const fail = async (error: string) => {
       await step({ label: error, status: 'failed' });
       await this.agent.finishRun(runId, { status: 'failed', error }).catch(() => undefined);
@@ -164,7 +183,7 @@ export class SocialAgentRunService {
       const ctx = (id: string, a: Record<string, any>) => ({ runId, runKind: 'agent', agentId: agent.id, args: a, argsPinned: true, label: id });
 
       for (const src of plan.sources) {
-        const out = src.kind === 'creators' ? await this.fetchCreators(src, guard, ctx, step) : await this.fetchSource(src, guard, ctx, step, sourceHint(src, plan.sources));
+        const out = await this.sources.fetchBlock(src, guard, ctx, step, { hint: sourceHint(src, plan.sources), progress });
         if (out.stop) return fail(out.stop);
         credits += out.credits;
         // Fetched fine but nothing kept (a creators block whose posts were all older than the window) is an
@@ -234,54 +253,21 @@ export class SocialAgentRunService {
       let outputDocId: string | undefined;
       let headline: string;
       if (dest === 'sheet') {
-        // "Keep adding" (BEA-1374): rows already in the sheet — same value in its key column (id,
-        // shortcode, url…) — are not appended again. The sheet's own column decides, not a model.
-        let skipped = 0;
-        if (existing?.keyed) {
-          const d = dropSeenRows(table, existing.keyed);
-          skipped = d.skipped;
-          table = d.table;
-        }
-        if (skipped && !table.rows.length) {
-          const url = sheetUrl(plan.output.sheetId!);
-          const label = `Nothing new — all ${skipped} row${skipped === 1 ? ' is' : 's are'} already in the sheet (matched on "${existing!.keyed!.column}")`;
-          await step({ label, status: 'done', detail: url, nodeId: 'write' });
-          await this.agent.finishRun(runId, { status: 'done', resultText: `**${label}.** · ${credits} credit${credits === 1 ? '' : 's'} · [Open the Google Sheet](${url})${plan.notify.whatsapp ? '\n\nWhatsApp skipped — nothing new to send.' : ''}`, outputUrl: url });
+        const w = await this.writeRowsToSheet(runId, agent, title, table, { existing, append: plan.output.append, step });
+        if (w.nothingNew) {
+          await this.agent.finishRun(runId, { status: 'done', resultText: `**${w.label}.** · ${credits} credit${credits === 1 ? '' : 's'} · [Open the Google Sheet](${w.url})${plan.notify.whatsapp ? '\n\nWhatsApp skipped — nothing new to send.' : ''}`, outputUrl: w.url });
           return;
         }
-        const w = await this.writeSheet(runId, agent, title, table, existing, { oneSheet: plan.output.append });
-        if (!w.ok) { await step({ label: w.error!, status: 'failed', nodeId: 'write' }); return fail(w.error!); }
+        if (!w.ok) return fail(w.error!);
+        table = w.table!;
         outputUrl = w.url;
         headline = `${table.rows.length} row${table.rows.length === 1 ? '' : 's'} → ${w.url}`;
-        const dedupe = skipped ? ` (${skipped} already in the sheet — skipped, matched on "${existing!.keyed!.column}")` : '';
-        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}${dedupe}`, status: 'done', detail: w.url, nodeId: 'write' });
-        // "Keep adding" and this was the first run: remember the sheet ON THE JOB, so every later run
-        // appends to this one. Not remembered = the next run would make another sheet, which is not
-        // what the owner asked — so a failure here fails the run, plainly.
-        if (w.created && plan.output.append && w.id) {
-          try {
-            await this.agent.updateAgent(agent.id, { sheetId: w.id } as any);
-            await step({ label: 'Remembered this sheet on the job — the next runs add to it', status: 'done', kind: 'log', nodeId: 'write' });
-          } catch (e: any) {
-            return fail(`The rows were written to ${w.url}, but the sheet could not be remembered on the job (${String(e?.message || e).slice(0, 160)}) — paste its link into "Append to one sheet" in the job's Settings, or the next run makes another sheet.`);
-          }
-        }
       } else {
         // document (the default) — the same place every other run's result lands.
-        if (!this.documents) return fail('The documents library is not available on this server.');
-        const doc: any = await this.documents.create({
-          title,
-          contentText: `# ${title}\n\n${table.rows.length} rows · ${credits} credit${credits === 1 ? '' : 's'}\n\n${markdownTable(table.columns, table.rows, MAX_ROWS)}`,
-          kind: 'md',
-          tags: ['agent', 'social'],
-          noIndex: true, // outputs stay out of the brain until "Add to my Brain" (BEA-1101)
-        } as any);
-        outputDocId = doc?.id;
+        const d = await this.writeDocument(runId, title, `# ${title}\n\n${table.rows.length} rows · ${credits} credit${credits === 1 ? '' : 's'}\n\n${markdownTable(table.columns, table.rows, MAX_ROWS)}`, { step, detail: title });
+        if (!d.ok) return fail(d.error!);
+        outputDocId = d.docId;
         headline = `${table.rows.length} row${table.rows.length === 1 ? '' : 's'} saved to Documents`;
-        if (outputDocId) {
-          await this.agent.attachOutput(runId, outputDocId).catch(() => undefined);
-          await step({ label: 'Saved to Documents', status: 'done', detail: title, nodeId: 'write' });
-        }
       }
 
       const resultText =
@@ -299,244 +285,6 @@ export class SocialAgentRunService {
       this.log.error(`social run ${runId} crashed: ${e?.message || e}`);
       await fail(String(e?.message || e || 'the run hit a problem'));
     }
-  }
-
-  // ---- the source blocks (BEA-1369) ----------------------------------------------------------
-
-  /**
-   * One source, up to `pages` pages (BEA-1369): page 1 exactly as before; then the vendor's cursor
-   * (or the next page number) with the same arguments, one `ToolCall` per page with its credits,
-   * items de-duped on the stable id (`itemKey`), and an early stop when a page is empty, repeats,
-   * or the vendor says there is no more. The credit ceiling is checked before EVERY page. A page-1
-   * failure is what it always was (empty search → empty source; anything else → the run fails); a
-   * later page that fails also fails the run — a run may never say done past a failed step.
-   */
-  private async fetchSource(
-    src: PlanSource,
-    guard: (actionId: string) => Promise<string | null>,
-    ctx: (id: string, args: Record<string, any>) => any,
-    step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
-    /** " (smarthomeindia)" when several sources share this action (BEA-1374) — so five hashtag steps read as five. */
-    hint = '',
-  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; why?: string; stop?: string }> {
-    const id = src.actionId;
-    const nodeId = `src:${src.id}`;
-    const card = src.pages > 1 ? await this.knowledge?.card?.(id).catch(() => null) : null;
-    const seen = new Set<string>();
-    const items: any[] = [];
-    let listKey = '';
-    let credits = 0;
-    let first: ServiceRunResult | null = null;
-    let pagesFetched = 0;
-    let stopNote = '';
-    let paging: { param: string; how: 'cursor' | 'page' } | null = null;
-    let cursor: any = null;
-    for (let p = 1; p <= src.pages; p++) {
-      const stop = await guard(id);
-      if (stop) return { credits, stop };
-      const a = p === 1 ? src.args : { ...src.args, [paging!.param]: cursor };
-      const r = await this.actions.runDetailed(id, '', ctx(id, a));
-      if (!r.ok && p === 1) {
-        if (isEmptySearch(id, r)) {
-          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id}${hint} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
-          return { credits, empty: true, why: `no ${nounOf(id)} found (vendor answered not_found)` };
-        }
-        const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
-        await step({ label: `Could not fetch ${r.serviceName || id}: ${why}`, status: 'failed', nodeId });
-        return { credits, stop: `Could not fetch ${r.serviceName || id}: ${why}` };
-      }
-      if (!r.ok) {
-        // A later page the vendor answers not_found for is the end of the list, not a failure —
-        // on ANY paged endpoint (page 1 already proved the thing exists), not only a search.
-        if (r.notFound) { stopNote = `page ${p} was empty`; break; }
-        const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
-        await step({ label: `Could not fetch page ${p} of ${r.serviceName || id}: ${why}`, status: 'failed', nodeId });
-        return { credits, stop: `Could not fetch page ${p} of ${r.serviceName || id}: ${why} (${items.length} item${items.length === 1 ? '' : 's'} from ${p - 1} page${p - 1 === 1 ? '' : 's'} were not written — nothing is written on a failed run)` };
-      }
-      credits += Number(r.credits) || 0;
-      pagesFetched = p;
-      if (p === 1) first = r;
-      const list = findList(r.data);
-      if (!list) {
-        // Not a list (a profile, a transcript): there is nothing to page. Page 1 is the answer.
-        if (p > 1) stopNote = `page ${p} had no list`;
-        break;
-      }
-      if (p === 1) listKey = list.key.split('.').pop() || 'items';
-      let fresh = 0;
-      for (const it of list.rows) { const k = dedupeKey(it); if (seen.has(k)) continue; seen.add(k); items.push(it); fresh++; }
-      if (p > 1 && fresh === 0) { stopNote = `page ${p} repeated what page ${p - 1} had`; break; }
-      if (p === src.pages) break;
-      if (p === 1) {
-        paging = pagingOf(card?.paging, src.args, r.data);
-        if (!paging) { stopNote = 'this endpoint does not page'; break; }
-      }
-      if (paging.how === 'cursor') {
-        const next = nextCursorOf(r.data);
-        if (!next) { stopNote = `that was everything after ${p} page${p === 1 ? '' : 's'}`; break; }
-        cursor = next.value;
-      } else {
-        cursor = (Number(a[paging.param]) || 1) + 1;
-      }
-    }
-    const single = pagesFetched <= 1;
-    const count = single ? tableOf(first!.data).itemCount : items.length;
-    const over = single ? '' : ` over ${pagesFetched} page${pagesFetched === 1 ? '' : 's'}`;
-    // Why fewer pages than asked, in plain words: the vendor does not page this one · that was
-    // everything · an empty / repeated page. Nothing when every page asked for was fetched.
-    const note = !stopNote || pagesFetched >= src.pages ? '' : /does not page/.test(stopNote) ? ` · ${stopNote} (${src.pages} pages asked)` : /everything/.test(stopNote) ? ` · ${stopNote}` : ` · stopped early: ${stopNote}`;
-    await step({ label: `Fetched ${first!.serviceName || ''}${first!.actionName ? ` · ${first!.actionName}` : ''}${hint} — ${count} item${count === 1 ? '' : 's'}${over} · ${credits} credit${credits === 1 ? '' : 's'}${note}`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
-    // One page: the vendor's whole answer, as always (a profile stays a profile). Several: the
-    // de-duped items under the list's own key — the same shape the rows, watch and shaping read.
-    const r: ServiceRunResult = single ? first! : { ...first!, data: { [listKey || 'items']: items }, credits };
-    return { r, credits };
-  }
-
-  /**
-   * Find creators, then their posts (BEA-1369): the finder once, the first N creators, then the
-   * per-creator action once per creator (`argsFrom` maps a creator field into the argument), items
-   * newer than `keepDays` kept when the items carry a date (the know-how card says which field; else
-   * the usual names; else everything is kept AND the step says so), merged under a `creator` column,
-   * de-duped by id. The ceiling is checked before every call. A creator that fails is said and
-   * skipped — one bad handle must not fail 40 good ones; no creator succeeded → the source is empty,
-   * with the reasons.
-   */
-  private async fetchCreators(
-    src: PlanCreators,
-    guard: (actionId: string) => Promise<string | null>,
-    ctx: (id: string, args: Record<string, any>) => any,
-    step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
-  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; why?: string; stop?: string }> {
-    const nodeId = `src:${src.id}`;
-    const findId = src.find.actionId;
-    const thenId = src.then.actionId;
-    let credits = 0;
-    if (!thenId) return { credits, stop: 'This creators-first source has no per-creator action — pick one in the job\'s Settings ("then, for each creator").' };
-    const mapping = Object.entries(src.then.argsFrom);
-    if (!mapping.length) return { credits, stop: 'This creators-first source does not say which creator field fills the per-creator call (for example handle ← username) — set it in the job\'s Settings.' };
-
-    // ---- 1. the finder, once
-    const stop = await guard(findId);
-    if (stop) return { credits, stop };
-    const f = await this.actions.runDetailed(findId, '', ctx(findId, src.find.args));
-    if (!f.ok) {
-      if (isEmptySearch(findId, f)) {
-        await step({ label: `${f.serviceName || 'Search'} · ${f.actionName || findId} — no creators found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
-        return { credits, empty: true, why: 'no creators found (vendor answered not_found)' };
-      }
-      const why = f.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : f.error || 'the fetch failed';
-      await step({ label: `Could not find creators (${f.serviceName || findId}): ${why}`, status: 'failed', nodeId });
-      return { credits, stop: `Could not find creators (${f.serviceName || findId}): ${why}` };
-    }
-    credits += Number(f.credits) || 0;
-    const found = findList(f.data)?.rows || [];
-    if (!found.length) {
-      await step({ label: `${f.serviceName || ''}${f.actionName ? ` · ${f.actionName}` : ''} — 0 creators found · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
-      return { credits, empty: true, why: '0 creators found' };
-    }
-    // The first N distinct creators (by the field the per-creator call needs).
-    const creators: { c: any; args: Record<string, any>; who: string }[] = [];
-    const seenWho = new Set<string>();
-    const skippedNoField: string[] = [];
-    for (const c of found) {
-      if (creators.length >= src.find.take) break;
-      const a: Record<string, any> = { ...(src.then.args || {}) };
-      let who = '';
-      let missing = '';
-      for (const [param, field] of mapping) {
-        const v = creatorField(c, field);
-        if (v === undefined || v === null || v === '') { missing = field; break; }
-        a[param] = v;
-        if (!who) who = String(v);
-      }
-      if (missing) { skippedNoField.push(missing); continue; }
-      if (seenWho.has(who)) continue;
-      seenWho.add(who);
-      creators.push({ c, args: a, who });
-    }
-    await step({ label: `${found.length} creator${found.length === 1 ? '' : 's'} found${creators.length < found.length ? ` · taking the first ${creators.length}` : ''}${skippedNoField.length ? ` (${skippedNoField.length} had no ${skippedNoField[0]})` : ''} · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', kind: 'log', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
-    if (!creators.length) {
-      await step({ label: `No creator carried the field the per-creator call needs (${mapping.map(([, fld]) => fld).join(', ')}) — nothing to fetch`, status: 'done', nodeId });
-      return { credits, empty: true, why: `no creator carried the field the per-creator call needs (${mapping.map(([, fld]) => fld).join(', ')})` };
-    }
-
-    // ---- 2. per creator — fetch them all first, then decide the date field over EVERY item
-    const card = await this.knowledge?.card?.(thenId).catch(() => null);
-    const failures: string[] = [];
-    const answers: { who: string; rows: any[] }[] = [];
-    let thenName = '';
-    let serviceName = f.serviceName || '';
-    let singles = 0; // answers that were ONE object (a profile lookup) — one row each (BEA-1377)
-    let unrecognised = 0; // succeeded WITH data, but no rows recognised — the tripwire's count
-    for (const cr of creators) {
-      const stop2 = await guard(thenId);
-      if (stop2) return { credits, stop: stop2 };
-      const r = await this.actions.runDetailed(thenId, '', ctx(thenId, cr.args));
-      credits += Number(r.credits) || 0;
-      if (!r.ok) { failures.push(`${cr.who}: ${(r.error || 'the fetch failed').slice(0, 120)}`); continue; }
-      thenName = r.actionName || thenName;
-      serviceName = r.serviceName || serviceName;
-      const rows = itemsOf(r.data);
-      if (rows.length === 1 && !findList(r.data)) singles++;
-      else if (!rows.length && unrecognisedAnswer(r.data)) unrecognised++;
-      answers.push({ who: cr.who, rows });
-    }
-    const okCount = answers.length;
-    const rawCount = answers.reduce((n, a) => n + a.rows.length, 0);
-    const keepDays = src.then.keepDays;
-    const cutoff = keepDays ? Date.now() - keepDays * 24 * 60 * 60 * 1000 : null;
-    // Which field is the date — decided over every creator's items together (the card's date field
-    // inside the list, else the usual names); an early creator with nothing must not decide "no date".
-    const dateField = cutoff !== null ? dateFieldOf(answers.flatMap((a) => a.rows), card?.fields) : null;
-    const items: any[] = [];
-    const seen = new Set<string>();
-    for (const a of answers) {
-      for (const it of a.rows) {
-        if (cutoff !== null && dateField) { const d = itemDate(it, dateField); if (d !== null && d < cutoff) continue; }
-        const k = dedupeKey(it);
-        if (seen.has(k)) continue;
-        seen.add(k);
-        items.push({ creator: a.who, ...it });
-      }
-    }
-    const kept = items.length;
-    // A per-creator action that answers ONE object (a profile lookup) reads as ROWS — "3 profiles
-    // fetched · 3 rows", never "3 creators · 0 items" while every call succeeded (BEA-1377).
-    const enrich = okCount > 0 && singles === okCount;
-    const unit = enrich ? 'row' : 'item';
-    const keepNote = cutoff === null || rawCount === 0
-      ? `${kept} ${unit}${kept === 1 ? '' : 's'}`
-      : dateField
-        ? `${kept} kept from the last ${keepDays} day${keepDays === 1 ? '' : 's'} (of ${rawCount})`
-        : `${kept} ${unit}${kept === 1 ? '' : 's'} — these carry no date, so all were kept (last ${keepDays} days could not be applied)`;
-    const failNote = failures.length ? ` · ${failures.length} failed and ${failures.length === 1 ? 'was' : 'were'} skipped` : '';
-    // Partial loss is never silent (review of BEA-1377): SOME creators' answers were read and
-    // others carried data no shape here recognised — the step says how many were dropped and whose.
-    const bugNote = rawCount && unrecognised ? ` · ${unrecognised} answer${unrecognised === 1 ? '' : 's'} carried data but no rows were recognised — a My Brain bug, not the vendor` : '';
-    const noun = /profile/i.test(`${thenId} ${thenName}`) ? 'profile' : 'answer';
-    const label = enrich
-      ? `${okCount} ${noun}${okCount === 1 ? '' : 's'} fetched${failNote} · ${keepNote} · ${credits} credit${credits === 1 ? '' : 's'}${bugNote}`
-      : `${creators.length} creator${creators.length === 1 ? '' : 's'} · fetched ${thenName ? thenName.toLowerCase() : 'items'} for ${okCount}${failNote} · ${keepNote} · ${credits} credit${credits === 1 ? '' : 's'}${bugNote}`;
-    if (!okCount) {
-      await step({ label: `${label} — no creator's fetch succeeded`, status: 'done', detail: failures.join('\n').slice(0, 1200), nodeId });
-      return { credits, empty: true, why: `${creators.length} creators found but no creator's fetch succeeded` };
-    }
-    // The tripwire (BEA-1377): calls succeeded and carried data, yet no shape here recognised a
-    // single row. That is OUR bug — say so plainly and finish honestly, never "0 items" as if the
-    // vendor had nothing. This line is what would have caught the 101-credit run on day one.
-    if (!rawCount && unrecognised) {
-      const bug = `fetched ${okCount} answer${okCount === 1 ? '' : 's'} but recognised 0 rows — this is a My Brain bug, not the vendor`;
-      await step({ label: `${creators.length} creator${creators.length === 1 ? '' : 's'} · ${bug} · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
-      return { credits, empty: true, why: bug };
-    }
-    await step({ label, status: 'done', detail: failures.length ? failures.join('\n').slice(0, 1200) : JSON.stringify(src.find.args).slice(0, 300), nodeId });
-    // Fetched fine but nothing kept (every post older than the window, or every account empty): an
-    // EMPTY source with that reason — not a not_found, and not a silent 0-row table (BEA-1373).
-    // (`why` beside `r`, not `empty`: a Watch still needs the 0-item table to diff and to refresh its
-    // baseline — the caller decides by mode.)
-    const r: ServiceRunResult = { ok: true, data: { items }, credits, serviceName, actionName: `${f.actionName || 'Find creators'} → ${thenName || 'their posts'}` };
-    if (!kept) return { r, credits, why: `${creators.length} creator${creators.length === 1 ? '' : 's'} · ${keepNote}` };
-    return { r, credits };
   }
 
   /**
@@ -765,11 +513,96 @@ export class SocialAgentRunService {
   // ---- the sheet -----------------------------------------------------------------------------
 
   /**
+   * Rows → the sheet, the whole way: skip what the sheet already has, create or append, remember a
+   * "keep adding" sheet on the job. Both roads call this — `runPlan()` above and a worker through
+   * `POST /api/worker/output` (BEA-1387) — so an appended row is de-duped by the same rule and the
+   * step lines read the same whoever wrote them.
+   *
+   * `existing` is passed in by the plan runner, which already read the sheet before shaping (the
+   * shaping step is told the columns it must fit); left out, this reads it here.
+   */
+  async writeRowsToSheet(
+    runId: string,
+    agent: any,
+    title: string,
+    table: { columns: string[]; rows: any[][]; itemCount?: number },
+    opts: { existing?: SheetState | null; append?: boolean; sheetId?: string | null; step?: (s: any) => Promise<any> } = {},
+  ): Promise<{ ok: boolean; table?: any; url?: string; id?: string; created?: boolean; skipped?: number; nothingNew?: boolean; label?: string; error?: string }> {
+    const step = opts.step || (async () => undefined);
+    const sheetId = opts.sheetId !== undefined ? opts.sheetId : agent?.sheetId || null;
+    let existing = opts.existing ?? null;
+    if (!existing && sheetId) {
+      const read = await this.readSheet(runId, agent, sheetId, { keys: true });
+      if (!read.ok) { await step({ label: read.error!, status: 'failed', nodeId: 'write' }); return { ok: false, error: read.error }; }
+      existing = { count: read.count!, header: read.header!, keyed: read.keyed };
+    }
+    // "Keep adding" (BEA-1374): rows already in the sheet — same value in its key column (id,
+    // shortcode, url…) — are not appended again. The sheet's own column decides, not a model.
+    let out: any = table;
+    let skipped = 0;
+    if (existing?.keyed) {
+      const d = dropSeenRows(out, existing.keyed);
+      skipped = d.skipped;
+      out = d.table;
+    }
+    if (skipped && !out.rows.length) {
+      const url = sheetUrl(sheetId!);
+      const label = `Nothing new — all ${skipped} row${skipped === 1 ? ' is' : 's are'} already in the sheet (matched on "${existing!.keyed!.column}")`;
+      await step({ label, status: 'done', detail: url, nodeId: 'write' });
+      return { ok: true, nothingNew: true, url, label, skipped, table: out };
+    }
+    const w = await this.writeSheet(runId, agent, title, out, existing, { oneSheet: opts.append });
+    if (!w.ok) { await step({ label: w.error!, status: 'failed', nodeId: 'write' }); return { ok: false, error: w.error }; }
+    const dedupe = skipped ? ` (${skipped} already in the sheet — skipped, matched on "${existing!.keyed!.column}")` : '';
+    await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${out.rows.length} row${out.rows.length === 1 ? '' : 's'}${dedupe}`, status: 'done', detail: w.url, nodeId: 'write' });
+    // "Keep adding" and this was the first run: remember the sheet ON THE JOB, so every later run
+    // appends to this one. Not remembered = the next run would make another sheet, which is not
+    // what the owner asked — so a failure here fails the run, plainly.
+    if (w.created && opts.append && w.id) {
+      try {
+        await this.agent.updateAgent(agent.id, { sheetId: w.id } as any);
+        await step({ label: 'Remembered this sheet on the job — the next runs add to it', status: 'done', kind: 'log', nodeId: 'write' });
+      } catch (e: any) {
+        return { ok: false, error: `The rows were written to ${w.url}, but the sheet could not be remembered on the job (${String(e?.message || e).slice(0, 160)}) — paste its link into "Append to one sheet" in the job's Settings, or the next run makes another sheet.` };
+      }
+    }
+    return { ok: true, table: out, url: w.url, id: w.id, created: w.created, skipped };
+  }
+
+  /**
+   * The run's result as a Document — where every other run's output lands. Shared with the worker
+   * road (`POST /api/worker/output {kind:'document'}`), so an output is attached to the run and
+   * kept out of the brain (BEA-1101) whichever road wrote it.
+   */
+  async writeDocument(
+    runId: string,
+    title: string,
+    markdown: string,
+    opts: { tags?: string[]; step?: (s: any) => Promise<any>; detail?: string } = {},
+  ): Promise<{ ok: boolean; docId?: string; error?: string }> {
+    if (!this.documents) return { ok: false, error: 'The documents library is not available on this server.' };
+    const step = opts.step || (async () => undefined);
+    const doc: any = await this.documents.create({
+      title,
+      contentText: markdown,
+      kind: 'md',
+      tags: opts.tags || ['agent', 'social'],
+      noIndex: true, // outputs stay out of the brain until "Add to my Brain" (BEA-1101)
+    } as any);
+    const docId = doc?.id;
+    if (docId) {
+      await this.agent.attachOutput(runId, docId).catch(() => undefined);
+      await step({ label: 'Saved to Documents', status: 'done', detail: opts.detail || title, nodeId: 'write' });
+    }
+    return { ok: true, docId };
+  }
+
+  /**
    * What the sheet holds now: the row count (column A), the header, and — when the header has a key
    * column (`id`, `shortcode`, `url`… — `KEY_FIELDS`) and the sheet has rows — that column's values,
    * so "keep adding" (BEA-1374) can skip rows the sheet already has. One extra read, only then.
    */
-  private async readSheet(runId: string, agent: any, sheetId: string, opts: { keys?: boolean } = {}): Promise<{ ok: boolean; count?: number; header?: string[]; keyed?: SheetKey; error?: string }> {
+  async readSheet(runId: string, agent: any, sheetId: string, opts: { keys?: boolean } = {}): Promise<{ ok: boolean; count?: number; header?: string[]; keyed?: SheetKey; error?: string }> {
     const r = await this.actions.runDetailed(SHEET_READ, '', { runId, runKind: 'agent', agentId: agent.id, argsPinned: true, label: 'Read the sheet', args: { spreadsheet_id: sheetId, ranges: [`${SHEET_TAB}!A:A`, `${SHEET_TAB}!1:1`] } });
     if (!r.ok) return { ok: false, error: this.sheetsError(r) };
     const grids = valuesGrids(r.data);
@@ -825,7 +658,7 @@ export class SocialAgentRunService {
    * is not one 200k-character prompt; the first batch (or the sheet's own header) decides the
    * columns, later batches fill them. Recall over precision: when unsure, keep the item.
    */
-  private async shape(prompt: string, table: { columns: string[]; rows: any[][] }, header: string[] | null): Promise<{ ok: boolean; columns?: string[]; rows?: any[][]; note?: string; error?: string }> {
+  async shape(prompt: string, table: { columns: string[]; rows: any[][] }, header: string[] | null): Promise<{ ok: boolean; columns?: string[]; rows?: any[][]; note?: string; error?: string }> {
     const items = table.rows.map((r) => shapeInput(Object.fromEntries(table.columns.map((c, i) => [c, r[i]]))));
     const batches: any[][] = [];
     for (let i = 0; i < items.length && batches.length < SHAPE_MAX_BATCHES; i += SHAPE_BATCH) batches.push(items.slice(i, i + SHAPE_BATCH));
@@ -924,81 +757,6 @@ export function shapeInput(item: Record<string, any>): Record<string, any> {
 
 /** 38,412 → "38k"; below 1000 the number itself. */
 export function fmtTokens(n: number): string { return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n); }
-
-/**
- * A vendor "not_found" on a SEARCH is an empty source, not a broken one (BEA-1359): Scrape Creators'
- * Google-indexed searches answer `404 not_found` for a query with no posts. A profile or a post
- * lookup that answers not_found still fails the run — that means the thing does not exist.
- */
-export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
-  if (!r?.notFound) return false;
-  const endpoint = String(id || '').replace(/^svc:/, '').split('.')[1] || '';
-  return /search/.test(endpoint);
-}
-
-/**
- * The items of one per-creator answer: a list → its items; an answer SHAPED like a list with nothing
- * in it (`{items: []}`, `{items: null, user: {…}}` — a list key holding null or an array) → nothing,
- * never one row of envelope; a single-object answer (a profile lookup as the per-creator action) →
- * ONE row, out of its envelope with the same `unwrap` the plain sources use — `{success,
- * data:{user:{…}}}` IS the profile (BEA-1377: `data` is also a list key, and 101 succeeded profile
- * calls were counted as "0 items" because the old check read that key's NAME, not its value).
- */
-const plainObj = (v: any) => v && typeof v === 'object' && !Array.isArray(v);
-
-export function itemsOf(data: any, depth = 0): any[] {
-  // findList runs ONLY at the top: it digs one level into every key, and inside the vendor's
-  // wrapper that dig pulls a profile's own `bio_links` out as "the list" — the first live re-run
-  // (f768… → 6785…) wrote 2 title/url rows per creator with links and LOST those profiles. A real
-  // list under the wrapper (`{data:{items:[…]}}`) is already found from the top; past it only an
-  // empty list or a single object remains.
-  if (depth === 0) {
-    const list = findList(data);
-    if (list) return list.rows;
-  }
-  if (Array.isArray(data)) return [];
-  if (!data || typeof data !== 'object') return [];
-  // The vendor's own envelope wraps the payload in `data` — judge what is INSIDE it, so a stray
-  // null list-named field BESIDE the wrapper (`{success, data:{user:{…}}, comments:null}`) can
-  // never hide a real profile (found in review of BEA-1377).
-  if (plainObj((data as any).data) && depth < 4) return itemsOf((data as any).data, depth + 1);
-  // A list answer with nothing in it: a list key holding null / an array findList rejected
-  // (a private account's `{items: null, user, more_available:false}`), or a bare array anywhere
-  // at the top — that is an empty list, never a row.
-  if (Object.entries(data).some(([k, v]) => LIST_KEYS.includes(k) && v !== undefined && !plainObj(v))) return [];
-  if (Object.values(data).some((v) => Array.isArray(v))) return [];
-  const one = unwrap(data);
-  const keys = plainObj(one) ? Object.keys(one).filter((k) => !ENVELOPE.has(k) && one[k] !== undefined && one[k] !== null) : [];
-  return keys.length ? [one] : [];
-}
-
-/**
- * The tripwire's judge (BEA-1377): true when a SUCCEEDED answer carried a real payload that
- * `itemsOf` could not read as rows — that is OUR bug, never the vendor's. An answer that is empty
- * on purpose (a list key holding null/[], an empty array under any name, the vendor's wrapper
- * around a null payload — `{success, data:{user:null}}` is "no such account" — or envelope only)
- * is NOT a bug and never blamed on My Brain.
- */
-export function unrecognisedAnswer(data: any, depth = 0): boolean {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
-  if (itemsOf(data).length) return false;
-  // Judge inside the vendor's `data` wrapper, exactly like itemsOf does (found in review).
-  if (plainObj((data as any).data) && depth < 4) return unrecognisedAnswer((data as any).data, depth + 1);
-  for (const [k, v] of Object.entries(data)) {
-    if (LIST_KEYS.includes(k) && (v === null || Array.isArray(v))) return false; // an empty list, on purpose
-    if (Array.isArray(v) && !(v as any[]).length) return false; // an empty list under any name
-  }
-  return Object.entries(data).some(([k, v]) => !ENVELOPE.has(k) && v !== null && v !== undefined);
-}
-
-/** What a search finds, for the run's own words: posts · reels · videos · results. */
-export function nounOf(id: string): string {
-  const endpoint = String(id || '').replace(/^svc:/, '').split('.')[1] || '';
-  if (/reel/.test(endpoint)) return 'reels';
-  if (/video/.test(endpoint)) return 'videos';
-  if (/post|hashtag|keyword|topic|trend/.test(endpoint)) return 'posts';
-  return 'results';
-}
 
 /** What `readSheet` learned about an existing sheet: rows, header, and its key column's values when it has one. */
 export type SheetKey = { column: string; values: Set<string> };
