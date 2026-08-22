@@ -389,6 +389,7 @@ function normaliseContract(raw) {
   const num = (v, dflt) => (Number.isFinite(Number(v)) ? Number(v) : dflt);
   return {
     minRows: Math.max(0, num(raw.minRows, 1)),
+    minFetched: raw.minFetched === null || raw.minFetched === undefined ? null : Math.max(0, num(raw.minFetched, 0)),
     maxRows: Math.max(1, num(raw.maxRows, 5000)),
     columns: list(raw.columns),
     mustHave: list(raw.mustHave),
@@ -496,6 +497,14 @@ function checkContract(table, contract, sources, now) {
     // Every source genuinely had nothing: the run finishes done with 0 rows, exactly as the plan
     // runner's `nothingFound()` has always done. Not a failure — the vendor was asked and said no.
     return { ok: true, rows: 0, empty: true, why: `every source came back empty (${list.map((s) => s.label).join(', ')})` };
+  }
+
+  // How many were FETCHED, before any filtering (BEA-1410). His sentence was "at least 10 emails
+  // read", and a run that read 15 and kept the 5 that mattered was failed for keeping 5 — while
+  // doing exactly what he asked. Reading and keeping are different numbers.
+  const fetched = list.reduce((n, s) => n + (Number(s.rows) || 0), 0);
+  if (contract.minFetched && fetched < contract.minFetched) {
+    return no(`Only ${fetched} came back from the sources, and this job needs to go through at least ${contract.minFetched}. Nothing was written.`, rows.length);
   }
 
   if (rows.length < contract.minRows) {

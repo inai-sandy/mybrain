@@ -35,6 +35,18 @@ export type WorkerContract = {
   freshnessDays: number | null;
   /** The one case where 0 rows is a success, in the owner's words. */
   allowEmptyWhen: string;
+  /**
+   * How many things must be FETCHED, as opposed to how many survive filtering (BEA-1410).
+   *
+   * Found on the very first real trial run. His sentence was *"at least 10 emails read"*, and that
+   * was turned into a rule about rows kept. The run fetched 15 real emails, filtered them down to
+   * the 5 that mattered, and was failed for producing 5 — while doing exactly what he asked.
+   *
+   * "read", "fetched", "looked at", "goes through" are about the fetch. "rows", "kept", "in the
+   * message" are about the result. They are different numbers and conflating them fails good runs,
+   * which is the one thing a check must never do.
+   */
+  minFetched?: number | null;
 };
 
 /** 0 rows is fine ONLY when every source genuinely came back empty. The default for every job. */
@@ -46,6 +58,9 @@ export const ALLOW_EMPTY_NEVER = 'never';
 
 /** A sheet write bigger than this from a plan of a few pages means something ran away. */
 export const MAX_CONTRACT_ROWS = 5000;
+
+/** How far from a number a word may sit and still be the one that explains it. */
+const NEAR_CHARS = 40;
 
 /** Columns whose blankness makes a row useless — the one a `mustHave` is worth spending on. */
 const IDENTITY_COLUMNS = ['link', 'url', 'permalink'];
@@ -74,20 +89,45 @@ export function contractFromBrief(plan: AgentPlan, successLines: string[]): Work
 
   // "at least 20 mails" / "20 or more rows" / "minimum 20" — the smallest such number wins, because
   // he is stating a floor and the strictest floor he wrote is the one he meant.
-  const mins: number[] = [];
+  const mins: { n: number; at: number }[] = [];
   const re = /\b(?:at least|minimum(?: of)?|no fewer than|more than|over)\s+(\d{1,5})\b|\b(\d{1,5})\s+or more\b/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const n = Number(m[1] || m[2]);
     // "more than 20" means 21; "at least 20" means 20. Only the word decides, never a guess.
-    if (Number.isFinite(n) && n > 0 && n <= MAX_CONTRACT_ROWS) mins.push(/more than|over/i.test(m[0]) ? n + 1 : n);
+    if (Number.isFinite(n) && n > 0 && n <= MAX_CONTRACT_ROWS) mins.push({ n: /more than|over/i.test(m[0]) ? n + 1 : n, at: m.index });
   }
-  const minRows = mins.length ? Math.max(base.minRows, Math.min(...mins)) : base.minRows;
+  // Which number is he talking about? A floor written next to "read"/"fetched"/"went through" is
+  // about the fetch; one next to "rows"/"kept"/"in the message" is about what comes out. The word
+  // NEAREST the number decides, so one sentence can carry both without them colliding.
+  const FETCH_WORDS = /\b(read|reads|fetch|fetched|fetching|looked?\s+at|goes?\s+through|gone\s+through|went\s+through|scan|scanned|checked)\b/gi;
+  const ROW_WORDS = /\b(rows?|kept|keep|keeps|saved|written|in\s+the\s+message|in\s+the\s+sheet|in\s+the\s+list)\b/gi;
+  const marks = (re: RegExp, kind: 'fetch' | 'row') => {
+    const out: { at: number; kind: 'fetch' | 'row' }[] = [];
+    let m: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((m = re.exec(text))) out.push({ at: m.index, kind });
+    return out;
+  };
+  const words = [...marks(FETCH_WORDS, 'fetch'), ...marks(ROW_WORDS, 'row')];
+  const fetchMins: number[] = [];
+  const rowMins: number[] = [];
+  for (const m of mins) {
+    let best: { at: number; kind: 'fetch' | 'row' } | null = null;
+    for (const w of words) {
+      const d = Math.abs(w.at - m.at);
+      if (d > NEAR_CHARS) continue;
+      if (!best || d < Math.abs(best.at - m.at)) best = w;
+    }
+    (best?.kind === 'fetch' ? fetchMins : rowMins).push(m.n);
+  }
+  const minRows = rowMins.length ? Math.max(base.minRows, Math.min(...rowMins)) : base.minRows;
+  const minFetched = fetchMins.length ? Math.min(...fetchMins) : null;
 
   const columns = Array.from(new Set([...(base.columns || []), ...columnsNamedIn(text)]));
   const mustHave = Array.from(new Set([...(base.mustHave || []), ...columns.filter((c) => IDENTITY_COLUMNS.includes(c.toLowerCase())).slice(0, 1)]));
 
-  return { ...base, minRows, columns, mustHave };
+  return { ...base, minRows, columns, mustHave, ...(minFetched ? { minFetched } : {}) };
 }
 
 export function contractFromPlan(plan: AgentPlan): WorkerContract {
@@ -159,6 +199,8 @@ export function sameColumn(a: string, b: string): boolean {
 export function contractInWords(contract: WorkerContract): string[] {
   const c = contract;
   const lines: string[] = [];
+  // What it has to READ comes first, when he said so — it is a different promise from what it keeps.
+  if (c.minFetched) lines.push(`It must go through at least ${c.minFetched} to begin with. Fewer than that and the run fails and writes nothing.`);
   lines.push(
     c.minRows > 0
       ? `It must find at least ${c.minRows} row${c.minRows === 1 ? '' : 's'}. Fewer than that and the run fails and writes nothing.`

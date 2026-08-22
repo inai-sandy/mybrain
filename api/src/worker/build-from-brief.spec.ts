@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { BriefPayload, briefInWords, buildHashOf, buildRequest, transcriptInWords } from './build-brief';
-import { contractFromBrief, contractFromPlan } from './contract';
+import { contractFromBrief, contractFromPlan, contractInWords } from './contract';
 import { ALL_PAGES, AgentPlan, MAX_PAGES, MAX_PAGES_ALL, clampPages, estimatePlanCost, pageCeiling, pagesText } from '../social/plan';
 
 /**
@@ -134,9 +134,11 @@ describe('staleness follows the brief too', () => {
 });
 
 describe('the contract comes from HIS words', () => {
-  it('turns "at least 20 mails read" into a real minimum', () => {
+  it('turns "at least 20 mails read" into a real minimum on what it READS', () => {
+    // This test used to assert `minRows: 20`, and the first real trial run proved that wrong: the
+    // run read 15 real emails, kept the 5 that mattered, and was failed for keeping 5.
     const c = contractFromBrief(PLAN, ['At least 20 mails read. All three groups present.']);
-    expect(c.minRows).toBe(20);
+    expect(c.minFetched).toBe(20);
     // The plan alone could only ever have asked for one row — which is how one email a night passed.
     expect(contractFromPlan(PLAN).minRows).toBe(1);
   });
@@ -175,7 +177,7 @@ describe('the contract comes from HIS words', () => {
     const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
     expect(req.files['contract.json']).toBeTruthy();
     expect(req.brief).toContain('Do not write it, do not edit it');
-    expect(JSON.parse(req.files['contract.json']).minRows).toBe(20);
+    expect(JSON.parse(req.files['contract.json']).minFetched).toBe(20);
   });
 });
 
@@ -229,5 +231,44 @@ describe('"every page there is"', () => {
     expect(cost.how).toContain('every page there is');
     expect(cost.how).toContain('or more');
     expect(cost.how).toContain('daily ceiling');
+  });
+});
+
+/**
+ * Reading and keeping are different numbers (BEA-1410).
+ *
+ * Found on the FIRST real trial run, on his real inbox — which is exactly what the gate is for.
+ * His sentence was *"at least 10 emails read"*. The run fetched 15 real emails, filtered them to the
+ * 5 that mattered, and was failed for producing 5 — while doing precisely what he asked. A check
+ * that fails a good run is worse than no check, so the words around the number now decide.
+ */
+describe('"read" and "kept" are not the same promise', () => {
+  it('"at least 10 emails read" is about the fetch, not the result', () => {
+    const c = contractFromBrief(PLAN, ['At least 10 emails read.']);
+    expect(c.minFetched).toBe(10);
+    expect(c.minRows).toBe(contractFromPlan(PLAN).minRows); // untouched
+  });
+
+  it('"at least 10 rows" is about the result', () => {
+    const c = contractFromBrief(PLAN, ['At least 10 rows in the sheet.']);
+    expect(c.minRows).toBe(10);
+    expect(c.minFetched).toBeFalsy();
+  });
+
+  it('one sentence can carry both, and they do not collide', () => {
+    const c = contractFromBrief(PLAN, ['It should read at least 20 emails and keep at least 3 rows.']);
+    expect(c.minFetched).toBe(20);
+    expect(c.minRows).toBe(3);
+  });
+
+  it('the other reading words count too', () => {
+    for (const said of ['At least 10 fetched.', 'It goes through at least 10.', 'At least 10 scanned.', 'It looked at at least 10.']) {
+      expect(contractFromBrief(PLAN, [said]).minFetched).toBe(10);
+    }
+  });
+
+  it('says the reading promise in plain words, first', () => {
+    const words = contractInWords(contractFromBrief(PLAN, ['At least 10 emails read.']));
+    expect(words[0]).toContain('go through at least 10');
   });
 });
