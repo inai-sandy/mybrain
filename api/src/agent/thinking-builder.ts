@@ -223,6 +223,7 @@ export const RULES_TEXT = `RULES:
 - "When it runs" and "where the rows go" are OPEN until the owner has said them, or has accepted your default in so many words. Settle both before the plan — ask ONE plain question with the default ("Run it once now, or on a schedule — every Monday 8am, say? And a new Google Sheet each run, or one sheet kept adding to?"). Never write "runs once now" or "a new sheet" into a plan as if it were agreed.
 - Cost numbers are the SERVER's, never yours: after you answer, it counts ≈ credits and ≈ AI tokens from the cards — today's figure too, while a source is down — and writes the cost line under your reply and on the plan card. Do not put your own ≈ credit or ≈ token figures in the reply; when a "server cost" for your last plan is given below, quote THAT when you must repeat a number.
 - When the owner says keep adding / add to the list / accumulate / grow the list / build up over time (or any wording that means one list that grows run after run), the output MUST be append:true on ONE sheet — never a new sheet per run. New profiles/posts land under the same columns; rows already in the sheet are skipped — so when the task names columns, keep an id, shortcode, link or username column, or nothing can be told apart from what is already there.
+- Some asks are a ONE-OFF ACTION, not an agent: create a WhatsApp template, send one message, make one sheet, file one issue. You design things that RUN AGAIN — on a schedule, or when something happens — and you cannot run a one-off write from this chat, because a sample only ever reads. So say it plainly in one line ("creating the template is a one-off, not something to schedule"), say where it IS done (Chat runs these same tools and asks you to confirm anything that cannot be undone, or the Tools page), offer to write out exactly what you would create so it can be pasted, and offer the agent version if the thing should happen every time. Never shrug at a one-off, and never say a tool does not exist when the facts above list it — say what you can and cannot do with it from here.
 - Plan the flow yourself from the blocks — do not ask the owner to design it.
 - Before the owner presses Create, your reply shows the plan in words: what it fetches (sources × pages, creators), what it keeps, columns, where it goes, when it runs, who is told (the cost line comes from the server, under your reply — put your arithmetic in the "cost" JSON field only).
 - Never say the agent was created — the owner presses Create. Plain, everyday English. Short sentences. Keep "reply" under 200 words — detail belongs in the plan JSON, not in prose.`;
@@ -257,12 +258,122 @@ export function parseBuilderJson(text: string | null | undefined): any | null {
   let t = s.slice(start).replace(/,\s*$/, '');
   for (let i = 0; i < 6; i++) {
     t += t.match(/\[[^\]]*$/) ? ']' : '}';
-    try { return JSON.parse(t); } catch { /* keep closing */ }
+    // A brace we had to close ourselves means the model stopped mid-way, even when what is left
+    // parses — `cutOff` marks it so the turn is CLASSIFIED as cut off and says so in the log,
+    // instead of passing for a healthy answer with half a plan in it (BEA-1402).
+    try { const v = JSON.parse(t); return v && typeof v === 'object' && !Array.isArray(v) ? { ...v, cutOff: true } : v; } catch { /* keep closing */ }
   }
   // Cut inside a string: at least the reply survives, so the owner reads words, not "I couldn't work that out".
   const r = s.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)/);
   if (r && r[1]) { try { return { reply: JSON.parse(`"${r[1]}"`), cutOff: true }; } catch { return { reply: r[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'), cutOff: true }; } }
   return null;
+}
+
+// ---- when a turn cannot be read, SAY WHICH of the four things happened (BEA-1402) ------------------
+//
+// The incident: the owner asked the builder about WhatsApp templates, a sample ran fine ("25
+// templates · 0 credits"), and the turn answered "I couldn't work that out — try saying it another
+// way." Twice. The usage log shows why — both failing turns came back with EXACTLY 8,000 completion
+// tokens (`TURN_MAX_TOKENS`), while the turns either side used 726 and 4,352. The model ran past its
+// output ceiling, the answer stopped mid-way, `parseBuilderJson` could salvage nothing, and every
+// road out of that fell into one shrug that named nothing. Four different things can go wrong with
+// one model answer, and the owner is owed the right one.
+
+/**
+ * What went wrong with ONE model answer:
+ *  - `none`       a usable answer.
+ *  - `no-answer`  the AI service gave nothing back (an error, a timeout, an empty body).
+ *  - `cut-off`    it started answering and stopped mid-way — the output ceiling.
+ *  - `unreadable` text came back, but not in the shape we asked for.
+ */
+export type TurnTrouble = 'none' | 'no-answer' | 'cut-off' | 'unreadable';
+
+/** One model answer, read: what we could parse, what went wrong, and its plain words if it wrote any. */
+export type TurnRead = { g: any | null; trouble: TurnTrouble; prose: string };
+
+/** How much of a shape-less answer may be shown to the owner as the reply. */
+export const PROSE_REPLY_CHARS = 1_200;
+/** Shorter than this is not an answer worth showing — the owner gets the honest sentence instead. */
+export const PROSE_REPLY_MIN = 40;
+
+/** The answer, classified — the one place a turn decides what it is looking at. */
+export function readTurn(text: string | null | undefined): TurnRead {
+  const s = String(text ?? '');
+  if (!s.trim()) return { g: null, trouble: 'no-answer', prose: '' };
+  const g = parseBuilderJson(s);
+  const prose = proseOf(s);
+  if (!g) return { g: null, trouble: looksCutOff(s) ? 'cut-off' : 'unreadable', prose };
+  // `parseBuilderJson` marks the reply it rescued out of a half-written answer.
+  if (g.cutOff) return { g, trouble: 'cut-off', prose };
+  return { g, trouble: 'none', prose };
+}
+
+/**
+ * Did this answer stop mid-way? True when a JSON object was opened and never closed — a brace still
+ * open at the end, or the text ending inside a string. Prose with no JSON in it is not "cut off",
+ * it is the wrong shape, and the owner is told a different thing.
+ */
+export function looksCutOff(text: string): boolean {
+  const s = String(text || '');
+  const start = s.indexOf('{');
+  if (start < 0) return false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') depth--;
+  }
+  return inString || depth > 0;
+}
+
+/** The plain words in an answer that was not the shape we asked for — fences and JSON stripped. */
+export function proseOf(text: string): string {
+  const s = String(text || '')
+    .replace(/```[a-z]*\n?/gi, '')
+    // From the brace that OPENS an object on, it was trying to be JSON. Only a brace followed by a
+    // quoted key counts, so a template body quoted in prose ("Hello {{1}}") survives (BEA-1402).
+    .replace(/\{\s*"[\s\S]*$/, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return s.length > PROSE_REPLY_CHARS ? `${s.slice(0, PROSE_REPLY_CHARS - 1)}…` : s;
+}
+
+/** The one sentence for a genuinely ambiguous message — and ONLY for that (BEA-1402). */
+export const AMBIGUOUS_TEXT = "I couldn't work that out — try saying it another way.";
+
+/** What the owner reads when a turn produced no answer — one true sentence per thing that can happen. */
+export const TROUBLE_TEXT: Record<Exclude<TurnTrouble, 'none'>, string> = {
+  'no-answer': 'The AI service did not answer just now, so this turn came back empty. Nothing you said is lost — send it again in a moment.',
+  'cut-off': "The AI's answer ran past its length limit and stopped mid-way, so I could not read it. Nothing you said is lost — say it again in one short line and I will carry on.",
+  unreadable: 'The AI answered in a shape I could not read. Nothing you said is lost — say it again in one short line and I will carry on.',
+};
+
+/** What the owner reads when the turn threw — the cause goes to the log, the plain sentence to him. */
+export const THINKING_FAILED_TEXT = 'The AI service failed on this turn, so I have no answer for you. Nothing you said is lost — send it again in a moment.';
+
+/** The one re-ask after an answer that could not be read: shorter, in shape, reply first. */
+export const SHAPE_RETRY_TEXT = `Your last answer could not be read — it was not the JSON object asked for, or it ran past the length limit and stopped mid-way. Answer again now: ONLY the JSON object, with "reply" as the FIRST field and under 120 words, and leave "plan"/"spec" exactly as they were unless you are proposing a new one. Do not repeat long lists back.`;
+
+/**
+ * A half-written or shape-less answer still holds words meant for the owner — better than losing his
+ * turn to a canned sentence (BEA-1402). The note says which of the two it was, so he knows whether
+ * there is more of it coming.
+ */
+export function proseFallbackReply(prose: string, trouble: Exclude<TurnTrouble, 'none'> = 'unreadable'): string {
+  const note = trouble === 'cut-off'
+    ? '(The rest of that answer ran past its length limit and stopped mid-way, so there is no plan card with it — say "carry on" and I will finish it.)'
+    : '(That came back outside the shape I expect, so there is no plan card with it — say "carry on" and I will put it back into a plan.)';
+  return `${prose}\n\n${note}`;
 }
 
 /** A sample request in the model's reply, or null. */

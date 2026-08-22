@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from './agent.service';
 import { LlmService } from '../llm/llm.service';
@@ -12,9 +12,10 @@ import { SAMPLE_CAPS, TOP_BUILDER_SESSION, builderSettingKey, readSampleCounter 
 import { BuilderSampleService } from './builder-sample.service';
 import {
   BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
-  fillTemplate, healthNote, indexSection, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
+  fillTemplate, healthNote, indexSection, overBudget, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
   BuilderSeed, MAX_ASKS_PER_MESSAGE, costReplyLine, goalMissingNote, goalOf, isExpensivePlan, noGoalText, noHealthySourceText, sampleFinderText, sampledActionIds,
   seedLine, seedText, unsampledFinderNote, unsampledFinders, withGoal,
+  AMBIGUOUS_TEXT, PROSE_REPLY_MIN, SHAPE_RETRY_TEXT, THINKING_FAILED_TEXT, TROUBLE_TEXT, TurnRead, TurnTrouble, proseFallbackReply, readTurn,
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
 
@@ -52,6 +53,10 @@ function packState(st: BuilderState): string {
  */
 @Injectable()
 export class AgentAreasService {
+  // A builder turn that goes wrong must leave a trace with the cause in it (BEA-1402) — the catch
+  // below used to swallow every error and the owner got one shrug that named nothing.
+  private readonly log = new Logger('AgentAreas');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly agentSvc?: AgentService, // optional + LAST — spec files construct positionally
@@ -209,9 +214,12 @@ export class AgentAreasService {
     let st = await o.load();
     st.log.push({ who: 'you', text: o.message, at: new Date().toISOString() });
     await o.save(st); // the owner's line is down before any sample line can land after it
-    const cantDo = "I couldn't work that out — try saying it another way.";
     const design: DesignCounter = readDesignCounter(st);
     let spentTokens = 0;
+    // What the LAST model answer was, so a turn with nothing to show says which thing went wrong
+    // instead of the one shrug (BEA-1402).
+    const turn: { trouble: TurnTrouble; prose: string } = { trouble: 'none', prose: '' };
+    const where = () => `prompt ${o.promptKey} · session ${o.sessionKey} · turn ${design.turns + 1} · ≈${spentTokens.toLocaleString('en-US')} tokens spent this turn`;
     try {
       const tpl = (await this.promptsSvc?.get(o.promptKey).catch(() => '')) || '';
       const convo = () => st.log.slice(-24).map((m: any) => `${m.who === 'you' ? 'OWNER' : 'YOU'}: ${m.text}`).join('\n');
@@ -249,11 +257,18 @@ export class AgentAreasService {
         goal: { label: 'What the result is FOR (the owner already said — do not ask again; keep it in your "goal" field)', text: goal || '' },
       }) + previous + extra;
 
+      // One model call, read and CLASSIFIED (BEA-1402): a `cut-off` or `unreadable` answer is said
+      // out loud in the log with the prompt, the session and what it cost, so the next one of these
+      // can be diagnosed from the container's own words instead of guessed at.
       const ask = async (extra: string): Promise<any> => {
         const prompt = buildPrompt(extra);
         const text = await this.llm?.completeHelper('agent-builder', prompt, TURN_MAX_TOKENS, o.label, { timeoutMs: TURN_TIMEOUT_MS });
         spentTokens += estimateTokens(prompt) + estimateTokens(text || '');
-        return parseBuilderJson(text);
+        const read: TurnRead = readTurn(text);
+        turn.trouble = read.trouble;
+        turn.prose = read.prose;
+        if (turn.trouble !== 'none') this.log.warn(`${o.label}: the model's answer was ${turn.trouble} (${String(text || '').length} chars back, ${TURN_MAX_TOKENS} token ceiling) — ${where()}`);
+        return read.g;
       };
 
       // ---- the loop: sample rounds and plan checks ------------------------------------------------
@@ -270,10 +285,20 @@ export class AgentAreasService {
       let refused: AgentPlan | null = null;
       // An expensive plan held back because no goal is established (BEA-1378) — its cost writes the note.
       let heldForGoal: PlanCost | null = null;
-      const nudged = { invalid: false, health: false, finder: false, goal: false };
+      const nudged = { invalid: false, health: false, finder: false, goal: false, shape: false };
       const canSample = () => !!this.sampler && !overBudget(design) && readSampleCounter(st).used < SAMPLE_CAPS.calls;
+      // An answer we could read nothing out of — cut off at the output ceiling, or simply not the
+      // shape asked for. ONE re-ask, shorter and in shape, before the owner is told (BEA-1402). A
+      // service that answered nothing at all is not re-asked: that is a second call for nothing.
+      const rescue = (): boolean => {
+        if (nudged.shape || turn.trouble === 'no-answer' || asks >= MAX_ASKS_PER_MESSAGE) return false;
+        nudged.shape = true;
+        extra += `\n\n${SHAPE_RETRY_TEXT}`;
+        return true;
+      };
       while (asks < MAX_ASKS_PER_MESSAGE) {
         g = await ask(extra); asks++;
+        if (!g) { if (rescue()) continue; break; }
         // The goal may arrive on ANY answer this turn — a plan beside it counts as goal-established.
         const said = goalOf(g);
         if (said) goal = said;
@@ -283,6 +308,8 @@ export class AgentAreasService {
             if (asks >= MAX_ASKS_PER_MESSAGE) break;
             extra += `\n\nNo more samples for this message${!this.sampler ? ' (sampling is not available here)' : ''} — answer the owner now from what you know.`;
             g = await ask(extra); asks++;
+            // The forced answer gets the same one rescue as any other (review fix, BEA-1402).
+            if (!g) { if (rescue()) continue; break; }
             if (sampleRequestOf(g)) break; // still asking → nothing to show
           } else {
             samplesRun++;
@@ -345,7 +372,7 @@ export class AgentAreasService {
       let cost: PlanCost | null = plan ? this.costWithHealth(plan, cardsById) : null;
       // Budget spent and still no plan: keep the best plan so far rather than asking on.
       if (!plan && !refused && !heldForGoal && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || this.costWithHealth(plan, cardsById); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
-      if (!reply) reply = cantDo;
+      if (!reply) reply = this.troubleReply(turn.trouble, turn.prose, `${o.label}: ${where()}`);
       // Honesty: a plan that leans on a failing source says so, even when the model forgot; a refused plan
       // (no healthy source) says why no card came.
       const note = healthNote(plan || refused, cardsById, reply);
@@ -373,12 +400,38 @@ export class AgentAreasService {
     } catch (e: any) {
       // A budget stop is a real answer, not a puzzle (BEA-1373): the owner read "try saying it another
       // way" three times while the day's AI budget was simply used up — say the reason and the remedy.
-      const reply = e instanceof TokenBudgetError ? `I have stopped for now — ${e.message}` : cantDo;
+      let reply: string;
+      if (e instanceof TokenBudgetError) reply = `I have stopped for now — ${e.message}`;
+      else {
+        // The catch that swallowed everything (BEA-1402). The cause goes to the log WITH the prompt,
+        // the session, the turn and the spend; the owner gets a sentence that says what happened.
+        this.log.error(`${o.label}: the turn threw — ${String(e?.message || e)} · ${where()}`, e?.stack || undefined);
+        reply = THINKING_FAILED_TEXT;
+      }
       st.design = { turns: design.turns + 1, tokens: design.tokens + spentTokens };
       st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
       await o.save(st);
       return { reply, state: st };
     }
+  }
+
+  /**
+   * A turn with nothing to say: WHICH thing went wrong, in the owner's words (BEA-1402).
+   *
+   * "Try saying it another way" is only honest when the model really did answer and left its reply
+   * empty — a genuinely ambiguous message. Every other road names itself: the AI service answered
+   * nothing, the answer stopped mid-way, or it came back in a shape we could not read. And when a
+   * shape-less answer still holds plain words meant for the owner, he reads THOSE — losing his turn
+   * to a shrug when the model actually wrote him a paragraph is the bug this exists to remove.
+   */
+  private troubleReply(trouble: TurnTrouble, prose: string, at: string): string {
+    if (trouble === 'none') return AMBIGUOUS_TEXT;
+    const words = String(prose || '').trim();
+    // Either kind of broken answer can still carry plain words meant for him — a lead-in sentence
+    // before a half-written plan counts (review fix, BEA-1402). Only "nothing came back" cannot.
+    const showProse = trouble !== 'no-answer' && words.length >= PROSE_REPLY_MIN;
+    this.log.error(`no reply for the owner — the model's answer was ${trouble}${showProse ? ' (its plain words were shown instead)' : ''} · ${at}`);
+    return showProse ? proseFallbackReply(words, trouble) : TROUBLE_TEXT[trouble];
   }
 
   /** The estimate plus the failing sources it leans on — the plan card marks them (BEA-1372). */
