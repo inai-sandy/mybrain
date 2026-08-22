@@ -8,8 +8,8 @@
     { "id": "BEA-1389", "title": "4/10 worker runner (host service)", "status": "done", "sha": "8ba783a", "note": "code shipped; systemd install NEEDS ROOT and is NOT done (owner has the one-liner). Port 8766 was taken by the retired gws-runner, so the runner uses 8769. Until installed, start by hand as sandy: node /home/sandy/worker-runner/server.js" },
     { "id": "BEA-1390", "title": "5/10 the build turn (Codex compiles the plan)", "status": "done", "note": "plan -> brief -> ONE fresh codex exec -s workspace-write -C vN -> the version's own tests -> promote (symlink move) ONLY on green. Routes GET/POST /api/agent/agents/:id/worker[/build]; nothing DISPATCHES a run onto the worker road yet (a promoted worker is installed and inert) and contract.json is piece 6. The worker runner still needs its root install (see BEA-1389) — start it by hand as sandy meanwhile, and its WORKER_API must be https://mybrain.1site.ai (the app container publishes no host port)." },
     { "id": "BEA-1391", "title": "6/10 contracts - fail loudly", "status": "done", "sha": "a462e7b" },
-    { "id": "BEA-1392", "title": "7/10 ask and wait (WhatsApp question + resume)", "status": "in_progress" },
-    { "id": "BEA-1393", "title": "8/10 self-heal", "status": "pending" },
+    { "id": "BEA-1392", "title": "7/10 ask and wait (WhatsApp question + resume)", "status": "done", "sha": "dea8ec2" },
+    { "id": "BEA-1393", "title": "8/10 self-heal", "status": "in_progress" },
     { "id": "BEA-1394", "title": "9/10 housekeeping + Worker tab", "status": "pending" },
     { "id": "BEA-1395", "title": "10/10 acceptance on a real agent", "status": "pending" }
   ]
