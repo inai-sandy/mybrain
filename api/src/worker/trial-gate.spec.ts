@@ -210,3 +210,42 @@ describe('"every page there is", from the brief into the job', () => {
     expect(briefToAgentInput(withPages(undefined)).toolArgs['svc:gmail.fetch_emails']._pages).toBeUndefined();
   });
 });
+
+/**
+ * A job made from a brief must really BE what the brief said (BEA-1410).
+ *
+ * Found on the fourth real trial run, by counting rows rather than trusting the code: `createAgent`
+ * silently rewrote `origin: 'brief'` to `'chat'` and dropped `useWorker` entirely. Two consequences,
+ * both bad. The draft job could never be found again, so every trial made ANOTHER one — four had
+ * piled up on his own agent. And a job he then kept would have run the OLD way, quietly, having been
+ * proved on the new one. That is a wrong agent reaching him, one level down.
+ */
+describe('the job a brief becomes is really the job the brief described', () => {
+  it('keeps origin "brief", so the same draft is re-used instead of piling up', async () => {
+    const { AgentService } = await import('../agent/agent.service');
+    let saved: any = null;
+    const prisma: any = { agent: { create: async ({ data }: any) => { saved = data; return { id: 'a1', ...data }; } } };
+    const svc: any = new (AgentService as any)(prisma);
+    await svc.createAgent({ name: 'n', origin: 'brief', useWorker: true }, { drawFlow: false });
+    expect(saved.origin).toBe('brief');
+  });
+
+  it('keeps useWorker, so what he approves on the new road stays on it', async () => {
+    const { AgentService } = await import('../agent/agent.service');
+    let saved: any = null;
+    const prisma: any = { agent: { create: async ({ data }: any) => { saved = data; return { id: 'a1', ...data }; } } };
+    const svc: any = new (AgentService as any)(prisma);
+    await svc.createAgent({ name: 'n', origin: 'brief', useWorker: true }, { drawFlow: false });
+    expect(saved.useWorker).toBe(true);
+  });
+
+  it('and an ordinary agent is still off the worker road unless it says so', async () => {
+    const { AgentService } = await import('../agent/agent.service');
+    let saved: any = null;
+    const prisma: any = { agent: { create: async ({ data }: any) => { saved = data; return { id: 'a1', ...data }; } } };
+    const svc: any = new (AgentService as any)(prisma);
+    await svc.createAgent({ name: 'n' }, { drawFlow: false });
+    expect(saved.origin).toBe('chat');
+    expect(saved.useWorker).toBe(false);
+  });
+});

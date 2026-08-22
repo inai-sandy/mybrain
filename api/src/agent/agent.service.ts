@@ -412,7 +412,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   // ---------- saved agents (BEA-623) ----------
 
   async createAgent(
-    input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; sheetAppend?: boolean; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown; folderId?: string | null },
+    input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; sheetAppend?: boolean; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown; folderId?: string | null; useWorker?: boolean },
     // `drawFlow:false` — the caller draws (and plans) the picture itself, e.g. the voice research
     // job, which links its own flow so it can plan inside the toolbox in one pass (BEA-1366).
     opts: { drawFlow?: boolean } = {},
@@ -440,7 +440,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         collectionId: input.collectionId ?? null,
         enabled: input.enabled ?? true,
         // Where it came from (BEA-1175/1176) — chat, voice, an import, or a Social result (BEA-1357).
-        origin: ['chat', 'voice', 'import', 'social'].includes(String(input.origin)) ? String(input.origin) : 'chat',
+        // 'brief' since BEA-1410: a job made from an approved brief. It was silently turned into
+        // 'chat', so every trial made ANOTHER draft job (four piled up on the owner's own agent
+        // before this was caught) — and `useWorker` was dropped with it, which would have created a
+        // job that quietly ran the OLD way. A wrong agent reaching him, one level down.
+        origin: ['chat', 'voice', 'import', 'social', 'brief'].includes(String(input.origin)) ? String(input.origin) : 'chat',
+        useWorker: input.useWorker === true,
         ...(tools.length ? { tools: JSON.stringify(tools.slice(0, 60)) } : {}),
         // Where the result goes (BEA-1357): document (default) | telegram | task | sheet.
         outputDest: this.normOutputDest(input.outputDest),
