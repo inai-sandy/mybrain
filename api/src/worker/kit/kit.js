@@ -198,7 +198,15 @@ function makeKit(opts) {
       return r;
     },
 
-    /** Tell the owner: WhatsApp (template first, Meta's real verdict, Telegram if refused) and/or Telegram. */
+    /**
+     * Tell the owner: WhatsApp (template first, Meta's real verdict, Telegram if refused) and/or
+     * Telegram.
+     *
+     * `what.message` is the WHOLE message the brief asked for — many lines, written out as it
+     * should arrive. `what.headline` is the one line that rides inside the WhatsApp template, which
+     * may not contain newlines. Give both: the headline always arrives, the full message arrives
+     * when Meta's 24-hour window allows and the run says plainly which happened.
+     */
     async notify(where, what) {
       // Telling the owner "here are your rows" is an output too — the same check stands in front of it.
       guardChecked();
@@ -208,6 +216,7 @@ function makeKit(opts) {
         telegram: !!(where && where.telegram),
         headline: what.headline,
         detail: what.detail,
+        message: what.message,
         url: what.url,
         title: what.title,
       });

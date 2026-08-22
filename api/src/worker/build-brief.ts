@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { AgentPlan, PlanBlock, sourceLabel, sourceActionId } from '../social/plan';
 import { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { cardText } from '../agent/thinking-builder';
-import { WorkerContract, contractFromPlan, contractInWords } from './contract';
+import { WorkerContract, contractFromBrief, contractFromPlan, contractInWords } from './contract';
 
 /**
  * The build turn's brief (BEA-1390, agent workers 5/10 — `specs/AGENT-WORKERS.md` §C, §D).
@@ -45,6 +45,28 @@ export type BuildInputs = {
   previousVersion?: number | null;
   origin?: 'build' | 'rebuild';
   reason?: string | null;
+  /**
+   * The approved brief and the whole conversation behind it (BEA-1407, `BriefService.forCodex`).
+   *
+   * When it is here it LEADS the build: the plan is still shipped as `plan.json` because the kit's
+   * fetch works on source ids, but what the worker is FOR comes from the brief, and the exact
+   * message it sends comes from the brief's own words. Absent = the old road, plan only.
+   */
+  brief?: BriefPayload | null;
+};
+
+/** What `BriefService.forCodex()` hands over. Kept structural so this file needs no Nest import. */
+export type BriefPayload = {
+  decides: string;
+  brief: {
+    name: string;
+    version?: number;
+    approvedAt?: string | null;
+    sections: { key: string; label: string; lines: { text: string; origin: string; struck?: boolean }[] }[];
+    sources: { id: string; actionId: string; args: Record<string, any>; saw?: string }[];
+    delivery: { whatsapp: boolean; telegram: boolean; messageText: string };
+  };
+  transcript: { id: string; who: string; text: string; at: string; kind?: string; struck?: boolean }[];
 };
 
 export type BuildRequest = {
@@ -71,6 +93,21 @@ export function planHashOf(plan: AgentPlan): string {
     mode: plan.mode,
   };
   return `sha256:${createHash('sha256').update(stable(shape)).digest('hex')}`;
+}
+
+/**
+ * What a worker was built FROM — the plan, plus the approved brief when there is one (BEA-1407).
+ *
+ * The brief contributes only its identity (which version, approved when), never its whole text: a
+ * new approved version is exactly the event that should mark a worker stale, and re-wording a line
+ * without approving it is not. `planHashOf` alone stays the answer for a job with no brief, so no
+ * existing worker is marked stale by this change.
+ */
+export function buildHashOf(plan: AgentPlan, brief?: BriefPayload | null): string {
+  const base = planHashOf(plan);
+  if (!brief) return base;
+  const stamp = stable({ v: brief.brief.version ?? null, at: brief.brief.approvedAt ?? null, msg: brief.brief.delivery?.messageText || '' });
+  return `sha256:${createHash('sha256').update(`${base}|${stamp}`).digest('hex')}`;
 }
 
 function canonicalBlock(s: PlanBlock): any {
@@ -101,16 +138,30 @@ export function sampleFileName(sourceId: string): string {
 
 /** The whole build request: the folder's files and the brief Codex is given. */
 export function buildRequest(inp: BuildInputs): BuildRequest {
-  const planHash = planHashOf(inp.plan);
+  // What this worker was built FROM: the plan, and the exact approved brief beside it. A new
+  // approved brief version changes this hash, so editing the brief marks the worker stale exactly
+  // as editing the plan already does — it keeps running until he rebuilds, never silently ignored.
+  const planHash = buildHashOf(inp.plan, inp.brief);
   // What "it worked" means for this job (BEA-1391 §E). Derived from the plan by the app, never
   // invented by the model, and the same words the owner reads in the job's Settings.
-  const contract = contractFromPlan(inp.plan);
+  const successLines = (inp.brief?.brief.sections || [])
+    .filter((sec) => sec.key === 'success')
+    .flatMap((sec) => (sec.lines || []).filter((l) => !l.struck).map((l) => l.text));
+  const contract = inp.brief ? contractFromBrief(inp.plan, successLines) : contractFromPlan(inp.plan);
   const files: Record<string, string> = {
     'kit/kit.js': inp.kit.js,
     'kit/KIT.md': inp.kit.doc,
     'plan.json': JSON.stringify(inp.plan, null, 2),
     'contract.json': JSON.stringify(contract, null, 2),
   };
+  // The brief and the WHOLE conversation, as files, so a repair turn months later reads exactly what
+  // this build read. The owner's decision (2026-08-22): send the entire transcript, not a summary —
+  // "a summary is a small form with better handwriting". The brief on top is what makes that safe.
+  if (inp.brief) {
+    files['BRIEF.md'] = briefInWords(inp.brief);
+    files['brief.json'] = JSON.stringify(inp.brief.brief, null, 2);
+    files['conversation.md'] = transcriptInWords(inp.brief.transcript);
+  }
 
   const index: any = {
     builtAt: new Date().toISOString(),
@@ -154,6 +205,48 @@ export function buildRequest(inp: BuildInputs): BuildRequest {
   files['samples/index.json'] = JSON.stringify(index, null, 2);
 
   return { brief: briefText(inp, planHash, index, contract), files, planHash, sampleIds: inp.samples.map((s) => s.sampleId) };
+}
+
+/**
+ * The brief, as the owner reads it, with every line's tag kept.
+ *
+ * The tags matter as much as the words. `your words` is an instruction; `my guess` is a suggestion
+ * nobody has confirmed; `looked` is a fact somebody checked with a real call. A model reading a flat
+ * paragraph cannot tell them apart — which is exactly what went wrong on the owner's side of the
+ * screen, and cost him nine hours.
+ */
+export function briefInWords(payload: BriefPayload): string {
+  const tag = (o: string) => (o === 'owner' ? 'HIS WORDS' : o === 'tool' ? 'CHECKED' : 'a guess');
+  const out: string[] = [`# The brief — "${payload.brief.name || 'this agent'}"`, '', payload.decides, ''];
+  for (const s of payload.brief.sections) {
+    out.push(`## ${s.label}`);
+    const lines = s.lines || [];
+    if (!lines.length) out.push('_(nothing said)_');
+    for (const l of lines) out.push(`- ${l.struck ? '~~' : ''}${l.text}${l.struck ? '~~ **(KILLED — he said no. Never build this.)**' : ''}  \`[${tag(l.origin)}]\``);
+    out.push('');
+  }
+  const d = payload.brief.delivery;
+  if (d.whatsapp || d.telegram) {
+    out.push('## The message it sends', '');
+    out.push(`It goes to ${[d.whatsapp ? 'WhatsApp' : '', d.telegram ? 'Telegram' : ''].filter(Boolean).join(' and ')}. **These are the exact words he approved. Send these, not a summary of them, and never a row count.**`, '');
+    out.push('```text', d.messageText || '(nothing written — this brief should not have been approved)', '```', '');
+    out.push('Pass it as `message` to `kit.notify`, and give `headline` a single line with no newline in it for the WhatsApp template. See `kit/KIT.md`.', '');
+  } else {
+    out.push('## The message it sends', '', 'Nothing is sent. There is no notify step.', '');
+  }
+  return out.join('\n');
+}
+
+/** The whole conversation, in order, with what he killed still visible and marked. */
+export function transcriptInWords(turns: BriefPayload['transcript']): string {
+  const out: string[] = ['# The whole conversation', '', 'Every turn, in order, nothing left out. A turn marked KILLED holds an idea he considered and said no to — it is kept so you can see the decision, never so you can build it.', ''];
+  for (const t of turns || []) {
+    const who = t.who === 'you' ? 'HIM' : 'THE BUILDER';
+    out.push(`**${who}**${t.struck ? ' — KILLED' : ''}${t.kind ? ` (${t.kind})` : ''}:`);
+    out.push(t.struck ? `~~${t.text}~~` : t.text);
+    out.push('');
+  }
+  return out.join('\n');
 }
 
 function cardFor(cards: ToolKnowledge[], actionId: string): ToolKnowledge | undefined {
@@ -208,7 +301,28 @@ Then run \`node --test worker.test.mjs\` yourself and fix what fails. **Green te
 this worker goes live.** If they cannot pass, leave them failing and say why in your final message —
 the job stays on the road it is on, and lying about it is worse than failing.
 
-## The plan
+${inp.brief ? `## What this is FOR — read this before anything else
+
+The owner wrote and approved a brief. It is in **\`BRIEF.md\`** in this folder, and the whole
+conversation behind it is in **\`conversation.md\`**.
+
+${inp.brief.decides}
+
+Two rules that follow from that, and they are not negotiable:
+
+1. **The brief decides.** The conversation is there for nuance — what he meant, what he tried, what
+   he cared about. Where it and the brief disagree, the brief is right.
+2. **Never build a struck thing.** A line or a turn marked KILLED is an idea he looked at and said
+   no to. It is kept so you can see the decision. Building one is worse than missing a feature.
+
+${briefInWords(inp.brief)}
+
+## The plan, in blocks
+
+The plan below is the same job expressed in the fetch/merge/write blocks the kit already knows. Use
+it for the mechanics — the source ids, the arguments, the paging. Use the BRIEF for what the result
+has to BE, and for the exact words of any message.
+` : ''}## The plan
 
 ${planInWords(plan)}
 

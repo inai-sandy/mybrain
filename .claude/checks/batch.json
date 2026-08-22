@@ -13,7 +13,9 @@
     {
       "id": "BEA-1406",
       "title": "2/6 the brief screen: read it, fix it, approve it",
-      "status": "pending"
+      "status": "done",
+      "sha": "c4732af",
+      "note": "screenshots caught two phone-layout bugs and one of mine (brief of a deleted agent was created, now 404)"
     },
     {
       "id": "BEA-1407",
