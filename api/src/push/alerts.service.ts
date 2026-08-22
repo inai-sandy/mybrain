@@ -62,12 +62,24 @@ export class AlertsService {
    * app link behind the button. Gated by the master switch + the per-job toggle (checked by the
    * caller). `kind: 'alert'` is a Watch/Alert that fired (BEA-1358), worded as one.
    */
-  async runFinished(name: string, headline: string, path: string, opts: { kind?: 'finished' | 'alert'; detail?: string } = {}): Promise<AlertResult> {
+  async runFinished(name: string, headline: string, path: string, opts: { kind?: 'finished' | 'alert'; detail?: string; longBody?: string } = {}): Promise<AlertResult> {
     const who = clean(name).slice(0, 120) || 'Your agent';
     const line = opts.kind === 'alert' ? `${who} — alert` : `${who} finished`;
     const what = clean(headline).slice(0, 600) || 'The result is ready.';
     return this.ownerAlert(
-      { headline: line, detail: opts.detail ? `${what} · ${clean(opts.detail)}` : what, path },
+      {
+        headline: line,
+        detail: opts.detail ? `${what} · ${clean(opts.detail)}` : what,
+        path,
+        // The agent's OWN message, in full, as a second free-text message (BEA-1407).
+        //
+        // Until now this was never passed, which is the whole of the owner's complaint: his nightly
+        // agent could only ever send "Nightly Important Email Summary finished · 5 rows saved to
+        // Documents" — a receipt — because a template variable may not hold newlines, so the
+        // grouped summary he asked for had nowhere to go. `longBody` is the road that already
+        // existed for it (`dailyMissDigest` uses it); the worker road now uses it too.
+        ...(opts.longBody && String(opts.longBody).trim() ? { longBody: String(opts.longBody) } : {}),
+      },
       { gate: 'whatsapp.outputs', log: 'finished alert', telegramCarried: opts.kind === 'alert' },
     );
   }

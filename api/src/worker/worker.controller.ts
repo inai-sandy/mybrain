@@ -27,6 +27,12 @@ export const WORKER_HELPERS = ['social-shape', 'social-alert'];
 const AI_MAX_TOKENS = SHAPE_MAX_TOKENS;
 
 /**
+ * How much of the agent's own message may go out (BEA-1407). WhatsApp's own limit for a free-text
+ * body is 4,096 characters; this leaves room and keeps one runaway job from writing an essay.
+ */
+export const MESSAGE_CHARS = 3500;
+
+/**
  * The callback API (BEA-1387, agent workers 2/10 — `specs/AGENT-WORKERS.md` §C).
  *
  * A worker is a small program on the host with no database, no keys and no vendor access. Everything
@@ -310,23 +316,45 @@ export class WorkerController {
     const headline = String(body?.headline || '').slice(0, 600);
     if (!headline.trim()) throw new BadRequestException('A message needs a headline.');
     const detail = body?.detail ? String(body.detail).slice(0, 1200) : '';
+    // The agent's OWN message, in full (BEA-1407). A WhatsApp TEMPLATE variable may not hold a
+    // newline, so a grouped summary cannot ride inside one — it goes as a second, free-text message
+    // (`longBody`), which Meta delivers only while the owner's 24-hour window is open. The template
+    // always arrives; the full text arrives when it can, and the step says which happened. Without
+    // this the only thing a worker could ever send was "<job> finished · N rows" — the receipt the
+    // owner rightly called useless.
+    const message = body?.message ? String(body.message).slice(0, MESSAGE_CHARS) : '';
     const url = String(body?.url || `/agent/runs/${runId}`);
     const wantWhatsApp = !!body?.whatsapp;
     const wantTelegram = !!body?.telegram;
     if (!wantWhatsApp && !wantTelegram) throw new BadRequestException('Say where the message goes: whatsapp, telegram, or both.');
     const title = String(body?.title || job?.name || 'Your agent').slice(0, 120);
 
-    const hit = await this.journal.once(runId, seq, 'notify', { headline, detail, url, whatsapp: wantWhatsApp, telegram: wantTelegram }, async () => {
+    const hit = await this.journal.once(runId, seq, 'notify', { headline, detail, url, message, whatsapp: wantWhatsApp, telegram: wantTelegram }, async () => {
       const out: any = { ok: false, whatsapp: null, telegram: null };
       if (wantTelegram) {
-        const tg = await this.budget?.pushAlert?.(job, `${headline}${detail ? `\n\n${detail}` : ''}`, runId).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+        // Telegram has no template and no window — the full message goes as it is written.
+        const tgText = message || `${headline}${detail ? `\n\n${detail}` : ''}`;
+        const tg = await this.budget?.pushAlert?.(job, tgText, runId).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
         out.telegram = { sent: !!tg?.sent, why: tg?.why || null };
         await step({ label: tg?.sent ? 'Sent on Telegram' : `⚠️ Not sent on Telegram — ${tg?.why || 'Telegram is not set up'}`, status: tg?.sent ? 'done' : 'info', nodeId: 'notify' });
       }
       if (wantWhatsApp) {
-        const wa = await this.alerts?.runFinished?.(title, headline, url, detail ? { detail } : {}).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+        const wa = await this.alerts?.runFinished?.(title, headline, url, { ...(detail ? { detail } : {}), ...(message ? { longBody: message } : {}) }).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
         out.whatsapp = { sent: !!wa?.sent, why: (wa as any)?.why || null };
         await step({ ...whatsappStepLabel(wa), nodeId: 'notify' });
+        // Honest about the half that may not arrive: the template always does, the full text only
+        // inside the 24-hour window. Never let a delivered receipt read as a delivered summary.
+        if (message) {
+          const followUp = (wa as any)?.followUp;
+          await step({
+            label: followUp === 'sent'
+              ? 'Sent your full message on WhatsApp'
+              : `⚠️ Only the short notice reached WhatsApp — your full message needs you to have messaged in the last 24 hours. It is on the run screen${wantTelegram ? ' and went out on Telegram' : ''}.`,
+            status: followUp === 'sent' ? 'done' : 'info',
+            nodeId: 'notify',
+          });
+          out.messageDelivered = followUp === 'sent';
+        }
       }
       out.ok = !!out.whatsapp?.sent || !!out.telegram?.sent;
       return out;

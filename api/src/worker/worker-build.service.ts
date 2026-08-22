@@ -3,12 +3,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
+import { BriefService } from '../agent/brief.service';
 import { ToolKnowledgeService, ToolKnowledge } from '../tools/tool-knowledge.service';
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { AgentPlan, PlanBlock, isDirectFetchAgent, planActionIds, planFromAgent, sourceActionId, sourceLabel } from '../social/plan';
 import { tableOf } from '../social/rows';
 import { argsHashOf } from '../tools/tool-sample';
-import { BuildRequest, BuildSample, buildRequest, planHashOf } from './build-brief';
+import { BuildRequest, BuildSample, buildHashOf, buildRequest, planHashOf } from './build-brief';
 import { WorkerRunnerClient } from './worker-runner.client';
 
 /** A build that has been going this long is not going to finish — its row stops blocking the next one. */
@@ -69,6 +70,7 @@ export class WorkerBuildService implements OnModuleInit {
     // Optional + LAST — spec harnesses build services positionally with fewer arguments.
     private readonly knowledge?: ToolKnowledgeService,
     private readonly samples?: ToolSampleService,
+    private readonly briefs?: BriefService,
   ) {}
 
   onModuleInit() {
@@ -85,7 +87,10 @@ export class WorkerBuildService implements OnModuleInit {
     if (!job) throw new BadRequestException('That job no longer exists.');
     const compilable = isDirectFetchAgent(job);
     const plan = compilable ? planFromAgent(job) : null;
-    const planHash = plan ? planHashOf(plan) : '';
+    // The SAME hash the build turn stamps (BEA-1407): plan + the approved brief's identity. If these
+    // two ever drift apart, every worker reads as stale for ever.
+    const brief = plan && job.areaId ? await this.briefs?.forCodex?.(job.areaId).catch(() => null) : null;
+    const planHash = plan ? buildHashOf(plan, brief || null) : '';
     const rows = await this.rows(agentId, 10);
     const worker = rows.find((b: any) => b.status === 'promoted') || null;
     const building = rows.some((b: any) => b.status === 'building' && Date.now() - new Date(b.startedAt).getTime() < BUILD_STUCK_MS);
@@ -207,12 +212,17 @@ export class WorkerBuildService implements OnModuleInit {
     const cards = await this.cards(plan);
     const samples = await this.samplesFor(plan, cards);
     const kit = this.kit();
+    // The approved brief and the whole conversation behind it (BEA-1407). A job with no brief is
+    // compiled from the plan exactly as before — the old road is not closed, it is just no longer
+    // the only one.
+    const brief = job.areaId ? await this.briefs?.forCodex?.(job.areaId).catch(() => null) : null;
     const req = buildRequest({
       job: { id: job.id, name: job.name },
       plan,
       cards,
       samples,
       kit,
+      brief: brief || null,
       version: opts.version,
       previousVersion: opts.previousVersion ?? null,
       origin: opts.origin || 'build',

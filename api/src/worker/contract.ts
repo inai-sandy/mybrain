@@ -53,6 +53,43 @@ const IDENTITY_COLUMNS = ['link', 'url', 'permalink'];
 /**
  * The contract for a plan. Pure, and the same on the server, in the build turn and in the UI.
  */
+/**
+ * The contract from the OWNER's own "what it worked means" lines (BEA-1407).
+ *
+ * The plan-derived contract can only assert what a plan can express. The brief has a section where
+ * he says, in his words, what a good run looks like — *"at least 20 mails read, all three groups
+ * present, message under 15 lines"* — and that sentence is the only thing that can tell a bad run
+ * from a good one for a job like his.
+ *
+ * Written by the APP, never by Codex, and read **mechanically**: a number he wrote becomes a
+ * minimum, words he named as columns become columns. Anything this cannot read with certainty is
+ * left out rather than guessed — a check that fails a good run teaches him to ignore the alarm,
+ * which is worse than no check at all.
+ */
+export function contractFromBrief(plan: AgentPlan, successLines: string[]): WorkerContract {
+  const base = contractFromPlan(plan);
+  const said = (successLines || []).map((l) => String(l || '')).filter(Boolean);
+  if (!said.length) return base;
+  const text = said.join(' . ');
+
+  // "at least 20 mails" / "20 or more rows" / "minimum 20" — the smallest such number wins, because
+  // he is stating a floor and the strictest floor he wrote is the one he meant.
+  const mins: number[] = [];
+  const re = /\b(?:at least|minimum(?: of)?|no fewer than|more than|over)\s+(\d{1,5})\b|\b(\d{1,5})\s+or more\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const n = Number(m[1] || m[2]);
+    // "more than 20" means 21; "at least 20" means 20. Only the word decides, never a guess.
+    if (Number.isFinite(n) && n > 0 && n <= MAX_CONTRACT_ROWS) mins.push(/more than|over/i.test(m[0]) ? n + 1 : n);
+  }
+  const minRows = mins.length ? Math.max(base.minRows, Math.min(...mins)) : base.minRows;
+
+  const columns = Array.from(new Set([...(base.columns || []), ...columnsNamedIn(text)]));
+  const mustHave = Array.from(new Set([...(base.mustHave || []), ...columns.filter((c) => IDENTITY_COLUMNS.includes(c.toLowerCase())).slice(0, 1)]));
+
+  return { ...base, minRows, columns, mustHave };
+}
+
 export function contractFromPlan(plan: AgentPlan): WorkerContract {
   const watching = plan.mode === 'watch' || plan.mode === 'alert';
   const columns = columnsNamedIn(plan.shape?.prompt || plan.prompt || '');

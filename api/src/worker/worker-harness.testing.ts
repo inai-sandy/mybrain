@@ -218,7 +218,16 @@ export async function makeWorld(opts: {
     /** Every question that went to the owner's phone (BEA-1392) — never a real send in a test. */
     asked: [] as any[],
     failures: [] as any[],
-    runFinished: async (title: string, headline: string) => { alerts.sent.push({ title, headline }); return { sent: true, label: 'WhatsApp sent (template)' }; },
+    /**
+     * `opts.longBody` is the agent's OWN message in full (BEA-1407). The harness records it, and
+     * `followUpDelivers` decides whether Meta's 24-hour window let it through — the difference
+     * between the owner reading his summary and reading a receipt.
+     */
+    followUpDelivers: true,
+    runFinished: async (title: string, headline: string, _path?: string, opts: any = {}) => {
+      alerts.sent.push({ title, headline, detail: opts?.detail, longBody: opts?.longBody });
+      return { sent: true, label: 'WhatsApp sent (template)', ...(opts?.longBody ? { followUp: alerts.followUpDelivers ? 'sent' : 'failed' } : {}) };
+    },
     runFailed: async (name: string, reason: string) => { alerts.failures.push({ name, reason }); return { sent: false }; },
     ownerNumber: async () => OWNER_NUMBER,
     askOwner: async (m: any) => { alerts.asked.push(m); return { sent: true, via: 'template' as const }; },
@@ -238,7 +247,10 @@ export async function makeWorld(opts: {
     },
     decisionFor: async (_actionId: string, ctx: any) => (ctx?.runId && ctx?.nodeId ? gates.decisions[`${ctx.runId}:${ctx.nodeId}`] || null : null),
   };
-  const budget = { checks: [] as string[], check: async (id: string) => { budget.checks.push(id); return { ok: true, spent: 0, ceiling: null, estimate: 1 }; }, pauseAgent: async () => undefined, pushAlert: async () => ({ sent: true }) };
+  // `pushes` records what really went to Telegram — Telegram has no template and no 24-hour window,
+  // so the whole message goes there as written (BEA-1407).
+  const pushes: string[] = [];
+  const budget = { checks: [] as string[], pushes, check: async (id: string) => { budget.checks.push(id); return { ok: true, spent: 0, ceiling: null, estimate: 1 }; }, pauseAgent: async () => undefined, pushAlert: async (_job: any, text: string) => { pushes.push(String(text || '')); return { sent: true }; } };
   const knowledge = { card: async (id: string) => opts.cards?.[id] ?? null };
 
   const sources = new SourceFetchService(actions as any, knowledge as any);

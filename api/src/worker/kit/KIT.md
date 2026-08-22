@@ -56,8 +56,22 @@ step at all** — shaping it would cost tokens and change the rows.
 ```js
 await kit.writeSheet(table, { title, append })   // -> {ok, url, id, created, skipped, nothingNew, rows}
 await kit.writeDocument({ title, markdown })     // -> {ok, docId}
-await kit.notify({ whatsapp, telegram }, { headline, detail, url, title })
+await kit.notify({ whatsapp, telegram }, { headline, detail, url, title, message })
 ```
+
+**`message` is the whole message the brief asked for** — as many lines as it says, written out
+exactly as it should arrive. `headline` is the ONE line that rides inside the WhatsApp template.
+Give both.
+
+Why both: a WhatsApp template variable may not contain a newline, so a grouped, multi-line summary
+cannot travel inside one. The template (the headline) always arrives. The full `message` follows as
+a second, free-text message, which Meta delivers only while the owner's 24-hour window is open. The
+run says plainly which of the two happened — never write a step that implies the full message
+arrived when only the headline did.
+
+If the brief names the exact words to send, build `message` to match them. Do not invent a summary
+format of your own, and do not reduce the message to a count of rows: "finished · 5 rows" is the
+exact failure this whole design exists to end.
 
 The sheet writer is the app's: it creates the sheet, or appends under the sheet's own header and
 skips rows the sheet already has. Never write the same rows twice "to be safe" — a replayed call

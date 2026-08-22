@@ -275,7 +275,7 @@ export function sourceName(s: BriefSource): string {
  */
 export function forCodexPayload(brief: Brief): {
   decides: string;
-  brief: { name: string; sections: { key: string; label: string; lines: BriefLine[] }[]; sources: BriefSource[]; delivery: BriefDelivery };
+  brief: { name: string; version: number; approvedAt?: string | null; sections: { key: string; label: string; lines: BriefLine[] }[]; sources: BriefSource[]; delivery: BriefDelivery };
   transcript: TranscriptTurn[];
 } {
   return {
@@ -284,6 +284,10 @@ export function forCodexPayload(brief: Brief): {
       'Where the two disagree, THE BRIEF WINS. A line or a turn marked struck was killed by the owner — it is kept so you can see he considered it and said no. Never build a struck thing.',
     brief: {
       name: brief.name,
+      // What the worker was built from. A new approved version changes this, which is what makes a
+      // worker STALE when he edits the brief — the same mechanism `planHash` already gives the plan.
+      version: brief.version,
+      approvedAt: brief.approvedAt || null,
       sections: SECTION_KEYS.map((k) => ({ key: k, label: SECTION_LABELS[k], lines: brief.sections[k] || [] })),
       sources: brief.sources,
       delivery: brief.delivery,
