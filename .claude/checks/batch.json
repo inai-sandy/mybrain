@@ -1,73 +1,19 @@
 {
   "startedAt": "2026-08-22T06:25:00Z",
-  "note": "Agent Workers build \u2014 10 pieces, STRICTLY SEQUENTIAL (one worker at a time in this repo; two concurrent sessions silently revert each other via branch switches). Design: specs/AGENT-WORKERS.md. Briefs: specs/briefs/AGENT-WORKERS-1-toolsample.md and specs/briefs/AGENT-WORKERS-QUEUE.md (pieces 2-10). Owner decisions 2026-08-22: two repair attempts, 12h question deadline, Brightdata/Apify AFTER (BEA-1397). Each piece: fresh worker, brief = its Linear issue + the queue file section, ship.sh is the only path to done, close in Linear with a sign-off. Known flake BEA-1376 may fail one ship test run - rerun ship.sh once.",
+  "completedAt": "2026-08-22T13:50:25Z",
+  "status": "complete",
+  "note": "Agent Workers — BUILT, VERIFIED, LIVE. Ten pieces (BEA-1386→1395) plus the re-verification fixes (BEA-1401), all shipped to main and deployed. Design: specs/AGENT-WORKERS.md; briefs in specs/briefs/. Owner decisions 2026-08-22: two repair attempts, 12h question deadline, Brightdata/Apify AFTER (BEA-1397). PROVEN on the owner's real agent 743d0852 at ZERO credits for the comparison (3 credits for the whole acceptance): 41/41 cells identical to the plan runner; a corrupted saved answer caught, repaired by Codex and promoted with 0 vendor calls; ask-and-wait resumed 12s after a real WhatsApp reply with no repeated fetch/write/message. STILL OFF: all NINE agents are useWorker:false — the worker road is dormant until the owner switches one on. NEEDS THE OWNER (root, one time): mkdir -p /srv/mybrain-workers + chown sandy:sandy; copy services/host/mybrain-worker-runner.service to /etc/systemd/system; write /home/sandy/worker-runner/runner.env (0600) with WORKER_RUNNER_TOKEN; daemon-reload; enable --now. Until then the runner runs by hand (port 8769, WORKER_ROOT=/home/sandy/worker-root) and dies on reboot — a switched-on agent then falls back to the plan runner and says so. Deferred by decision: BEA-1396 tappable WhatsApp buttons, BEA-1397 Brightdata/Apify.",
   "issues": [
-    {
-      "id": "BEA-1386",
-      "title": "1/10 ToolSample - keep whole vendor answers",
-      "status": "done",
-      "sha": "8ddf72b"
-    },
-    {
-      "id": "BEA-1387",
-      "title": "2/10 kit v1 + callback API + run journal + runKind",
-      "status": "done",
-      "sha": "cab2d83",
-      "note": "shipped 650bd06 with routes mounted at /api/api/worker; fixed and re-shipped as cab2d83 \u2014 verify routes over HTTP, not just in tests"
-    },
-    {
-      "id": "BEA-1388",
-      "title": "3/10 per-job run lock",
-      "status": "done",
-      "sha": "5f4015c"
-    },
-    {
-      "id": "BEA-1389",
-      "title": "4/10 worker runner (host service)",
-      "status": "done",
-      "sha": "8ba783a",
-      "note": "code shipped; systemd install NEEDS ROOT and is NOT done (owner has the one-liner). Port 8766 was taken by the retired gws-runner, so the runner uses 8769. Until installed, start by hand as sandy: node /home/sandy/worker-runner/server.js"
-    },
-    {
-      "id": "BEA-1390",
-      "title": "5/10 the build turn (Codex compiles the plan)",
-      "status": "done",
-      "note": "plan -> brief -> ONE fresh codex exec -s workspace-write -C vN -> the version's own tests -> promote (symlink move) ONLY on green. Routes GET/POST /api/agent/agents/:id/worker[/build]; nothing DISPATCHES a run onto the worker road yet (a promoted worker is installed and inert) and contract.json is piece 6. The worker runner still needs its root install (see BEA-1389) \u2014 start it by hand as sandy meanwhile, and its WORKER_API must be https://mybrain.1site.ai (the app container publishes no host port)."
-    },
-    {
-      "id": "BEA-1391",
-      "title": "6/10 contracts - fail loudly",
-      "status": "done",
-      "sha": "a462e7b"
-    },
-    {
-      "id": "BEA-1392",
-      "title": "7/10 ask and wait (WhatsApp question + resume)",
-      "status": "done",
-      "sha": "dea8ec2"
-    },
-    {
-      "id": "BEA-1393",
-      "title": "8/10 self-heal",
-      "status": "done",
-      "sha": "845a435"
-    },
-    {
-      "id": "BEA-1394",
-      "title": "9/10 housekeeping + Worker tab + the dispatch switch",
-      "status": "done",
-      "sha": "b439b07"
-    },
-    {
-      "id": "BEA-1395",
-      "title": "10/10 acceptance on a real agent",
-      "status": "done",
-      "sha": "980e802"
-    },
-    {
-      "id": "FINAL-VERIFY",
-      "title": "Owner asked (2026-08-22) for a full re-verification AFTER all 10 pieces: independent adversarial review of the built system vs specs/AGENT-WORKERS.md + live checks on the running server (routes, host runner, a real build+repair, contacts/reminders untouched, owner's 6 agents unchanged, cost + disk). Report findings honestly, fix what is broken.",
-      "status": "pending"
-    }
+    { "id": "BEA-1386", "title": "1/10 ToolSample - keep whole vendor answers", "status": "done", "sha": "8ddf72b" },
+    { "id": "BEA-1387", "title": "2/10 kit v1 + callback API + run journal + runKind", "status": "done", "sha": "cab2d83", "note": "first ship mounted the routes at /api/api/worker; fixed and re-shipped — verify routes over HTTP, not just in tests" },
+    { "id": "BEA-1388", "title": "3/10 per-job run lock", "status": "done", "sha": "5f4015c", "note": "also closed a pre-existing hole: the Flow tab's Run was a second unlocked door on the same job" },
+    { "id": "BEA-1389", "title": "4/10 worker runner (host service)", "status": "done", "sha": "8ba783a", "note": "port 8766 was taken by the retired gws-runner, so it uses 8769" },
+    { "id": "BEA-1390", "title": "5/10 the build turn (Codex compiles the plan)", "status": "done", "sha": "626aad4", "note": "plan -> brief -> ONE fresh codex exec -s workspace-write -C vN -> the version's own tests -> promote (symlink move) ONLY on green" },
+    { "id": "BEA-1391", "title": "6/10 contracts - fail loudly", "status": "done", "sha": "a462e7b", "note": "the APP writes contract.json, never Codex — a model-invented contract can be as wrong as the bug it exists to catch" },
+    { "id": "BEA-1392", "title": "7/10 ask and wait (WhatsApp question + resume)", "status": "done", "sha": "dea8ec2", "note": "owner-number check sits AHEAD of the Contact lookup; a contact's reply still reaches Contacts/Reminders unchanged (proved through the real controller)" },
+    { "id": "BEA-1393", "title": "8/10 self-heal", "status": "done", "sha": "845a435", "note": "promotion guard measures both versions with a tokenless, network-stubbed harness the APP writes; a repair that changes rows is held for the owner" },
+    { "id": "BEA-1394", "title": "9/10 housekeeping + Worker tab + the dispatch switch", "status": "done", "sha": "b439b07", "note": "Agent.useWorker default false; a stale/missing/refused worker falls back to the plan runner for that run and says so" },
+    { "id": "BEA-1395", "title": "10/10 acceptance on a real agent", "status": "done", "sha": "980e802", "note": "found and fixed two real bugs: the 256KB sample cap made the flagship job unbuildable (a real profile answer is 436KB), and a parked worker's clean exit read as done and cancelled the owner's question" },
+    { "id": "BEA-1401", "title": "re-verification fixes (runner secret, build sandbox, journal leak, delete leftovers, tool scope, silent-ready)", "status": "done", "sha": "1ca0778", "note": "the runner now refuses to answer ready when its workers root is unusable — verified live by running a second copy against an unwritable root" }
   ]
 }
