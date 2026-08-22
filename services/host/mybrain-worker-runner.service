@@ -1,0 +1,22 @@
+[Unit]
+Description=My Brain worker runner (host service that runs agent workers — BEA-1389)
+After=network.target
+
+[Service]
+Type=simple
+User=sandy
+Environment=HOME=/home/sandy
+Environment=PATH=/usr/bin:/usr/local/bin:/bin
+# Port 8769: 8765 codex-runner, 8766 gws-runner (retired but still listening), 8767 gemini-runner,
+# 8768 claude-runner, 8770 agent-helper. Confirmed with `ss -ltnp` before pinning.
+Environment=WORKER_RUNNER_HOST=172.18.0.1
+Environment=WORKER_RUNNER_PORT=8769
+Environment=WORKER_ROOT=/srv/mybrain-workers
+Environment=WORKER_API=http://127.0.0.1:3000
+WorkingDirectory=/home/sandy/worker-runner
+ExecStart=/usr/bin/node /home/sandy/worker-runner/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
