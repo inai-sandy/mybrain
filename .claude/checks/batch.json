@@ -20,12 +20,14 @@
     {
       "id": "BEA-1407",
       "title": "3/6 Codex builds from the brief and the whole transcript",
-      "status": "pending"
+      "status": "done",
+      "sha": "99da369"
     },
     {
       "id": "BEA-1408",
       "title": "4/6 the trial run: see the real thing before Create",
-      "status": "pending"
+      "status": "done",
+      "sha": "a3f00f2"
     },
     {
       "id": "BEA-1409",

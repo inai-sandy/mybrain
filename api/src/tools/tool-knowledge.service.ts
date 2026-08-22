@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ComposioProvider } from './composio.provider';
 import { KNOWLEDGE_NOTES, KnowledgeNote, notesFor } from './knowledge-notes';
+import { ToolLessonService } from './tool-lesson.service';
 import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { WhatsAppProvider } from './whatsapp.provider';
 import { isServiceToolId, parseServiceToolId, ServiceAction } from './service-provider';
@@ -455,6 +456,9 @@ export class ToolKnowledgeService {
     // The third provider (BEA-1384). Its cards read like a Services card (no metering, schema-only
     // spec part); the 24h-window / approved-template truths ride in as notes.
     private readonly whatsapp?: WhatsAppProvider,
+    // What using each action has taught us (BEA-1409). Optional: without it a card is exactly what
+    // it was before, so every existing spec harness behaves unchanged.
+    private readonly lessons?: ToolLessonService,
   ) {}
 
   /** The hand-kept notes in use — swapped only by the tests. */
@@ -526,6 +530,9 @@ export class ToolKnowledgeService {
 
     const rows = await this.rows(parsed.service, actionId);
     const notes = notesFor(actionId, parsed.service, this.notes);
+    // What USING it has taught us (BEA-1409) — derived mechanically from real calls, never typed by
+    // anybody, so an action nobody has written a note for still has know-how the moment it is used.
+    const learned = (await this.lessons?.forAction?.(actionId).catch(() => [])) || [];
 
     // ---- spec part
     const params = paramsOf(action.schema);
@@ -598,7 +605,12 @@ export class ToolKnowledgeService {
       paging,
       cost,
       health,
-      notes: notes.flatMap((n) => n.notes),
+      // Learned facts come FIRST: they are about this account and this month, while a hand note is
+      // general. Both are kept — a human still knows things one request and one answer cannot show.
+      notes: [
+        ...learned.map((l: any) => `${l.text} (learned by using it — ${l.confidence}${l.timesSeen > 1 ? `, seen ${l.timesSeen} times` : ''})`),
+        ...notes.flatMap((n) => n.notes),
+      ],
       ...(action.retired ? { retired: true } : {}),
       updatedAt: new Date().toISOString(),
     };
