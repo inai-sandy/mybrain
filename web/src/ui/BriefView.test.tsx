@@ -177,10 +177,12 @@ describe('the brief screen', () => {
     expect(p.onApprove).toHaveBeenCalled();
   });
 
-  it('an approved brief says what happens next instead of offering approve again', () => {
+  it('an approved brief stops offering approve, and does not repeat what the trial card says', () => {
     view({ status: 'approved' });
     expect(screen.queryByTestId('brief-approve')).toBeNull();
-    expect(screen.getByTestId('brief-approved')).toHaveTextContent(/see it run once before anything is saved/i);
+    // Short on purpose: this is a sticky bar on a phone, and the trial card above already explains
+    // what happens next.
+    expect(screen.getByTestId('brief-approved')).toHaveTextContent('You approved this.');
   });
 
   // ---- adding -----------------------------------------------------------------------------------------
