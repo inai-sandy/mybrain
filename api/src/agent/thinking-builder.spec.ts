@@ -545,7 +545,8 @@ describe('the pieces (BEA-1371)', () => {
 
   it('parses JSON out of prose and fences, and closes a cut-off object', () => {
     expect(parseBuilderJson('```json\n{"reply":"hi","plan":null}\n```')).toEqual({ reply: 'hi', plan: null });
-    expect(parseBuilderJson('{"reply":"hi","plan":{"name":"x"')).toEqual({ reply: 'hi', plan: { name: 'x' } });
+    // A brace we had to close ourselves marks the answer as cut off (BEA-1402), so the turn can say so.
+    expect(parseBuilderJson('{"reply":"hi","plan":{"name":"x"')).toEqual({ reply: 'hi', plan: { name: 'x' }, cutOff: true });
     expect(parseBuilderJson('nothing')).toBeNull();
     // Cut inside a string (the first live turn): the reply survives, marked cut off.
     expect(parseBuilderJson('{"reply":"Here is the plan.\\nIt fetches a lot","plan":{"name":"x","sources":[{"kind":"sou')).toEqual({ reply: 'Here is the plan.\nIt fetches a lot', cutOff: true });
