@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { BriefPayload, briefInWords, buildHashOf, buildRequest, transcriptInWords } from './build-brief';
 import { contractFromBrief, contractFromPlan } from './contract';
-import { AgentPlan } from '../social/plan';
+import { ALL_PAGES, AgentPlan, MAX_PAGES, MAX_PAGES_ALL, clampPages, estimatePlanCost, pageCeiling, pagesText } from '../social/plan';
 
 /**
  * Codex builds from the brief and the WHOLE conversation (BEA-1407).
@@ -188,5 +188,46 @@ describe('the conversation, written out', () => {
     expect(text.indexOf('first')).toBeLessThan(text.indexOf('second'));
     expect(text).toContain('**HIM**');
     expect(text).toContain('**THE BUILDER**');
+  });
+});
+
+/**
+ * "Read ALL my emails since yesterday" (BEA-1407).
+ *
+ * The plan had a page count, capped at 11, and a count is a guess about how much of somebody's life
+ * fits on a page. `ALL_PAGES` is how the brief says "until it runs out" — bounded by the source
+ * itself, by a runaway backstop, and by the daily credit ceiling, checked before every page.
+ */
+describe('"every page there is"', () => {
+  it('reads the word "all" as a real instruction', () => {
+    expect(clampPages('all')).toBe(ALL_PAGES);
+    expect(clampPages(ALL_PAGES)).toBe(ALL_PAGES);
+  });
+
+  it('still caps an ordinary number, so nothing else changes', () => {
+    expect(clampPages(3)).toBe(3);
+    expect(clampPages(99)).toBe(MAX_PAGES);
+    expect(clampPages('rubbish')).toBe(1);
+    expect(clampPages(0)).toBe(1);
+  });
+
+  it('has a runaway backstop, and it is far above any real source', () => {
+    expect(pageCeiling(ALL_PAGES)).toBe(MAX_PAGES_ALL);
+    expect(MAX_PAGES_ALL).toBeGreaterThan(MAX_PAGES * 10);
+    expect(pageCeiling(3)).toBe(3);
+  });
+
+  it('says so in plain words rather than printing -1 at him', () => {
+    expect(pagesText(ALL_PAGES)).toBe('every page there is');
+    expect(pagesText(1)).toBe('1 page');
+    expect(pagesText(4)).toBe('4 pages');
+  });
+
+  it('costs it as a floor, never as a number it cannot know', () => {
+    const all = { ...PLAN, sources: [{ ...(PLAN.sources[0] as any), pages: ALL_PAGES }] } as AgentPlan;
+    const cost = estimatePlanCost(all, {});
+    expect(cost.how).toContain('every page there is');
+    expect(cost.how).toContain('or more');
+    expect(cost.how).toContain('daily ceiling');
   });
 });
