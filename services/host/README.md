@@ -41,7 +41,8 @@ env-overridable: `WORKER_RUNNER_PORT` here, `WORKER_RUNNER_URL` on the app (in `
 | --- | --- |
 | `GET /status` | `{installed, version, loggedIn, ready, workdir, runner, engine, kit, api, workers, running}` — the same keys the codex runner answers, so the engine pill can show it unchanged. |
 | `POST /run {jobId, runId, token, seed?, kit?, timeoutMs?}` | Spawns `node --max-old-space-size=512 worker.mjs` in `<root>/<jobId>/current`, detached. Answers **ndjson**: `{type:'step', step}` per JSON line the worker prints, `{type:'log', line}` for anything else, and a final `{type:'result', status, rows, error}`. |
-| `POST /build {jobId, brief, model?, timeoutMs?}` | Makes `<root>/<jobId>/vN`, pins the kit, writes `BRIEF.md`, runs one fresh `codex exec -s workspace-write -C vN`, then `node --test worker.test.mjs`. Answers `{ok, version, dir, tests, log}`. **It does not promote** — moving `current` is the build turn's call (piece 5). |
+| `POST /build {jobId, brief, files?, model?, timeoutMs?}` | Makes `<root>/<jobId>/vN`, writes the app's `files` into it (the pinned kit, its docs, `plan.json`, the saved answers under `samples/`), writes `BRIEF.md`, runs one fresh `codex exec -s workspace-write -C vN`, then `node --test worker.test.mjs`. Answers `{ok, version, dir, wrote, tests, sessionId, log}`. **It does not promote** — moving `current` is the build turn's call. |
+| `POST /promote {jobId, version, meta?}` | Writes `meta.json` into `v<version>` (when `meta` is given) and moves the `current` symlink to it, atomically. Answers `{ok, version, previous}`. A **rollback is the same call** with an older version, and it leaves that version's own `meta.json` alone. Refused (400) when the version has no `worker.mjs`, and (409) while the job is busy here. |
 
 A malformed request (bad `jobId`, no `runId`, no token, no brief) is a plain `400`. A request that is
 fine but cannot run — no worker installed, kit too new, the job already running here — is a `200`
@@ -72,7 +73,7 @@ ndjson stream whose one line is the honest failed result, so the app has one roa
 | --- | --- | --- |
 | `WORKER_RUNNER_HOST` / `WORKER_RUNNER_PORT` | `172.18.0.1` / `8769` | Where it listens (the Docker gateway). |
 | `WORKER_ROOT` | `/srv/mybrain-workers` | The version folders (§D). |
-| `WORKER_API` | `http://127.0.0.1:3000` | What a worker calls back on. |
+| `WORKER_API` | `http://127.0.0.1:3000` | What a worker calls back on. **On this VPS it must be set** (the unit sets it to `https://mybrain.1site.ai`): the app container publishes no host port at all — Caddy reaches it over the Docker network — so a worker on the host cannot call `127.0.0.1:3000`. Confirmed from the host on 2026-08-22. |
 | `WORKER_TIMEOUT_MS` / `WORKER_MAX_TIMEOUT_MS` | `300000` / `1800000` | Default and ceiling for a run. |
 | `WORKER_BUILD_TIMEOUT_MS` / `WORKER_TEST_TIMEOUT_MS` | `900000` / `120000` | The build turn and its tests. |
 | `WORKER_MEMORY_MB` | `512` | `--max-old-space-size`. |

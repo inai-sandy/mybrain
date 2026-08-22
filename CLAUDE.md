@@ -738,6 +738,34 @@ added there too or it is silently dropped; steps, logs and stderr share ONE 2,00
 an off-by-default shared secret (`WORKER_RUNNER_TOKEN` + `x-runner-token`) for the day piece 5 sends
 real briefs to `/build` — that is the one route that runs a Codex session on a caller's text.
 
+**The build turn: Codex compiles an approved plan into a tested worker (BEA-1390, agent workers 5/10
+— `specs/AGENT-WORKERS.md` §C, §D).** `WorkerBuildService` (`api/src/worker/worker-build.service.ts`)
+is the whole turn on the app's side: the job's plan (`planFromAgent`) → a build brief (the plan in
+the owner's own terms, the pinned `kit/kit.js` + `kit/KIT.md`, the **fact card** for every action it
+calls, and the saved `ToolSample`s its tests will stand on) → `WorkerRunnerClient.build()` → the
+runner makes `vN`, writes those files, runs **ONE fresh `codex exec -s workspace-write -C vN`**
+(`resume` cannot change sandbox or cwd, so a build can never be a resumed session) and then `node
+--test worker.test.mjs`. **Green tests are the only thing that moves `current`**: promotion is
+`POST /promote` on the runner (an atomic symlink move; the same call with an older version is the
+rollback), and it happens after the tests, never before. A build that writes nothing, writes no
+tests, fails them, or passes and cannot be put live leaves the job **on the road it was already on**
+— the plan runner, or its previous worker version — and the `WorkerBuild` row says which, in words.
+**The newest `promoted` row IS the live worker** (no "current version" column anywhere else), and
+`planHash` on it is what makes a worker **stale**: `planHashOf()` hashes what the worker DOES (sources
+· args · pages · merge · shape prompt · watch · output · notify), so a rename does not, but a changed
+hashtag or output does; the job's plan is hashed fresh on every read, so staleness is a comparison,
+never a flag. Routes: `GET /api/agent/agents/:id/worker` (version, tests, stale, the last 10 builds)
+and `POST …/worker/build` (Create/Rebuild). **A promoted worker is installed and inert** — nothing
+dispatches a run onto the worker road yet, so every live agent keeps running exactly as today; the
+Worker tab that taps these routes is piece 9, `contract.json` is piece 6. The kit is read off disk at
+run time, so the Dockerfile copies `src/worker/kit` into `dist/worker/kit` (`tsc` does not carry
+non-TS files). Only the newest promoted build's samples are pinned against the eviction sweep
+(`ToolSampleService.setPinned`, `pick()` returns the row id beside the answer). Traps: the runner's
+`WORKER_API` default `127.0.0.1:3000` answers nothing on this VPS — the app container publishes **no**
+host port, so the unit sets `https://mybrain.1site.ai`; `codex exec --json` announces its id as
+`thread.started`/`thread_id`, not `session_id`; a build's `files` map is checked for `..`/absolute
+paths BEFORE the version folder is made, so a bad request leaves nothing behind.
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

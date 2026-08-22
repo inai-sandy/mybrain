@@ -12,7 +12,10 @@ Environment=PATH=/usr/bin:/usr/local/bin:/bin
 Environment=WORKER_RUNNER_HOST=172.18.0.1
 Environment=WORKER_RUNNER_PORT=8769
 Environment=WORKER_ROOT=/srv/mybrain-workers
-Environment=WORKER_API=http://127.0.0.1:3000
+# What a worker calls back on. The app container publishes NO host port (Caddy reaches it over the
+# Docker network), so 127.0.0.1:3000 would answer nothing — a worker reaches the app the same way
+# the world does. Checked from the host, 2026-08-22.
+Environment=WORKER_API=https://mybrain.1site.ai
 WorkingDirectory=/home/sandy/worker-runner
 ExecStart=/usr/bin/node /home/sandy/worker-runner/server.js
 Restart=always

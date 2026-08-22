@@ -20,6 +20,24 @@ Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-4
     dispatches a Watch on the worker road until a build turn can write one.
   The worker's clock is the moment the RUN started (journalled at `seq -1`), not the moment of the
   spawn: a question that waits two days must not move "the last 30 days" under the worker.
+- **3/10 — §G the per-job run lock** (BEA-1388): `RunLockService` + the `JobRunLock` row, claimed at
+  `startRun()`, `FlowRunnerService.start()` and `WorkerTokenService.mint()`.
+- **4/10 — §F the worker runner** (BEA-1389): `services/host/worker-runner.server.js` on **8769**
+  (8766 was taken), ndjson `/run`, the fixed child environment, the kit-too-new refusal.
+- **5/10 — §C, §D the build turn** (BEA-1390): plan → brief → ONE fresh `codex exec -s workspace-write
+  -C vN` → the version's own tests → **green tests, and only green tests, move `current`**.
+  `WorkerBuildService` + `WorkerRunnerClient` + the `WorkerBuild` row (the newest `promoted` row IS
+  the live worker); the runner grew `files` on `/build` and a `/promote` route (the symlink move, and
+  the same call with an older version is the rollback). Deliberate differences from the sketch below:
+  - **the build turn does not dispatch a run.** A promoted worker is installed and inert until the
+    piece that routes a run onto the worker road lands — every live agent keeps running on the plan
+    runner exactly as it does today, which is the whole point of promoting nothing untested;
+  - **`contract.json` is not written yet** (§E is piece 6): a worker's tests are its proof today, and
+    the brief asks for the five things a contract will later assert;
+  - **the trigger is a route, not a hook on Create.** `POST /api/agent/agents/:id/worker/build`, with
+    `GET` beside it for the version, the tests, staleness and the last builds. The tap that calls them
+    is the Worker tab (piece 9) — a Codex session started silently by every agent create would be a
+    surprise, and there is nothing to show it on yet.
 
 ## The owner's words
 
@@ -265,6 +283,21 @@ Rules:
 `planHash` is the hash of the plan the worker was compiled from. **If the plan changes, the worker is
 stale** — the UI says so and offers Rebuild; a stale worker keeps running until rebuilt (never
 silently ignored, never silently used after an edit the owner expects to take effect).
+
+**As built (BEA-1390).** The folder also carries `BRIEF.md` (what Codex was told) and `plan.json`
+(the plan it compiled), and every file in it comes from the app — the runner writes what it is sent
+and nothing else. `planHash` (`planHashOf` in `api/src/worker/build-brief.ts`) is a key-sorted hash
+of what the worker DOES: the sources with their actions, arguments and pages, the merge, the shaping
+prompt, the watch mode, the output and the notify. Renaming a job or changing its icon does not make
+a worker stale; changing a hashtag, a page count or the output does. The hash lives on the
+`WorkerBuild` row, and the job's plan is hashed fresh on every read, so staleness is a comparison and
+never a flag somebody has to remember to set. `samples/index.json` names the `ToolSample` ids a
+version was tested against, and `WorkerBuildService` registers them with `ToolSampleService.setPinned()`
+— **only the newest promoted build of each job pins anything**, so the sweep can still evict the
+answers a failed build stood on. A source with no saved answer yet is said out loud in
+`index.json` and in the brief, with the fields the know-how card has observed, and the tests Codex
+writes mark that fixture as made up — a made-up fixture that knows it is made up, never one
+pretending to be real.
 
 ## E. The contract — what "it worked" means
 

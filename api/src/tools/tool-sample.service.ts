@@ -167,6 +167,17 @@ export class ToolSampleService implements OnModuleInit {
    * a repair loop runs as many times as it needs to and costs nothing.
    */
   async replay(actionId: string, argsHash?: string): Promise<any | null> {
+    const picked = await this.pick(actionId, argsHash);
+    return picked ? picked.data : null;
+  }
+
+  /**
+   * The same answer, with the row it came from: its id, the arguments it was given and when it was
+   * kept. A worker's `samples/index.json` names the ids it was tested against (BEA-1390), and the
+   * eviction sweep is told to keep exactly those — so the fixture under a live worker's tests cannot
+   * be swept out from under it.
+   */
+  async pick(actionId: string, argsHash?: string): Promise<{ id: string; args: Record<string, any>; createdAt: Date; data: any } | null> {
     const find = this.prisma?.toolSample?.findMany;
     if (!find) return null;
     const rows = await this.prisma.toolSample
@@ -180,7 +191,10 @@ export class ToolSampleService implements OnModuleInit {
       // A truncated sample is evidence, not a fixture — its JSON does not parse. Skip to the next.
       if (!isUsable(r)) continue;
       const parsed = await this.parse(r.payload).catch(() => undefined);
-      if (parsed !== undefined) return parsed;
+      if (parsed === undefined) continue;
+      let args: Record<string, any> = {};
+      try { args = JSON.parse(r.arguments || '{}') || {}; } catch { args = {}; }
+      return { id: r.id, args, createdAt: r.createdAt, data: parsed };
     }
     return null;
   }
