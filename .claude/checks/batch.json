@@ -1,17 +1,73 @@
 {
   "startedAt": "2026-08-22T06:25:00Z",
-  "note": "Agent Workers build — 10 pieces, STRICTLY SEQUENTIAL (one worker at a time in this repo; two concurrent sessions silently revert each other via branch switches). Design: specs/AGENT-WORKERS.md. Briefs: specs/briefs/AGENT-WORKERS-1-toolsample.md and specs/briefs/AGENT-WORKERS-QUEUE.md (pieces 2-10). Owner decisions 2026-08-22: two repair attempts, 12h question deadline, Brightdata/Apify AFTER (BEA-1397). Each piece: fresh worker, brief = its Linear issue + the queue file section, ship.sh is the only path to done, close in Linear with a sign-off. Known flake BEA-1376 may fail one ship test run - rerun ship.sh once.",
+  "note": "Agent Workers build \u2014 10 pieces, STRICTLY SEQUENTIAL (one worker at a time in this repo; two concurrent sessions silently revert each other via branch switches). Design: specs/AGENT-WORKERS.md. Briefs: specs/briefs/AGENT-WORKERS-1-toolsample.md and specs/briefs/AGENT-WORKERS-QUEUE.md (pieces 2-10). Owner decisions 2026-08-22: two repair attempts, 12h question deadline, Brightdata/Apify AFTER (BEA-1397). Each piece: fresh worker, brief = its Linear issue + the queue file section, ship.sh is the only path to done, close in Linear with a sign-off. Known flake BEA-1376 may fail one ship test run - rerun ship.sh once.",
   "issues": [
-    { "id": "BEA-1386", "title": "1/10 ToolSample - keep whole vendor answers", "status": "done", "sha": "8ddf72b" },
-    { "id": "BEA-1387", "title": "2/10 kit v1 + callback API + run journal + runKind", "status": "done", "sha": "cab2d83", "note": "shipped 650bd06 with routes mounted at /api/api/worker; fixed and re-shipped as cab2d83 — verify routes over HTTP, not just in tests" },
-    { "id": "BEA-1388", "title": "3/10 per-job run lock", "status": "done", "sha": "5f4015c" },
-    { "id": "BEA-1389", "title": "4/10 worker runner (host service)", "status": "done", "sha": "8ba783a", "note": "code shipped; systemd install NEEDS ROOT and is NOT done (owner has the one-liner). Port 8766 was taken by the retired gws-runner, so the runner uses 8769. Until installed, start by hand as sandy: node /home/sandy/worker-runner/server.js" },
-    { "id": "BEA-1390", "title": "5/10 the build turn (Codex compiles the plan)", "status": "done", "note": "plan -> brief -> ONE fresh codex exec -s workspace-write -C vN -> the version's own tests -> promote (symlink move) ONLY on green. Routes GET/POST /api/agent/agents/:id/worker[/build]; nothing DISPATCHES a run onto the worker road yet (a promoted worker is installed and inert) and contract.json is piece 6. The worker runner still needs its root install (see BEA-1389) — start it by hand as sandy meanwhile, and its WORKER_API must be https://mybrain.1site.ai (the app container publishes no host port)." },
-    { "id": "BEA-1391", "title": "6/10 contracts - fail loudly", "status": "done", "sha": "a462e7b" },
-    { "id": "BEA-1392", "title": "7/10 ask and wait (WhatsApp question + resume)", "status": "done", "sha": "dea8ec2" },
-    { "id": "BEA-1393", "title": "8/10 self-heal", "status": "done", "sha": "845a435" },
-    { "id": "BEA-1394", "title": "9/10 housekeeping + Worker tab + the dispatch switch", "status": "done", "sha": "b439b07" },
-    { "id": "BEA-1395", "title": "10/10 acceptance on a real agent", "status": "in_progress" },
-    { "id": "FINAL-VERIFY", "title": "Owner asked (2026-08-22) for a full re-verification AFTER all 10 pieces: independent adversarial review of the built system vs specs/AGENT-WORKERS.md + live checks on the running server (routes, host runner, a real build+repair, contacts/reminders untouched, owner's 6 agents unchanged, cost + disk). Report findings honestly, fix what is broken.", "status": "pending" }
+    {
+      "id": "BEA-1386",
+      "title": "1/10 ToolSample - keep whole vendor answers",
+      "status": "done",
+      "sha": "8ddf72b"
+    },
+    {
+      "id": "BEA-1387",
+      "title": "2/10 kit v1 + callback API + run journal + runKind",
+      "status": "done",
+      "sha": "cab2d83",
+      "note": "shipped 650bd06 with routes mounted at /api/api/worker; fixed and re-shipped as cab2d83 \u2014 verify routes over HTTP, not just in tests"
+    },
+    {
+      "id": "BEA-1388",
+      "title": "3/10 per-job run lock",
+      "status": "done",
+      "sha": "5f4015c"
+    },
+    {
+      "id": "BEA-1389",
+      "title": "4/10 worker runner (host service)",
+      "status": "done",
+      "sha": "8ba783a",
+      "note": "code shipped; systemd install NEEDS ROOT and is NOT done (owner has the one-liner). Port 8766 was taken by the retired gws-runner, so the runner uses 8769. Until installed, start by hand as sandy: node /home/sandy/worker-runner/server.js"
+    },
+    {
+      "id": "BEA-1390",
+      "title": "5/10 the build turn (Codex compiles the plan)",
+      "status": "done",
+      "note": "plan -> brief -> ONE fresh codex exec -s workspace-write -C vN -> the version's own tests -> promote (symlink move) ONLY on green. Routes GET/POST /api/agent/agents/:id/worker[/build]; nothing DISPATCHES a run onto the worker road yet (a promoted worker is installed and inert) and contract.json is piece 6. The worker runner still needs its root install (see BEA-1389) \u2014 start it by hand as sandy meanwhile, and its WORKER_API must be https://mybrain.1site.ai (the app container publishes no host port)."
+    },
+    {
+      "id": "BEA-1391",
+      "title": "6/10 contracts - fail loudly",
+      "status": "done",
+      "sha": "a462e7b"
+    },
+    {
+      "id": "BEA-1392",
+      "title": "7/10 ask and wait (WhatsApp question + resume)",
+      "status": "done",
+      "sha": "dea8ec2"
+    },
+    {
+      "id": "BEA-1393",
+      "title": "8/10 self-heal",
+      "status": "done",
+      "sha": "845a435"
+    },
+    {
+      "id": "BEA-1394",
+      "title": "9/10 housekeeping + Worker tab + the dispatch switch",
+      "status": "done",
+      "sha": "b439b07"
+    },
+    {
+      "id": "BEA-1395",
+      "title": "10/10 acceptance on a real agent",
+      "status": "done",
+      "sha": "980e802"
+    },
+    {
+      "id": "FINAL-VERIFY",
+      "title": "Owner asked (2026-08-22) for a full re-verification AFTER all 10 pieces: independent adversarial review of the built system vs specs/AGENT-WORKERS.md + live checks on the running server (routes, host runner, a real build+repair, contacts/reminders untouched, owner's 6 agents unchanged, cost + disk). Report findings honestly, fix what is broken.",
+      "status": "pending"
+    }
   ]
 }
