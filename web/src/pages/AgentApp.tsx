@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ChevronRight, Loader2, Play, Sparkles, FileText, CheckCircle2, RotateCcw, MessageSquare, Save, Check, X, Settings as GearIcon, Workflow, Clock, ListChecks, History as HistoryIcon } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
@@ -17,6 +17,7 @@ import { plainPreview } from '../ui/plainPreview';
 import { AddSourcePanel } from './social/AddSourcePanel';
 import { entryOf, sourceIdFor, sourcesOf, toolArgsOf, toolsOf } from '../ui/toolArgs';
 import { creditsText, type PlanCost } from '../ui/PlanCard';
+import { WorkerRow, workerSummary, type WorkerState } from './AgentWorkerRow';
 
 type UiInput = { key: string; label: string; type: 'topic' | 'text' | 'url' | 'contact' | 'date' | 'choice'; placeholder?: string; options?: string[] };
 type UiSpec = { headline: string; inputs: UiInput[]; view: 'report' | 'brief' | 'checklist' | 'plain'; runLabel: string };
@@ -52,6 +53,7 @@ export function AgentApp() {
   const [addingSource, setAddingSource] = useState(false); // another Social source on a direct-fetch job (BEA-1359)
   const [planCost, setPlanCost] = useState<PlanCost | null>(null); // ≈ what one run costs (BEA-1369); today's figure while a source is down (BEA-1375)
   const [contractWords, setContractWords] = useState<string[] | null>(null); // what "it worked" means, in plain words (BEA-1391)
+  const [worker, setWorker] = useState<WorkerState | null>(null); // the job's worker + the dispatch switch (BEA-1394)
   const catalog = useCatalog();
   const toolNames: Record<string, string> = Object.fromEntries((catalog?.tools || []).map((t: any) => [t.id, t.name]));
   const [allSkills, setAllSkills] = useState<any[] | null>(null);
@@ -100,6 +102,14 @@ export function AgentApp() {
   // ≈ credits per run for a direct-fetch (Social) job — from the plan + the know-how cards (BEA-1369). Re-read whenever the sources change.
   const isDirectFetch = !!(a?.toolArgs && typeof a.toolArgs === 'object' && Object.keys(a.toolArgs).length);
   const toolArgsKey = isDirectFetch ? JSON.stringify(a.toolArgs) : '';
+  // The job's worker, its switch and the road the next run takes (BEA-1394). Owned here so the
+  // CLOSED accordion row can say it in one line too; the row itself re-reads while a build runs.
+  const loadWorker = useCallback(async () => {
+    const d = await fetch(`/api/agent/agents/${id}/worker`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (d?.agentId) setWorker(d);
+    return d;
+  }, [id]);
+  useEffect(() => { if (isDirectFetch) loadWorker(); else setWorker(null); }, [isDirectFetch, loadWorker]);
   useEffect(() => {
     if (!isDirectFetch) { setPlanCost(null); setContractWords(null); return; }
     let live = true;
@@ -591,6 +601,17 @@ export function AgentApp() {
                     ))}
                   </ul>
                   <p className="text-[11px] text-zinc-400">Checked before anything is written. A run that does not pass fails out loud and writes nothing — no half-empty sheet, no "done" with no rows. These checks come from the plan above, so changing the sources or the task changes them too.</p>
+                </SettingsRow>
+              )}
+
+              {/* 3c · Worker 🛠 — the compiled version, its tests, staleness, repairs, and the switch
+                   that decides which road a run takes (BEA-1394). Direct-fetch jobs only: an engine
+                   job has no plan to compile, and the row says so rather than offering a dead button. */}
+              {isDirectFetch && (
+                <SettingsRow k="worker" icon="🛠" title="Worker"
+                  summary={workerSummary(worker)}
+                  open={openRow === 'worker'} onToggle={toggleRow}>
+                  <WorkerRow agentId={String(id)} worker={worker} contractWords={contractWords} reload={loadWorker} toast={toast} />
                 </SettingsRow>
               )}
 

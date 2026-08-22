@@ -47,6 +47,15 @@ const FINISHED = ['done', 'failed', 'cancelled'];
 export type AgentFlowSync = { afterSave(agent: any, ctx: { created: boolean; changed: string[] }): Promise<void> };
 
 /**
+ * "Deleting an agent deletes its worker" (BEA-1394 — `specs/AGENT-WORKERS.md` §I). The rows are this
+ * service's to clean up; the version folders on the host belong to the worker runner, so the delete
+ * asks through this seam (registered by `WorkerDispatchService`) rather than importing WorkerModule,
+ * which imports AgentModule. It never throws and never blocks the delete — a folder we could not
+ * reach is a warning in the log, not a job the owner cannot get rid of.
+ */
+export type WorkerCleanup = (jobId: string) => Promise<void>;
+
+/**
  * AgentService — the DURABLE human-in-the-loop engine (BEA-619).
  *
  * This is the piece Hermes does NOT give us: a run can pause on a structured question,
@@ -60,6 +69,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   private flowSync: AgentFlowSync | null = null;
   private answered: RunAnswered | null = null;
   private runFailed: RunFailed | null = null;
+  private workerCleanup: WorkerCleanup | null = null;
 
   // `locks` is optional and LAST: spec harnesses build this service positionally with just Prisma,
   // and every call is `?.`-guarded, so a harness without it behaves exactly as before. (BEA-1388)
@@ -91,6 +101,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    */
   setRunFailedHook(hook: RunFailed | null) {
     this.runFailed = hook;
+  }
+
+  /**
+   * Register who removes a deleted job's worker folders (BEA-1394). Called once by
+   * `WorkerDispatchService.onModuleInit` — the same registration seam, for the same reason.
+   */
+  setWorkerCleanup(hook: WorkerCleanup | null) {
+    this.workerCleanup = hook;
   }
 
   onModuleInit() {
@@ -203,7 +221,46 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   async getRun(id: string) {
     const run = await this.prisma.agentRun.findUnique({ where: { id }, include: { waitpoints: true } });
     if (!run) throw new NotFoundException('Run not found');
-    return this.shapeRun(run);
+    return { ...this.shapeRun(run), cost: await this.runCost(id, (run as any).aiTokens) };
+  }
+
+  /**
+   * What ONE run really cost (BEA-1394 §I, "cost is shown per run"). Until now neither road showed a
+   * total — the plan runner said its credits inside a sentence and the worker road said nothing.
+   *
+   * Credits are summed from the `ToolCall` rows that already carry this run's id (every paid call
+   * goes through `runDetailed()`, on both roads and from the worker's callback API alike), so there
+   * is no second ledger to keep in step. AI tokens have no such column anywhere, so they are added
+   * up on the run row as the model steps happen (`addAiTokens`). `calls` is how many paid calls the
+   * total is made of — a 0-credit answer is still a call, and saying so is how a cache hit reads.
+   */
+  async runCost(runId: string, aiTokens?: number): Promise<{ credits: number; aiTokens: number; calls: number }> {
+    let credits = 0;
+    let calls = 0;
+    try {
+      const rows: any[] = (await (this.prisma as any).toolCall?.findMany?.({ where: { runId }, select: { credits: true } })) || [];
+      calls = rows.length;
+      for (const r of rows) credits += Number(r.credits) || 0;
+    } catch { /* no ledger in a harness — the run still reads, with nothing claimed */ }
+    let tokens = Number(aiTokens) || 0;
+    if (aiTokens === undefined) {
+      const row: any = await this.prisma.agentRun.findUnique({ where: { id: runId }, select: { aiTokens: true } as any }).catch(() => null);
+      tokens = Number(row?.aiTokens) || 0;
+    }
+    return { credits, aiTokens: tokens, calls };
+  }
+
+  /**
+   * Add what a model step just spent to the run's own total (BEA-1394). Both roads call it — the plan
+   * runner after its shaping step, the worker's `/api/worker/ai` after each one — because `UsageLog`
+   * is keyed by FEATURE and has no run on it. Never throws: a figure is not worth a run.
+   */
+  async addAiTokens(runId: string, tokens: number): Promise<void> {
+    const n = Math.max(0, Math.round(Number(tokens) || 0));
+    if (!runId || !n) return;
+    try {
+      await this.prisma.agentRun.update({ where: { id: runId }, data: { aiTokens: { increment: n } } as any });
+    } catch { /* a run that has gone, or a harness without the column */ }
   }
 
   /**
@@ -546,6 +603,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (p.keepDays !== undefined) data.keepDays = p.keepDays == null ? null : Math.max(1, Math.min(3650, Number(p.keepDays) || 0)) || null;
     if (p.engine !== undefined) data.engine = p.engine && typeof p.engine === 'object' ? JSON.stringify(p.engine) : null;
     if (p.indexToBrain !== undefined) data.indexToBrain = !!p.indexToBrain;
+    // The dispatch switch (BEA-1394): "run it on its worker" / "run it the old way". Nothing else
+    // in the app ever writes this — it is the owner's tap, and turning it off needs no rebuild.
+    if (p.useWorker !== undefined) data.useWorker = !!p.useWorker;
     // Where the result goes + the pinned fetch arguments (BEA-1357).
     if (p.outputDest !== undefined) data.outputDest = this.normOutputDest(p.outputDest);
     if (p.sheetId !== undefined) data.sheetId = this.cleanSheetId(p.sheetId);
@@ -582,17 +642,45 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
+  /**
+   * Delete a job and everything that belongs to it — nothing left behind (BEA-1394 §I).
+   *
+   * Most of this is hand-kept because the tables have no foreign key back to `Agent`, which is
+   * exactly the bug class CLAUDE.md flags and the reason `deleteAgentLeavesNothing` asserts it row by
+   * row. The order matters in one place: `RunJournal` is keyed on the RUN, so it has to go while the
+   * run rows are still here to be listed.
+   *
+   * Deliberately NOT deleted: `ToolCall` rows. That table is the credit ledger the daily Social
+   * ceiling is summed from, and rewriting yesterday's spend because a job was deleted would make the
+   * ceiling lie. Saved Documents are not touched either — they live in the library with their own
+   * rules.
+   */
   async deleteAgent(id: string) {
     // A deleted job takes its run history with it (BEA-1109) — no orphan rows in Landed/History —
     // and its flows + flow runs (BEA-1113): with no Flows sidebar, an orphaned flow is unreachable.
     // Waitpoints cascade with their runs; saved Documents are never touched.
+    // `?.`-guarded: spec harnesses pass partial Prisma stubs, and a delete must degrade rather than
+    // throw on a client that only has the delegates the older test knew about.
+    const runIds = ((await (this.prisma as any).agentRun?.findMany?.({ where: { agentId: id }, select: { id: true } })?.catch?.(() => [] as any[])) || []).map((r: any) => r.id);
+    if (runIds.length) {
+      // The journal of every worker run (BEA-1387) — no FK, and it must go BEFORE the runs do, or
+      // there is nothing left to find its rows by. Any still-pending question is cancelled first so
+      // nothing can act on it in the moment between the two deletes; the rows themselves cascade.
+      await (this.prisma as any).waitpoint?.updateMany?.({ where: { runId: { in: runIds }, status: 'pending' }, data: { status: 'cancelled' } })?.catch?.(() => undefined);
+      await (this.prisma as any).runJournal?.deleteMany?.({ where: { runId: { in: runIds } } }).catch(() => undefined);
+    }
     await this.prisma.agentRun.deleteMany({ where: { agentId: id } }).catch(() => undefined);
     // …and what a Watch/Alert job saw last time (BEA-1358) — no FK, so by hand.
     await (this.prisma as any).socialWatch?.deleteMany?.({ where: { agentId: id } }).catch(() => undefined);
     await this.locks?.releaseJob(id).catch(() => undefined); // …and its run lock (BEA-1388) — no FK either.
-    // …and the history of the workers Codex built for it (BEA-1390). The version folders on the host
-    // are the worker runner's to clean up — that is piece 9's housekeeping, and it is written down there.
+    // …and the history of the workers Codex built for it (BEA-1390), plus the whole vendor answers
+    // its builds and repairs were tested against (BEA-1386) — a deleted job's fetched content has no
+    // reason to stay on disk, and with its builds gone nothing pins it anyway.
     await (this.prisma as any).workerBuild?.deleteMany?.({ where: { agentId: id } }).catch(() => undefined);
+    await (this.prisma as any).toolSample?.deleteMany?.({ where: { agentId: id } }).catch(() => undefined);
+    // …and the version folders on the host, through the runner (BEA-1394 §I). Best effort by design:
+    // a runner that is down must not leave the owner with a job he cannot delete.
+    await this.workerCleanup?.(id)?.catch?.(() => undefined);
     try {
       const flows = await this.prisma.flow.findMany({ where: { agentId: id }, select: { id: true } });
       for (const f of flows) await this.prisma.flowRun.deleteMany({ where: { flowId: f.id } }).catch(() => undefined);

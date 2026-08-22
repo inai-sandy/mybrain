@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { AgentService } from '../agent/agent.service';
 import { WorkerBuildService } from './worker-build.service';
+import { WorkerDispatchService } from './worker-dispatch.service';
 import { WorkerRepairService } from './worker-repair.service';
 
 /**
@@ -15,11 +17,27 @@ import { WorkerRepairService } from './worker-repair.service';
  */
 @Controller('agent/agents/:id/worker')
 export class WorkerBuildController {
-  constructor(private readonly builds: WorkerBuildService, private readonly repairs: WorkerRepairService) {}
+  constructor(
+    private readonly builds: WorkerBuildService,
+    private readonly repairs: WorkerRepairService,
+    // Optional + LAST — spec harnesses build this positionally with fewer args.
+    private readonly dispatch?: WorkerDispatchService,
+    private readonly agent?: AgentService,
+  ) {}
 
+  /**
+   * Everything the Worker row shows (BEA-1394): the live version and its tests, staleness, the repair
+   * history — plus the switch (`useWorker`), the road the NEXT run will really take, and what the
+   * last run cost. The road comes from `WorkerDispatchService`, the same function that dispatches, so
+   * what the owner reads here can never disagree with what happens when the job runs.
+   */
   @Get()
-  state(@Param('id') id: string) {
-    return this.builds.state(id);
+  async state(@Param('id') id: string) {
+    const state = await this.builds.state(id);
+    const job: any = await this.agent?.getAgent?.(id).catch(() => null);
+    const road = (await this.dispatch?.decideFor?.(job).catch(() => null)) || { use: false };
+    const lastRun = await this.builds.lastRun(id).catch(() => null);
+    return { ...state, useWorker: !!job?.useWorker, road, lastRun };
   }
 
   @Post('build')

@@ -45,9 +45,14 @@ env-overridable: `WORKER_RUNNER_PORT` here, `WORKER_RUNNER_URL` on the app (in `
 | `POST /parity {jobId, version, harness, files?, timeoutMs?}` | Measures ONE version against the saved answers, for the repair loop's promotion guard (BEA-1393). The version folder is **copied** to a throwaway `.parity-*` beside it, the app's `harness` is written in as `.parity.mjs`, the app's `files` (the fixtures and `contract.json`) land on top, and `node .parity.mjs` runs there with **no token and no API address**. Answers `{ok, version, result:{ok, error, rows, columns, rowKeys, calls}, log}`. The copy is deleted before the answer is sent, so a caller that reads the reply never sees leftovers. |
 | `POST /promote {jobId, version, meta?}` | Writes `meta.json` into `v<version>` (when `meta` is given) and moves the `current` symlink to it, atomically. Answers `{ok, version, previous}`. A **rollback is the same call** with an older version, and it leaves that version's own `meta.json` alone. Refused (400) when the version has no `worker.mjs`, and (409) while the job is busy here. |
 
+| `POST /remove {jobId}` | Deletes the whole job folder — every version, the `current` symlink, the briefs and the saved answers (BEA-1394 §I, "deleting an agent deletes its worker"). Answers `{ok, removed}`; a job with no folder answers `ok` with `removed:false`, because that is already the state the caller wants. Refused (409) while the job is busy here. The app calls it from `deleteAgent`, best effort — a runner that is down never leaves the owner with a job he cannot delete. |
+
 A malformed request (bad `jobId`, no `runId`, no token, no brief) is a plain `400`. A request that is
 fine but cannot run — no worker installed, kit too new, the job already running here — is a `200`
-ndjson stream whose one line is the honest failed result, so the app has one road to parse.
+ndjson stream whose one line is the honest failed result, so the app has one road to parse. That
+line carries **`notStarted: true`** whenever the refusal happened BEFORE the spawn: the dispatch
+switch (BEA-1394) reads it to tell "the worker road was unavailable" (run it the old way for this
+run) from "the worker ran and failed" (a real failure, and the repair loop's business).
 
 ### Rules it keeps
 

@@ -155,6 +155,41 @@ Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-4
     `permalink_url` as well (8 tests green); the guard found no baseline, so v2 was promoted and the
     `current` symlink moved. **Vendor calls in the whole loop: 0.**
 
+- **9/10 — §I housekeeping, §J the Worker row — and the dispatch switch nobody owned** (BEA-1394).
+  Every piece above assumed something else decided WHEN a job runs on its worker; nothing did, so a
+  promoted worker had been installed and inert since piece 5. `Agent.useWorker` (default **false**)
+  is that switch, and `WorkerDispatchService` is the decision, taken at `HermesBridgeService.
+  startRun()` — the one door the scheduler, both manual routes, event triggers and the voice lane
+  already come through, one line after the job lock is claimed. How the pieces were settled:
+  - **nothing converts automatically, ever.** A run takes the worker road only when the job has a
+    promoted worker AND the switch is on; the owner taps it in the Worker row, and turning it off is
+    instant and needs no rebuild. Every existing job is `useWorker:false`, which is exactly today.
+  - **the worker road being unavailable is never a failed run.** Stale (the plan was edited), missing,
+    or refused by the runner (kit too new, the runner down, the host busy) → the plan runner takes
+    that run and the reason is a step the owner reads. The fallback is decided on two facts, never on
+    the error text: the runner's new **`notStarted`** field (a refusal BEFORE the spawn) AND an empty
+    journal. Both, because a client-side timeout on a worker that really was working also answers
+    `notStarted`, and the journal is what stops that from fetching, writing and messaging twice.
+  - **deleting an agent deletes its worker.** `deleteAgent` now sweeps the `RunJournal` rows (before
+    the runs, or there is nothing left to find them by), the open waitpoints, the lock, the
+    `WorkerBuild` rows, the job's `ToolSample`s and — through the runner's new `POST /remove` — the
+    version folders on the host. `ToolCall` rows stay on purpose: that table is the credit ledger the
+    daily ceiling is summed from, and rewriting yesterday's spend would make the ceiling lie.
+  - **cost is per run at last.** Credits are summed from the run's own `ToolCall` rows; AI tokens had
+    no ledger at all, so both roads add what they measured onto `AgentRun.aiTokens`. Shown on the run
+    screen and in the Worker row.
+  - **the Worker row** is the BEA-1381 accordion row (`web/src/pages/AgentWorkerRow.tsx`): version and
+    when it was built, test status, the switch, what the NEXT run will really do **in the server's own
+    words** (the same `decideFor()` that dispatches, so the two can never disagree), the contract in
+    plain words (BEA-1391's lines, reused), staleness with Rebuild, the repair history and the
+    held-repair decision, and the last run's cost.
+  - The proof (2026-08-22, a throwaway job on a local instance, **0 vendor calls**): a promoted worker
+    with the switch OFF ran on the plan runner; switched ON, the same job spawned a real worker process
+    on the host whose own steps came back through `/api/worker/step` and finished `done` with
+    `runKind:'worker'`; the plan was then edited and the next run said "the plan changed since worker v1
+    was built" and went the old way; with the runner stopped the run said so and went the old way
+    rather than failing; and deleting the job left no rows and no folder behind.
+
 ## The owner's words
 
 > "The entire interview will be taken care of by Sonnet. While creating an agent, the tool will hand

@@ -51,6 +51,19 @@ export type StartRunInput = {
 };
 
 /**
+ * The dispatch switch (BEA-1394 — `specs/AGENT-WORKERS.md` §I), registered here at boot by
+ * `WorkerDispatchService`. WorkerModule imports HermesModule and never the other way round, so this
+ * is a seam rather than an import — the same pattern as the flow drawer and the repair loop.
+ *
+ * `decide()` says whether this job's next run goes down the worker road; `run()` runs it there and
+ * answers `{ fallback }` when the road was not available and the run should carry on the old way.
+ */
+export type WorkerDispatch = {
+  decide(agentId: string): Promise<{ use: boolean; say?: string; version?: number }>;
+  run(runId: string, agentId: string, opts?: { version?: number }): Promise<{ fallback?: string }>;
+};
+
+/**
  * HermesBridgeService (BEA-618) — orchestrates one agent run on Hermes and mirrors it into our
  * shell: streams the engine's steps into the AgentRun (the run screen polls those), and saves the
  * result into Documents. Hermes is the doer; My Brain owns the record + the output.
@@ -67,6 +80,8 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
    * it must not change the stored run shape the UI already reads.
    */
   private readonly gradeFailure = new Map<string, string>();
+  /** The worker road, when one is registered (BEA-1394). Null = every run goes exactly as it did. */
+  private workers: WorkerDispatch | null = null;
 
   constructor(
     private readonly agent: AgentService,
@@ -84,6 +99,11 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly socialRuns?: SocialAgentRunService, // direct fetch jobs — no engine turn (BEA-1357)
     private readonly locks?: RunLockService, // one run at a time per job (BEA-1388)
   ) {}
+
+  /** Register the worker road (BEA-1394). Called once by `WorkerDispatchService.onModuleInit`. */
+  setWorkerDispatch(dispatch: WorkerDispatch | null) {
+    this.workers = dispatch;
+  }
 
   onModuleInit() {
     // Resume sweeper (BEA-795): wakes parked runs whose question has been answered. DB-backed, so
@@ -573,11 +593,46 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     // fire-and-forget — the run screen polls GET /api/agent/runs/:id for live progress.
     // execute() awaits appendStep/engineSettings before its own try, so a transient DB error there
     // would leave the run stuck 'running'. Always finalize on any escape. (BEA-799)
-    this.execute(run.id, input).catch(async (e) => {
+    this.startOnRoad(run.id, input).catch(async (e) => {
       this.log.error(`run ${run.id} crashed: ${e?.message || e}`);
       await this.agent.finishRun(run.id, { status: 'failed', error: friendlyError(e?.message || String(e)) }).catch(() => undefined);
     });
     return run;
+  }
+
+  /**
+   * Which road this run takes (BEA-1394, agent workers 9/10 — `specs/AGENT-WORKERS.md` §I).
+   *
+   * The decision lives here, one line after the job lock is claimed, because this is the ONE door
+   * every start already comes through — the scheduler, both manual routes, event triggers and the
+   * voice lane — so a switch decided anywhere else would be obeyed by some of them and not others.
+   *
+   * The worker road is taken only when the job has a promoted worker AND its switch is on. Anything
+   * else — no dispatcher registered, the switch off, no worker, a stale worker, a runner that refuses
+   * — carries on down the ordinary road with the same run row, and says why in a step when the owner
+   * asked for the worker and did not get it. **The worker road being unavailable is never a failed
+   * run**; only a worker that really ran and really failed is.
+   */
+  private async startOnRoad(runId: string, input: StartRunInput): Promise<void> {
+    if (input.agentId && this.workers) {
+      const decision = await this.workers.decide(input.agentId).catch((e: any) => {
+        this.log.warn(`run ${runId}: could not decide the road (${e?.message || e}) — running it the old way`);
+        return { use: false } as { use: boolean; say?: string; version?: number };
+      });
+      if (decision?.say) await this.agent.appendStep(runId, { label: decision.say, status: 'info' }).catch(() => undefined);
+      if (decision?.use) {
+        const out = await this.workers.run(runId, input.agentId, { version: decision.version }).catch((e: any) => ({
+          fallback: `Ran it the old way for this run — the worker could not be started (${String(e?.message || e).slice(0, 160)}).`,
+        }));
+        // No fallback = the worker road owned this run: it finished, failed, or parked on a question.
+        if (!out?.fallback) return;
+        await this.agent.appendStep(runId, { label: out.fallback, status: 'info' }).catch(() => undefined);
+        // Hand the run back to the road it is really on, or the stall watchdog and the repair loop
+        // would both read it as a worker run that stopped saying anything.
+        await this.agent.setRunKind?.(runId, 'engine')?.catch?.(() => undefined);
+      }
+    }
+    await this.execute(runId, input);
   }
 
   /**

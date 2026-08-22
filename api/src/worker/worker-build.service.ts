@@ -221,6 +221,20 @@ export class WorkerBuildService implements OnModuleInit {
     return { plan, cards, kit, req };
   }
 
+  /**
+   * The job's last run, with what it cost (BEA-1394 §I). The Worker row shows it because "what did
+   * the last run spend" is the question the owner actually has when he looks at a worker — and until
+   * this piece neither road showed a total anywhere.
+   */
+  async lastRun(agentId: string): Promise<any | null> {
+    const run: any = await this.prisma.agentRun
+      .findFirst({ where: { agentId }, orderBy: { startedAt: 'desc' }, select: { id: true, status: true, runKind: true, startedAt: true, endedAt: true, aiTokens: true } as any })
+      .catch(() => null);
+    if (!run) return null;
+    const cost = await this.agent.runCost?.(run.id, run.aiTokens).catch(() => ({ credits: 0, aiTokens: Number(run.aiTokens) || 0, calls: 0 }));
+    return { ...run, cost: cost || { credits: 0, aiTokens: Number(run.aiTokens) || 0, calls: 0 } };
+  }
+
   /** The live worker of a job: the newest build that passed its tests and was put live. */
   async livePromoted(agentId: string): Promise<any | null> {
     return await this.prisma.workerBuild

@@ -833,6 +833,40 @@ Codex turns in review, and a `held` repair also blocks a new one until the owner
 journal records a call's position and its answer, never its arguments, so the evidence's `args` come
 off the job's own plan (`argsOf`).
 
+**The switch that makes any of it run, and the tidying up after it (BEA-1394, agent workers 9/10 —
+`specs/AGENT-WORKERS.md` §I, §J).** Every piece above assumed something else decided WHEN a job runs
+on its worker: nothing did, so a promoted worker had been installed and INERT since BEA-1390.
+**`Agent.useWorker` (default false)** is that switch and `WorkerDispatchService`
+(`api/src/worker/worker-dispatch.service.ts`) is the decision — taken at **`HermesBridgeService.
+startRun()`**, one line after the per-job lock is claimed, because that is the one door the
+scheduler, both manual routes, event triggers and the voice lane already come through (it registers
+itself there through `setWorkerDispatch()`; WorkerModule imports HermesModule and nothing imports
+back, the `setFlowSync` seam again). A run takes the worker road **only** when the job has a promoted
+worker AND the switch is on — **nothing converts automatically, ever**, and "run it the old way"
+turns it off instantly with no rebuild. **The worker road being unavailable is never a failed run**:
+stale (the plan was edited since the build), missing, or refused by the runner (kit too new, runner
+down, host busy) → the plan runner takes that run and the reason is an `info` step the owner reads.
+The fallback is decided on two facts and never on the error text — the runner's new **`notStarted`**
+(a refusal BEFORE any spawn; added to the result line in `worker-runner.server.js` AND parsed in
+`worker-runner.client.ts`, or it is silently dropped) AND an empty `RunJournal`, because a client
+timeout on a worker that really was working also answers `notStarted` and the journal is what stops
+that from fetching, writing and messaging twice. **Deleting an agent now leaves nothing behind**:
+`deleteAgent` sweeps `RunJournal` (BEFORE the runs, or there is nothing left to find its rows by),
+open waitpoints, the lock, `WorkerBuild`, the job's `ToolSample`s, and the host folders through the
+runner's new `POST /remove` (best effort — a runner that is down must never leave a job that cannot
+be deleted); `ToolCall` rows STAY on purpose, because that table is the credit ledger the daily
+Social ceiling is summed from. **Cost is per run at last**: credits summed from the run's own
+`ToolCall` rows, AI tokens added onto the new `AgentRun.aiTokens` by both roads (`UsageLog` is keyed
+by feature and has no run on it), shown on the run screen and in the Worker row. **The Worker row**
+(`web/src/pages/AgentWorkerRow.tsx`, in the BEA-1381 accordion, direct-fetch jobs only) shows the
+version and when it was built, its tests, the switch, what the NEXT run will really do **in the
+server's own words** (`decideFor()` — the same function that dispatches, so the two cannot disagree),
+the contract in plain words (BEA-1391's lines, reused not re-derived), staleness with Rebuild, the
+repair history and the held-repair buttons. Proved end to end on a throwaway job with **0 vendor
+calls**: OFF → the plan runner; ON → a real worker process on the host, its steps on the run screen,
+`runKind:'worker'`, done; plan edited → "the plan changed since worker v1 was built" and the old way;
+runner stopped → said so and went the old way instead of failing; deleted → no rows, no folder.
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

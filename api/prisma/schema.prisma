@@ -729,6 +729,11 @@ model Agent {
   engine       String? // JSON {provider, model} — this job's own model, overrides the global agent model (BEA-1106)
   chatLog      String     @default("[]") // JSON [{who: you|ai, text, at}] — the persisted change-by-chatting history (BEA-1097)
   indexToBrain Boolean    @default(false) // outputs are NEVER auto-indexed; the "Add to my Brain" tap flips per output (BEA-1101)
+  /// The dispatch switch (BEA-1394, agent workers 9/10). A run goes down the worker road ONLY when
+  /// this job has a promoted worker AND this is on. Default false, and NOTHING ever turns it on by
+  /// itself: the owner taps it in the job's Worker row, and "run it the old way" turns it back off
+  /// with no rebuild. A stale, missing or refused worker falls back to the plan runner for that run.
+  useWorker    Boolean    @default(false)
   enabled      Boolean    @default(true)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -848,6 +853,10 @@ model AgentRun {
   outputUrl   String? // an outside link the run produced — the Google Sheet it wrote (BEA-1357)
   resultText  String? // the agent's final answer text, shown inline on the run (BEA-630)
   grade       String? // JSON grade vs the agent's Outcome rubric {verdict,score,criteria,notes} (BEA-641)
+  /// What this run's model steps really spent (BEA-1394 §I, "cost is shown per run"). Credits are
+  /// summed from the `ToolCall` rows that carry this `runId`; AI tokens have no such ledger, so the
+  /// two roads add what they measured here as they go. 0 = no model step ran.
+  aiTokens    Int         @default(0)
   error       String?
   startedAt   DateTime    @default(now())
   endedAt     DateTime?
