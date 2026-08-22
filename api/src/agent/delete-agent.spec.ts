@@ -50,15 +50,21 @@ describe('Deleting an agent leaves nothing behind (BEA-1394 §I)', () => {
     await prisma.workerBuild.create({ data: { agentId: job.id, version: 1, status: 'promoted', planHash: 'p1' } });
     await prisma.toolSample.create({ data: { agentId: job.id, service: 'instagram', action: 'search_hashtag', actionId: 'svc:instagram.search_hashtag', argsHash: 'h1', arguments: '{}', payload: Buffer.from('x'), bytes: 1 } });
     await prisma.jobRunLock.create({ data: { jobId: job.id, holder: 'h1', runId: run.id, expiresAt: new Date(Date.now() + 60_000) } });
+    // A one-time can't-undo decision this run held (BEA-1401) — keyed on the run, no FK, so it was
+    // the one table the delete missed.
+    await prisma.serviceGate.create({ data: { service: 'github', action: 'svc:github.delete_a_repository', scope: 'once', runId: run.id, nodeId: 'worker:3', decision: 'approved' } });
     const flow = await prisma.flow.create({ data: { agentId: job.id, name, graph: '{}' } });
     await prisma.flowRun.create({ data: { flowId: flow.id, status: 'done' } });
     return { job, run, flow };
   }
 
-  it('sweeps the runs, the journal, the waitpoints, the lock, the builds, the samples, the watch and the flows', async () => {
+  it('sweeps the runs, the journal, the waitpoints, the lock, the builds, the samples, the watch, the gates and the flows', async () => {
     const { job, run } = await jobWithEverything();
     const removed: string[] = [];
     agents.setWorkerCleanup(async (jobId: string) => { removed.push(jobId); });
+    // The owner's own permanent release of a gate, made in /tools. It belongs to the SERVICE, not to
+    // this job, and deleting a job may never quietly turn a confirmation back on (BEA-1401).
+    await prisma.serviceGate.create({ data: { service: 'github', action: 'svc:github.delete_a_repository', scope: 'always', decision: 'approved' } });
 
     await agents.deleteAgent(job.id);
 
@@ -72,6 +78,10 @@ describe('Deleting an agent leaves nothing behind (BEA-1394 §I)', () => {
     expect(await prisma.socialWatch.count({ where: { agentId: job.id } })).toBe(0);
     expect(await prisma.flow.count({ where: { agentId: job.id } })).toBe(0);
     expect(await prisma.flowRun.count({})).toBe(0);
+    expect(await prisma.serviceGate.count({ where: { runId: run.id } })).toBe(0);
+    // …but the permanent release is untouched: it is a setting about a service, not a job's row.
+    expect(await prisma.serviceGate.count({ where: { scope: 'always' } })).toBe(1);
+    await prisma.serviceGate.deleteMany({ where: { scope: 'always' } });
     // …and the version folders on the host, which are the runner's to remove.
     expect(removed).toEqual([job.id]);
   });
@@ -89,6 +99,7 @@ describe('Deleting an agent leaves nothing behind (BEA-1394 §I)', () => {
     expect(await prisma.workerBuild.count({ where: { agentId: yours.job.id } })).toBe(1);
     expect(await prisma.toolSample.count({ where: { agentId: yours.job.id } })).toBe(1);
     expect(await prisma.jobRunLock.count({ where: { jobId: yours.job.id } })).toBe(1);
+    expect(await prisma.serviceGate.count({ where: { runId: yours.run.id } })).toBe(1);
     await agents.deleteAgent(yours.job.id);
   });
 

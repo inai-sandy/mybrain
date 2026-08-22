@@ -878,12 +878,33 @@ Three things a fresh session must know: **(1) it is OFF everywhere.** `Agent.use
 every job, including his; nothing converts automatically and turning it on is his tap in the Worker
 row. **(2) The runner is not installed as a service.** `services/host/worker-runner.server.js` needs a
 systemd unit and that needs root; until then it is started by hand
-(`WORKER_API=https://mybrain.1site.ai WORKER_ROOT=<a writable dir> node …/worker-runner.server.js`,
+(`WORKER_API=https://mybrain.1site.ai WORKER_ROOT=/home/sandy/worker-root
+WORKER_RUNNER_TOKEN=<the shared secret> node …/worker-runner.server.js`,
 port 8769) and dies with the box — and while it is down every run simply goes the old way and says so,
 which is what the BEA-1394 fallback is for. **(3) A worker only repairs what is IN the worker.** The
 acceptance break (a vendor answer the row reader could not read) was repaired with a new test and no
 code change, because the reading lives in the app — `tableOf`/`itemsOf` — not in the worker. Do not
 expect self-heal to fix an app-side shape bug.
+
+**The re-verification's seven fixes (BEA-1401).** Two independent passes found no critical bug; these
+were the real gaps, and they are closed. **The runner's door is locked and its `ready` is a promise**:
+`WORKER_RUNNER_TOKEN` is now REQUIRED — `/run`, `/build`, `/promote`, `/parity`, `/remove` answer 401
+without it and a runner started without one refuses everything and says so (`deploy.sh` carries the
+app's copy from `.claude/checks/secrets.env`; the host's is `/home/sandy/worker-runner/runner.env`,
+read by the unit, never in git) — and `WORKER_ROOT` is PROVED on every `/status` (created where it
+can be, then written to), so an unusable root is `ready:false` + a plain `reason` + a refusal on
+every route, never the old `ready:true, workers:0` that made a promoted worker invisible and killed
+the first build on EACCES. **A build's tests run where `/parity` runs**: `childEnv()` (none of the
+host's environment) and `node --import <preload> --test`, the preload throwing on `fetch`/`net`/`tls`/
+`http`/`https`/`dns`; the Codex turn itself stays networked ON PURPOSE and the README says so. **A
+worker may only call its own job's actions** — the `{actionId,args}` road is checked against
+`planActionIds` ∪ `Agent.tools` (§C says there is no exception; add it to the job instead). **A
+worker run's journal is dropped inside `AgentService.finishRun()`** (registered by
+`WorkerDispatchService`, after the failure hook that reads it), so the stall watchdog, a deadline with
+no default and an overtaken run stop leaking whole fetched tables. **`deleteAgent` also sweeps the
+run-scoped `ServiceGate` rows** (a permanent /tools release is left alone). **Failing evidence has a
+wider deny list** (`NO_FAILING_SERVICES`: calendar, drive, notes, contacts, photos, meetings) on top
+of `NO_SAMPLE_SERVICES`. And the owner has **NINE** agents, not six — all enabled, all `useWorker:false`.
 
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.

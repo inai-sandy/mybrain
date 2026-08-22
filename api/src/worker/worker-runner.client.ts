@@ -3,7 +3,12 @@ import { ParityResult } from './repair';
 
 /** The host service that owns the worker folders (BEA-1389). Overridden in `deploy.sh`. */
 const RUNNER = process.env.WORKER_RUNNER_URL || 'http://172.18.0.1:8769';
-/** Off by default, like every other host runner on this VPS — set on both sides to lock the door. */
+/**
+ * The runner's shared secret. **Required on both sides since BEA-1401**: the runner refuses every
+ * route but `/status` without it, so an app that does not send it simply has no worker road — every
+ * run falls back to the plan runner and says so. Set in `.claude/checks/secrets.env` → `deploy.sh`,
+ * and the same value in `/home/sandy/worker-runner/runner.env` on the host. Never in code or git.
+ */
 const RUNNER_TOKEN = process.env.WORKER_RUNNER_TOKEN || '';
 
 /** A Codex build turn is minutes, not seconds: the runner caps it, this is the client's own patience. */
@@ -57,6 +62,14 @@ const RUN_TIMEOUT_MS = Number(process.env.WORKER_RUN_TIMEOUT_MS || 30 * 60_000);
 @Injectable()
 export class WorkerRunnerClient {
   private readonly log = new Logger('WorkerRunner');
+
+  constructor() {
+    // Said once, loudly, at boot — the mirror of the runner's own line. A missing secret is not a
+    // crash, it is a road that is closed, and the owner should be able to see why in the log.
+    if (!RUNNER_TOKEN) {
+      this.log.warn('WORKER_RUNNER_TOKEN is not set here, so the worker runner will refuse every call — jobs on the worker road will run the old way and say so (BEA-1401).');
+    }
+  }
 
   get url(): string {
     return RUNNER;

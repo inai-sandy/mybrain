@@ -82,6 +82,42 @@ export const NO_SAMPLE_SERVICES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Never kept as EVIDENCE either (BEA-1401), on top of everything above.
+ *
+ * A good sample has to pass the opt-in list, so it can only ever be public social content. A failing
+ * answer deliberately skips that list — a repair must be able to read whatever broke it — which left
+ * the deny list as the only guard, and the deny list was written for messaging services. It said
+ * nothing about a calendar, a drive or a notes app, whose answers are somebody's diary, somebody's
+ * documents and somebody's notes: masking by key name and value shape does not hide a meeting title
+ * or an attendee list. So these are shut here as well, and evidence from one of them is simply not
+ * kept — the repair still runs, on the error and the contract, with no payload.
+ */
+export const NO_FAILING_SERVICES: ReadonlySet<string> = new Set([
+  'calendar',
+  'googlecalendar',
+  'outlookcalendar',
+  'calendly',
+  'drive',
+  'googledrive',
+  'onedrive',
+  'dropbox',
+  'box',
+  'docs',
+  'googledocs',
+  'notion',
+  'evernote',
+  'obsidian',
+  'contacts',
+  'googlecontacts',
+  'people',
+  'googlephotos',
+  'photos',
+  'zoom',
+  'googlemeet',
+  'meet',
+]);
+
+/**
  * An action whose answer carries message bodies — a direct message, an inbox, a mail thread. Matched
  * on the ACTION half of the id only: `svc:threads.user_posts` is a public post, not a conversation,
  * and matching the whole id would catch the Threads platform by its name.
@@ -262,15 +298,17 @@ export function shouldSample(c: SampleCandidate): boolean {
  * apply here.
  *
  * What DOES still apply is the privacy half, and it applies exactly as strictly: a service on
- * `NO_SAMPLE_SERVICES` (the vault, WhatsApp, Gmail, chat, Telegram…) and anything that reads like
- * somebody's messages are never stored, broken or not. Evidence is never worth keeping a person's
- * conversation for.
+ * `NO_SAMPLE_SERVICES` (the vault, WhatsApp, Gmail, chat, Telegram…) or on `NO_FAILING_SERVICES`
+ * (a calendar, a drive, a notes app — added by BEA-1401), and anything that reads like somebody's
+ * messages, are never stored, broken or not. Evidence is never worth keeping a person's
+ * conversation, diary or documents for.
  */
 export function mayKeepFailing(actionId: string, service?: string): boolean {
   const m = /^svc:([^.]+)\.(.+)$/.exec(String(actionId || ''));
   if (!m) return false;
   const slug = String(service || m[1] || '').toLowerCase();
   if (NO_SAMPLE_SERVICES.has(slug)) return false;
+  if (NO_FAILING_SERVICES.has(slug)) return false;
   return !NO_SAMPLE_ACTION_RE.test(m[2]);
 }
 

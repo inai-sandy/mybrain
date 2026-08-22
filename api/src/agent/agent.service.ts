@@ -56,6 +56,19 @@ export type AgentFlowSync = { afterSave(agent: any, ctx: { created: boolean; cha
 export type WorkerCleanup = (jobId: string) => Promise<void>;
 
 /**
+ * Drop a finished worker run's journal (BEA-1401). The journal exists for exactly one purpose —
+ * making a RESUME free — so a run that has reached a terminal state has no use for it, and leaving
+ * it keeps whole fetched tables in the database and in every nightly backup after that.
+ *
+ * It hangs off `finishRun()` for the same reason `RunFailed` does: that is the ONE door every
+ * terminal state comes through. The worker's own `/finish` used to be the only place that forgot,
+ * so the three roads where the worker has already exited and can never call it — the stall
+ * watchdog, a deadline with no default, and a run overtaken by a newer one — leaked their journals
+ * until the agent itself was deleted. Registered by `WorkerDispatchService`, the same seam as above.
+ */
+export type JournalCleanup = (runId: string) => Promise<unknown>;
+
+/**
  * AgentService — the DURABLE human-in-the-loop engine (BEA-619).
  *
  * This is the piece Hermes does NOT give us: a run can pause on a structured question,
@@ -70,6 +83,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   private answered: RunAnswered | null = null;
   private runFailed: RunFailed | null = null;
   private workerCleanup: WorkerCleanup | null = null;
+  private journalCleanup: JournalCleanup | null = null;
 
   // `locks` is optional and LAST: spec harnesses build this service positionally with just Prisma,
   // and every call is `?.`-guarded, so a harness without it behaves exactly as before. (BEA-1388)
@@ -111,6 +125,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     this.workerCleanup = hook;
   }
 
+  /**
+   * Register who drops a finished worker run's journal (BEA-1401). Called once by
+   * `WorkerDispatchService.onModuleInit` — the same registration seam, for the same reason.
+   */
+  setJournalCleanup(hook: JournalCleanup | null) {
+    this.journalCleanup = hook;
+  }
+
   onModuleInit() {
     // A run's driver lives in this process's memory. If the process restarts (deploy/crash/reboot)
     // mid-run, the row is left status='running' with nothing to advance it — it would spin forever.
@@ -150,7 +172,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // Only runs with no way to advance are failed:
     //   'running' + no sessionId        → mid-turn when the process died
     //   'awaiting_input' + no sessionId → an old in-memory wait whose poll loop died
-    const orphans = await this.prisma.agentRun.findMany({ where: { status: { in: ['running', 'awaiting_input'] }, sessionId: null }, select: { id: true, status: true, stepLog: true } });
+    const orphans = await this.prisma.agentRun.findMany({ where: { status: { in: ['running', 'awaiting_input'] }, sessionId: null }, select: { id: true, status: true, stepLog: true, runKind: true } });
     if (!orphans.length) return 0;
     const now = new Date();
     for (const o of orphans) {
@@ -166,6 +188,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       // The restart that orphaned this run also left its lock behind (the row is in the database, not
       // in memory). Free it here rather than waiting out the timeout — the job can fire again at once.
       await this.locks?.releaseForRun(o.id).catch(() => undefined);
+      // …and its journal, if it was a worker run. This road writes the row itself rather than going
+      // through `finishRun()`, so it has to say so here too — no terminal road may leak (BEA-1401).
+      if ((o as any).runKind === 'worker' && this.journalCleanup) await Promise.resolve(this.journalCleanup(o.id)).catch(() => undefined);
     }
     return orphans.length;
   }
@@ -653,7 +678,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    * Deliberately NOT deleted: `ToolCall` rows. That table is the credit ledger the daily Social
    * ceiling is summed from, and rewriting yesterday's spend because a job was deleted would make the
    * ceiling lie. Saved Documents are not touched either — they live in the library with their own
-   * rules.
+   * rules. Nor is a PERMANENT gate release (`ServiceGate` with `scope:'always'`): that is a setting
+   * the owner made in /tools about a service, not something this job owns.
    */
   async deleteAgent(id: string) {
     // A deleted job takes its run history with it (BEA-1109) — no orphan rows in Landed/History —
@@ -668,6 +694,11 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       // nothing can act on it in the moment between the two deletes; the rows themselves cascade.
       await (this.prisma as any).waitpoint?.updateMany?.({ where: { runId: { in: runIds }, status: 'pending' }, data: { status: 'cancelled' } })?.catch?.(() => undefined);
       await (this.prisma as any).runJournal?.deleteMany?.({ where: { runId: { in: runIds } } }).catch(() => undefined);
+      // …and the one-time can't-undo decisions its runs held (BEA-1401). `ServiceGate` is keyed on
+      // the RUN, not the job, and has no FK either, so it goes the same way and at the same moment.
+      // A PERMANENT release (`scope:'always'`, no runId) is the owner's own /tools setting for a
+      // service and has nothing to do with this job — it is deliberately left alone.
+      await (this.prisma as any).serviceGate?.deleteMany?.({ where: { runId: { in: runIds } } })?.catch?.(() => undefined);
     }
     await this.prisma.agentRun.deleteMany({ where: { agentId: id } }).catch(() => undefined);
     // …and what a Watch/Alert job saw last time (BEA-1358) — no FK, so by hand.
@@ -822,6 +853,15 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         /* the loop says its own piece in its own log; a finish is never held up by it */
       }
     }
+    // …and now the journal goes, whichever road ended the run (BEA-1401). AFTER the failure hook,
+    // because that hook reads the very answers this deletes. A finished run is never resumed, so a
+    // kept journal is only whole fetched tables sitting in the database and in every backup after
+    // it. The worker's own `/finish` used to be the only place that did this; the stall watchdog, a
+    // deadline with no default and an overtaken run all leaked, and they are exactly the roads where
+    // the worker has already exited and can never call anything.
+    if ((run as any).runKind === 'worker' && this.journalCleanup) {
+      await Promise.resolve(this.journalCleanup(id)).catch(() => undefined);
+    }
     return this.shapeRun(updated);
   }
 
@@ -861,6 +901,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.waitpoint.updateMany({ where: { runId: id, status: 'pending' }, data: { status: 'cancelled' } });
     const updated = await this.prisma.agentRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date() } });
     await this.locks?.releaseForRun(id).catch(() => undefined); // cancelled is terminal too (BEA-1388)
+    // …and cancelled means never resumed, so the journal goes with it (BEA-1401). This road writes
+    // the row itself rather than going through `finishRun()`, so it says so here as well.
+    if ((run as any).runKind === 'worker' && this.journalCleanup) await Promise.resolve(this.journalCleanup(id)).catch(() => undefined);
     return this.shapeRun(updated);
   }
 

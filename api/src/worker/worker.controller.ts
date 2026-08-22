@@ -10,7 +10,7 @@ import { ASK_DEADLINE_HOURS, OwnerAskService } from './owner-ask.service';
 import { SocialAgentRunService, SHAPE_MAX_TOKENS, mergeTables } from '../social/social-agent-run.service';
 import { SocialBudgetService, BudgetCheck } from '../social/social-budget.service';
 import { SourceFetchService } from '../social/source-fetch.service';
-import { planFromAgent, sourceHint, sourceLabel, clampPages } from '../social/plan';
+import { planActionIds, planFromAgent, sourceHint, sourceLabel, clampPages } from '../social/plan';
 import { tableOf } from '../social/rows';
 import { RunJournalService } from './run-journal.service';
 import { WorkerTokenGuard } from './worker-token.guard';
@@ -122,6 +122,16 @@ export class WorkerController {
 
     const actionId = String(body?.actionId || '');
     if (!actionId.startsWith('svc:')) throw new BadRequestException('Give a sourceId from the job\'s plan, or an actionId that starts with "svc:".');
+    // …and it must be one of THIS job's own actions (BEA-1401 — §C, "a worker is its own job and
+    // nothing else"). Without this a worker could reach any action of any connected service, bounded
+    // only by the credit ceiling and the can't-undo gate — the whole point of the worker road is that
+    // it is the job's plan compiled, so its reach is the job's reach and nothing wider.
+    const allowed = jobActionIds(job);
+    if (!allowed.has(actionId)) {
+      throw new BadRequestException(
+        `This job may not call ${actionId}. A worker may only call its own job's actions${allowed.size ? ` (${[...allowed].slice(0, 8).join(', ')}${allowed.size > 8 ? `, +${allowed.size - 8} more` : ''})` : ''} — add it to the job if it really belongs there.`,
+      );
+    }
     const args = body?.args && typeof body.args === 'object' ? body.args : {};
     const hit = await this.journal.once(runId, seq, 'tool', { actionId, args }, async () => {
       const stop = await this.guard(runId, job, seq)(actionId);
@@ -462,8 +472,10 @@ export class WorkerController {
 
   /**
    * The run is over (`kit.finish` / `kit.fail`). The spawn's tokens stop working the same moment,
-   * and the run's journal is dropped: it existed to make a resume free, and a finished run is never
-   * resumed — leaving it would keep every fetched table in the database for ever.
+   * and the run's journal is dropped inside `finishRun()`: it existed to make a resume free, and a
+   * finished run is never resumed — leaving it would keep every fetched table in the database for
+   * ever. It lives there rather than here because this is only one of the four roads that end a
+   * worker run (BEA-1401).
    */
   @Post('finish')
   async finish(@Req() req: any, @Body() body: any) {
@@ -479,7 +491,8 @@ export class WorkerController {
       outputDocId: body?.outputDocId ? String(body.outputDocId) : undefined,
     });
     this.tokens.revokeRun(runId);
-    await this.journal.forget(runId);
+    // The journal is dropped by `finishRun()` itself now (BEA-1401), so every road that ends a worker
+    // run forgets it — this one, the stall watchdog, a deadline with no default, an overtaken run.
     return { ok: true, status: (run as any)?.status || status };
   }
 
@@ -552,6 +565,26 @@ export class WorkerController {
   private ctx(runId: string, job: any, seq?: number) {
     return (id: string, args: Record<string, any>) => ({ runId, runKind: 'worker', agentId: job?.id, args, argsPinned: true, label: id, ...(seq === undefined ? {} : { nodeId: nodeIdOf(seq) }) });
   }
+}
+
+/**
+ * Every action id this job may call (BEA-1401): the ones its plan really fetches, plus whatever the
+ * owner put in its toolbox — `Agent.tools` means exactly "the action ids this job may call", and it
+ * is recomputed from the sources on every save (BEA-1374), so the two together are the job's reach.
+ * A job with an unreadable plan still gets its toolbox rather than nothing.
+ */
+function jobActionIds(job: any): Set<string> {
+  const out = new Set<string>();
+  for (const t of Array.isArray(job?.tools) ? job.tools : []) {
+    const id = String(t || '');
+    if (id.startsWith('svc:')) out.add(id);
+  }
+  try {
+    for (const id of planActionIds(planFromAgent(job))) if (id) out.add(String(id));
+  } catch {
+    /* a plan that cannot be read leaves the toolbox as the answer */
+  }
+  return out;
 }
 
 /** A worker call's step id — its place in the run's call order, stable across every replay. */
