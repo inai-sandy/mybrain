@@ -340,3 +340,45 @@ describe('a gated action stops BEFORE the provider is called (BEA-1348)', () => 
     expect(list.actions[0].retired).toBeUndefined();
   });
 });
+
+/**
+ * A WORKER has no screen to show a confirm card on (BEA-1392 §H): it parks the run, asks on
+ * WhatsApp and exits, so the decision arrives hours later with nothing left in memory. The gate is
+ * written down as `pending` at that moment and settled by whatever he replies.
+ */
+describe('a gate a worker parked on, decided hours later (BEA-1392)', () => {
+  it('a pending gate lets nothing through by itself, and a yes carries the exact arguments he saw', async () => {
+    const { svc, gates, provider } = harness();
+    const err = await svc.run('svc:github.delete_a_repository', 'clean up', { runId: 'runW', nodeId: 'worker:3' }).catch((e) => e);
+    expect(err).toBeInstanceOf(GatePause);
+
+    await gates.recordPending(err.gate, { runId: 'runW', nodeId: 'worker:3' });
+    expect(await gates.decisionFor('svc:github.delete_a_repository', { runId: 'runW', nodeId: 'worker:3' })).toBe('pending');
+    // The whole point: a question that has not been answered is NOT an approval.
+    expect(await gates.approvalFor('svc:github.delete_a_repository', { runId: 'runW', nodeId: 'worker:3' })).toBeNull();
+
+    expect(await gates.settlePending('runW', 'Yes, run it')).toMatchObject({ settled: 1, decision: 'approved' });
+    expect(await gates.decisionFor('svc:github.delete_a_repository', { runId: 'runW', nodeId: 'worker:3' })).toBe('approved');
+
+    // The resumed worker makes the call again at the same place in its call order, and it goes.
+    const out = await svc.run('svc:github.delete_a_repository', 'clean up', { runId: 'runW', nodeId: 'worker:3' });
+    expect(out).toContain('GitHub: Delete a repository');
+    expect(provider.execute).toHaveBeenCalledWith('svc:github.delete_a_repository', { owner: 'inai-sandy', repo: 'mybrain' }, { connectionId: 'ca_1' });
+  });
+
+  it('a no is settled as a no, and drops the arguments so nothing can run from them', async () => {
+    const { svc, gates, provider } = harness();
+    const err = await svc.run('svc:github.delete_a_repository', 'clean up', { runId: 'runX', nodeId: 'worker:1' }).catch((e) => e);
+    await gates.recordPending(err.gate, { runId: 'runX', nodeId: 'worker:1' });
+    expect(await gates.settlePending('runX', 'no')).toMatchObject({ decision: 'rejected' });
+    expect(await gates.decisionFor('svc:github.delete_a_repository', { runId: 'runX', nodeId: 'worker:1' })).toBe('rejected');
+    expect(await gates.approvalFor('svc:github.delete_a_repository', { runId: 'runX', nodeId: 'worker:1' })).toBeNull();
+    expect(provider.execute).not.toHaveBeenCalled();
+  });
+
+  it('an answer to a run holding nothing settles nothing', async () => {
+    const { gates } = harness();
+    expect(await gates.settlePending('runY', 'yes')).toBeNull();
+    expect(await gates.settlePending('', 'yes')).toBeNull();
+  });
+});

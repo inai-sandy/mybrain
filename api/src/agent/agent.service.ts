@@ -13,7 +13,15 @@ export type AskInput = {
   options?: unknown; // choices array, form fields, or the draft for approve_edit_reject
   defaultValue?: string; // smart default, auto-applied on timeout
   expiresInMs?: number; // optional timeout; on expiry the default is applied (or the run parks)
+  /** Where the question is being SENT (BEA-1392): 'whatsapp' for a worker's `kit.ask`. */
+  askedVia?: string;
 };
+
+/**
+ * What runs when a question is answered, whichever road answered it (BEA-1392) — see
+ * {@link AgentService.setAnswerHook}. `via` is `web | telegram | whatsapp | timeout`.
+ */
+export type RunAnswered = (runId: string, answer: string, via: string) => any;
 
 const FINISHED = ['done', 'failed', 'cancelled'];
 
@@ -38,6 +46,7 @@ export type AgentFlowSync = { afterSave(agent: any, ctx: { created: boolean; cha
 export class AgentService implements OnModuleInit, OnModuleDestroy {
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private flowSync: AgentFlowSync | null = null;
+  private answered: RunAnswered | null = null;
 
   // `locks` is optional and LAST: spec harnesses build this service positionally with just Prisma,
   // and every call is `?.`-guarded, so a harness without it behaves exactly as before. (BEA-1388)
@@ -46,6 +55,21 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   /** Register the flow-picture drawer (BEA-1366). Called once by `AgentFlowSyncService.onModuleInit`. */
   setFlowSync(sync: AgentFlowSync | null) {
     this.flowSync = sync;
+  }
+
+  /**
+   * Register what else has to happen when a run's question is answered (BEA-1392). Called once by
+   * `OwnerAskService.onModuleInit` — the registration pattern again, because the gates live in
+   * ToolCatalogModule and an import here would be a cycle.
+   *
+   * It hangs off `resolve()` on purpose: EVERY road that answers a question — the run screen,
+   * Telegram, WhatsApp, and the 12-hour timeout applying the question's own default — goes through
+   * that one method, so a can't-undo call a worker parked on is settled the same way whichever road
+   * answered it. Hanging it off the WhatsApp road alone would leave a timed-out gate for ever
+   * `pending`, and the resumed worker would park and message the owner again, and again.
+   */
+  setAnswerHook(hook: RunAnswered | null) {
+    this.answered = hook;
   }
 
   onModuleInit() {
@@ -974,6 +998,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         options: JSON.stringify(q.options ?? []),
         defaultValue: q.defaultValue ?? null,
         resumeToken: token,
+        askedVia: q.askedVia ?? null,
         expiresAt: q.expiresInMs && q.expiresInMs > 0 ? new Date(Date.now() + q.expiresInMs) : null,
       },
     });
@@ -1016,6 +1041,11 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // cap and failed while the question was open), answering must NOT flip a terminal run back to
     // 'running' with no driver — that leaves it stuck forever. (BEA-794)
     await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: { in: ['awaiting_input', 'paused'] } }, data: { status: 'running' } });
+    // Whatever else this answer settles — today, a can't-undo call a worker parked on (BEA-1392).
+    // Never throws: an answer that was applied must stay applied.
+    try {
+      await this.answered?.(wp.runId, typeof answer === 'string' ? answer : JSON.stringify(answer ?? ''), via);
+    } catch { /* the answer stands whatever the hook makes of it */ }
     const run = await this.prisma.agentRun.findUnique({ where: { id: wp.runId } });
     const fresh = await this.prisma.waitpoint.findUnique({ where: { id: wp.id } });
     return { applied: true, alreadyResolved: false, status: 'answered', waitpoint: this.shapeWaitpoint(fresh), run: run ? this.shapeRun(run) : null };
@@ -1062,6 +1092,32 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       paused.push({ runId: wp.runId, title: run?.title ?? null, question: wp.question, waitedHours });
     }
     return paused;
+  }
+
+  /**
+   * Every question WhatsApp itself asked and is still waiting on (BEA-1392 §H).
+   *
+   * Deliberately narrow: `askedVia: 'whatsapp'` only, and only a run that is really parked. An
+   * inbound owner message may never answer a question the run screen or Telegram is holding — he
+   * would answer those there, and a stray "ok" on WhatsApp must not decide them.
+   */
+  async openWhatsAppAsks() {
+    const rows = await this.prisma.waitpoint.findMany({
+      where: { status: 'pending', askedVia: 'whatsapp', run: { status: { in: ['awaiting_input', 'paused'] } } },
+      orderBy: { createdAt: 'asc' },
+      include: { run: { select: { id: true, agentId: true, title: true } } },
+    });
+    return rows.map((w: any) => ({ ...this.shapeWaitpoint(w), runId: w.runId, runTitle: w.run?.title ?? null }));
+  }
+
+  /**
+   * A question that ran out of time with no default to fall back on (BEA-1392). Marked expired so
+   * nothing can answer it afterwards; the caller ends the run honestly. Idempotent — a second sweep
+   * changes nothing.
+   */
+  async expireAsk(id: string): Promise<boolean> {
+    const res = await this.prisma.waitpoint.updateMany({ where: { id, status: 'pending' }, data: { status: 'expired' } });
+    return res.count > 0;
   }
 
   // ---------- shaping / json safety ----------

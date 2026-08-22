@@ -129,6 +129,64 @@ export class ServiceGatesService {
       .catch((e: any) => this.log.warn(`could not write the gate decision for ${gate.actionId}: ${e?.message || e}`));
   }
 
+  /**
+   * A gate a WORKER stopped on (BEA-1392). The worker has no screen — it parks the run on a
+   * question and exits, so the decision arrives hours later on WhatsApp with nothing left in
+   * memory. The row is written now, `decision: 'pending'`, carrying the exact arguments and the
+   * question the owner was shown; `approvalFor()` ignores it (it reads `approved` only), so a
+   * pending row can never let a call through by itself.
+   */
+  async recordPending(gate: PendingGate, ctx: { runId?: string; nodeId?: string }): Promise<string | null> {
+    const row = await this.prisma?.serviceGate
+      ?.create?.({
+        data: {
+          service: gate.service,
+          action: gate.actionId,
+          scope: 'once',
+          runId: ctx?.runId || null,
+          nodeId: ctx?.nodeId || null,
+          decision: 'pending',
+          arguments: this.safeJson(gate.args),
+          question: (gate.question || '').slice(0, 1000),
+        },
+      })
+      .catch((e: any) => {
+        this.log.warn(`could not hold ${gate.actionId} for approval: ${e?.message || e}`);
+        return null;
+      });
+    return row?.id || null;
+  }
+
+  /**
+   * The owner answered the run's question — settle whatever that run was holding (BEA-1392).
+   *
+   * Only one question per run is open at a time (§H's matching rule), so a run's pending gate IS
+   * the one this answer decides. `readDecision` is deliberately strict: anything that is not
+   * plainly a yes is a no, and the arguments are dropped on a no so nothing can run from them.
+   */
+  async settlePending(runId: string, answer: string): Promise<{ settled: number; decision: 'approved' | 'rejected' } | null> {
+    if (!runId) return null;
+    const rows = (await this.prisma?.serviceGate?.findMany?.({ where: { runId, decision: 'pending' } }).catch(() => [])) || [];
+    if (!rows.length) return null;
+    const decision = this.readDecision(answer);
+    for (const r of rows) {
+      await this.prisma?.serviceGate
+        ?.update?.({ where: { id: r.id }, data: { decision, ...(decision === 'rejected' ? { arguments: null } : {}) } })
+        .catch(() => undefined);
+    }
+    return { settled: rows.length, decision };
+  }
+
+  /** The settled answer for one step of one run, if there is one — 'rejected' included (BEA-1392). */
+  async decisionFor(actionId: string, ctx: { runId?: string; nodeId?: string }): Promise<'approved' | 'rejected' | 'pending' | null> {
+    if (!ctx?.runId || !ctx?.nodeId) return null;
+    const row = await this.prisma?.serviceGate
+      ?.findFirst?.({ where: { action: actionId, runId: ctx.runId, nodeId: ctx.nodeId, scope: 'once', usedAt: null }, orderBy: { createdAt: 'desc' } })
+      .catch(() => null);
+    const d = String(row?.decision || '');
+    return d === 'approved' || d === 'rejected' || d === 'pending' ? (d as any) : null;
+  }
+
   /** Spend a one-time yes, so it can never approve a second run. */
   async markUsed(id: string): Promise<void> {
     if (!id) return;

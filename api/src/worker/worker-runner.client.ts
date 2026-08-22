@@ -23,6 +23,12 @@ export type RunnerBuildResult = {
 
 export type RunnerPromoteResult = { ok: boolean; version?: number; previous?: string | null; error?: string };
 
+/** What one spawn came back as. `waiting` = it parked on a question and exited (BEA-1392 §H). */
+export type RunnerRunResult = { status: 'done' | 'failed' | 'waiting'; rows?: number | null; error?: string | null; waitpointId?: string | null; timedOut?: boolean; kitRefused?: boolean };
+
+/** A worker run's own patience. The runner caps it too; this is the client's side of the same wait. */
+const RUN_TIMEOUT_MS = Number(process.env.WORKER_RUN_TIMEOUT_MS || 30 * 60_000);
+
 /**
  * The app's one door to the worker runner (BEA-1390 — `specs/AGENT-WORKERS.md` §F).
  *
@@ -76,6 +82,36 @@ export class WorkerRunnerClient {
     }
   }
 
+  /**
+   * Spawn one worker and wait for its last word (BEA-1392). The steps the owner reads do not come
+   * back this way — the worker writes them itself through `/api/worker/step` as they happen — so
+   * the ndjson body is only the runner's own log, and the line that matters is the final
+   * `{type:'result'}`. `waiting` means the worker parked on a question and exited; the run is
+   * already `awaiting_input` by then, and nothing here has to do anything about it.
+   */
+  async run(input: { jobId: string; runId: string; token: string; seed?: { now: number; random: number }; kit?: string; timeoutMs?: number }): Promise<RunnerRunResult> {
+    try {
+      const r = await fetch(`${RUNNER}/run`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(input.timeoutMs ? input.timeoutMs + 60_000 : RUN_TIMEOUT_MS),
+      });
+      const text = await r.text().catch(() => '');
+      if (!r.ok) {
+        let why = `the worker runner answered ${r.status}`;
+        try { why = JSON.parse(text)?.error || why; } catch { /* not JSON — the status stands */ }
+        return { status: 'failed', error: why };
+      }
+      const result = lastResult(text);
+      if (!result) return { status: 'failed', error: 'The worker runner said nothing about how the run ended.' };
+      return result;
+    } catch (e: any) {
+      this.log.warn(`run ${input.runId} could not be spawned: ${e?.message || e}`);
+      return { status: 'failed', error: `The worker could not be started — ${reasonOf(e)}.` };
+    }
+  }
+
   /** The `current` symlink move: promotion, and the same move back for a rollback. */
   async promote(input: { jobId: string; version: number; meta?: any }): Promise<RunnerPromoteResult> {
     try {
@@ -96,6 +132,19 @@ export class WorkerRunnerClient {
   private headers(): Record<string, string> {
     return { 'content-type': 'application/json', ...(RUNNER_TOKEN ? { 'x-runner-token': RUNNER_TOKEN } : {}) };
   }
+}
+
+/** The runner's final line out of an ndjson body. Anything before it is log, and none of it is trusted. */
+function lastResult(body: string): RunnerRunResult | null {
+  const lines = String(body || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let ev: any = null;
+    try { ev = JSON.parse(lines[i]); } catch { ev = null; }
+    if (ev?.type !== 'result') continue;
+    const status = ev.status === 'done' || ev.status === 'waiting' ? ev.status : 'failed';
+    return { status, rows: typeof ev.rows === 'number' ? ev.rows : null, error: ev.error ? String(ev.error) : null, waitpointId: ev.waitpointId || null, timedOut: !!ev.timedOut, kitRefused: !!ev.kitRefused };
+  }
+  return null;
 }
 
 function reasonOf(e: any): string {

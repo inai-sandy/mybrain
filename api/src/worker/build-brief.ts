@@ -262,6 +262,25 @@ This exists because of one real run: it fetched 90 answers, recognised 0 rows, w
 Sheet, said "done" and cost 101 credits. A quiet success with no rows is the worst thing this program
 can do.
 
+## When it needs the owner
+
+A worker may stop and ask him, and it costs nothing to wait — the process exits and is run again
+when he answers, replaying everything it already did:
+
+\`\`\`js
+const answer = await kit.ask({ question: '…?', choices: ['Carry on', 'Stop'], ifNoAnswer: 'Carry on' });
+const what = await kit.trouble('Instagram has answered not_found 6 times in a row');
+\`\`\`
+
+- Ask **only** when a wrong guess would waste the run, or when something is broken and either road is
+  defensible. Never ask about something the plan already settles.
+- \`kit.ask\` throws \`WorkerPaused\` when there is no answer yet. **Let it out** — the template's
+  \`if (e && e.paused) return;\` is what makes a two-day wait free. Never catch it, never retry it in
+  a loop, and never poll for the answer.
+- Choices are read to him as "reply 1, 2" on WhatsApp, so keep them short and give \`ifNoAnswer\`.
+  After 12 hours with no reply the run carries on with it and says so.
+- Tests drive \`kit.ask\` through the fake kit like any other route: \`ask: () => ({ answer: 'Carry on' })\`.
+
 ## The saved answers your tests stand on
 
 \`samples/index.json\` lists one entry per source. ${withSamples.length ? `${withSamples.length} of them ${withSamples.length === 1 ? 'has' : 'have'} a real saved answer in \`samples/\`: the file's \`answer\` field is **exactly** what \`kit.fetchSource(sourceId)\` returns for that source — the masked answer a real call gave, put through the app's own row builder.` : 'None of them has a real saved answer yet.'}

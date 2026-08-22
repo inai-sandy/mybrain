@@ -5,7 +5,8 @@ import { LlmService } from '../llm/llm.service';
 import { AlertsService } from '../push/alerts.service';
 import { whatsappStepLabel } from '../contacts/owner-alert';
 import { ServiceActionsService } from '../tools/service-actions.service';
-import { GatePause } from '../tools/service-gates.service';
+import { GatePause, ServiceGatesService } from '../tools/service-gates.service';
+import { ASK_DEADLINE_HOURS, OwnerAskService } from './owner-ask.service';
 import { SocialAgentRunService, SHAPE_MAX_TOKENS, mergeTables } from '../social/social-agent-run.service';
 import { SocialBudgetService, BudgetCheck } from '../social/social-budget.service';
 import { SourceFetchService } from '../social/source-fetch.service';
@@ -57,6 +58,8 @@ export class WorkerController {
     // Optional + LAST — spec harnesses build this positionally with fewer args.
     private readonly budget?: SocialBudgetService,
     private readonly alerts?: AlertsService,
+    private readonly owner?: OwnerAskService, // the question's road to the owner's phone (BEA-1392)
+    private readonly gates?: ServiceGatesService,
   ) {}
 
   // ---- fetching ------------------------------------------------------------------------------
@@ -69,7 +72,9 @@ export class WorkerController {
    */
   @Post('tool')
   async tool(@Req() req: any, @Body() body: any) {
-    return this.saying(() => this.fetch(req, body));
+    // A can't-undo call parks the run and asks the owner (§H) instead of failing it — this is the
+    // one route where an arbitrary `svc:` action can be reached, so it is the one that can gate.
+    return this.saying(() => this.fetch(req, body), { req, body });
   }
 
   private async fetch(req: any, body: any) {
@@ -93,7 +98,7 @@ export class WorkerController {
       // journalled and a resume re-fetches from page 1. `runDetailed()` answers rather than throws
       // on every vendor road, which is what keeps that narrow; it is the reason it must stay so.
       const hit = await this.journal.once(runId, seq, 'fetchSource', args, async () => {
-        const out = await this.sources.fetchBlock(src, this.guard(runId, job), this.ctx(runId, job), step, { hint: sourceHint(src, plan.sources), progress });
+        const out = await this.sources.fetchBlock(src, this.guard(runId, job, seq), this.ctx(runId, job, seq), step, { hint: sourceHint(src, plan.sources), progress });
         const label = sourceLabel(src, plan.sources);
         return {
           ok: !out.stop,
@@ -115,9 +120,9 @@ export class WorkerController {
     if (!actionId.startsWith('svc:')) throw new BadRequestException('Give a sourceId from the job\'s plan, or an actionId that starts with "svc:".');
     const args = body?.args && typeof body.args === 'object' ? body.args : {};
     const hit = await this.journal.once(runId, seq, 'tool', { actionId, args }, async () => {
-      const stop = await this.guard(runId, job)(actionId);
+      const stop = await this.guard(runId, job, seq)(actionId);
       if (stop) return { ok: false, credits: 0, stop, table: null };
-      const r = await this.actions.runDetailed(actionId, '', this.ctx(runId, job)(actionId, args));
+      const r = await this.actions.runDetailed(actionId, '', this.ctx(runId, job, seq)(actionId, args));
       return {
         ok: !!r.ok,
         credits: Number(r.credits) || 0,
@@ -165,7 +170,7 @@ export class WorkerController {
       const hit = await this.journal.once(runId, seq, 'shape', { prompt, header, rows: table.rows.length, columns: table.columns }, async () => {
         const start = new Date();
         await this.agent.stampProgress?.(runId, `shaping ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`);
-        const shaped = await this.social.shape(prompt, table, header);
+        const shaped = await this.social.shape(prompt, table, header, (n, of) => this.agent.stampProgress?.(runId, `shaping batch ${n} of ${of}`));
         let aiTokens = 0;
         try { aiTokens = (await this.llm.tokensSince?.('social-shape', start)) || 0; } catch { aiTokens = 0; }
         return { ok: !!shaped.ok, columns: shaped.columns || null, rows: shaped.rows || null, note: shaped.note || null, error: shaped.error || null, aiTokens };
@@ -300,14 +305,14 @@ export class WorkerController {
    */
   @Post('ask')
   async ask(@Req() req: any, @Body() body: any) {
-    const { runId } = who(req);
+    const { runId, agentId } = who(req);
     const seq = seqOf(body);
     const question = String(body?.question || '').trim();
     if (!question) throw new BadRequestException('A question needs to say something.');
     const choices = Array.isArray(body?.choices) ? body.choices.map((c: any) => String(c)).slice(0, 6) : [];
     const ifNoAnswer = body?.ifNoAnswer === undefined || body?.ifNoAnswer === null ? null : String(body.ifNoAnswer);
     if (choices.length && ifNoAnswer === null) throw new BadRequestException('A question with choices must say what to do if nobody answers (ifNoAnswer).');
-    const deadlineHours = Math.min(Math.max(Number(body?.deadlineHours) || 12, 1), 24 * 14);
+    const deadlineHours = Math.min(Math.max(Number(body?.deadlineHours) || ASK_DEADLINE_HOURS, 1), 24 * 14);
     const stepKey = this.journal.stepKey(seq, 'ask', { question, choices });
 
     const found = await this.journal.read(runId, seq);
@@ -327,22 +332,98 @@ export class WorkerController {
         this.tokens.revokeRun(runId);
         return { waiting: true, waitpointId: v.waitpointId, question, replayed: true };
       }
+      // The answer is in. Say on the run where it came from — a 12-hour silence that fell back to
+      // the worker's own default must never read as if the owner had chosen it (§H).
+      const viaTimeout = wp?.status === 'expired' || wp?.answeredVia === 'timeout';
+      await this.agent
+        .appendStep(runId, {
+          label: viaTimeout
+            ? `No answer in ${deadlineHours} hours — carrying on with "${String(answer).slice(0, 120)}", the default this question named`
+            : `Carrying on with your answer: ${String(answer).slice(0, 160)}`,
+          status: viaTimeout ? 'info' : 'done',
+          kind: 'ask',
+        })
+        .catch(() => undefined);
       const answered = { waiting: false, answer, waitpointId: v.waitpointId };
       await this.journal.write(runId, seq, stepKey, 'ask', answered);
       return { ...answered, replayed: true };
     }
 
-    const wp: any = await this.agent.ask(runId, {
+    const job = agentId ? await this.agent.getAgent(agentId).catch(() => null) : null;
+    const wp: any = await this.park(runId, {
       question,
-      kind: choices.length ? 'choice' : 'free_text',
-      options: choices,
-      defaultValue: ifNoAnswer ?? undefined,
-      expiresInMs: deadlineHours * 3600_000,
-    } as any);
+      choices,
+      ifNoAnswer,
+      deadlineHours,
+      jobName: (job as any)?.name || 'Your agent',
+    });
     await this.journal.write(runId, seq, stepKey, 'ask', { waiting: true, waitpointId: wp?.id || null });
-    await this.agent.appendStep(runId, { label: `Waiting for you: ${question.slice(0, 200)}`, status: 'running', kind: 'ask' }).catch(() => undefined);
-    this.tokens.revokeRun(runId);
     return { waiting: true, waitpointId: wp?.id || null, question };
+  }
+
+  /**
+   * Park the run on a question and get it onto the owner's phone (§H). The one place both roads —
+   * `kit.ask` and a can't-undo gate — go through, so a parked run always looks the same:
+   *
+   *  1. the `Waitpoint` is written and the run goes to **`awaiting_input`** (`AgentService.ask()`);
+   *  2. the run is marked parked, so a restart leaves it alone instead of failing it as an orphan
+   *     (`reconcileOrphans` only fails runs with no way to advance) and the Codex resume sweeper
+   *     still skips it — it reads `runKind`, which is already `worker`;
+   *  3. the question goes out on WhatsApp;
+   *  4. this spawn's tokens are revoked and the worker EXITS. Nothing is held open, so a two-day
+   *     wait costs nothing at all.
+   */
+  private async park(
+    runId: string,
+    o: { question: string; choices: string[]; ifNoAnswer: string | null; deadlineHours: number; jobName: string },
+  ): Promise<any> {
+    const wp: any = await this.agent.ask(runId, {
+      question: o.question,
+      kind: o.choices.length ? 'choice' : 'free_text',
+      options: o.choices,
+      defaultValue: o.ifNoAnswer ?? undefined,
+      expiresInMs: o.deadlineHours * 3600_000,
+      askedVia: 'whatsapp',
+    } as any);
+    await this.agent.parkRun?.(runId, 'worker')?.catch?.(() => undefined);
+    await this.agent.appendStep(runId, { label: `Waiting for you: ${o.question.slice(0, 200)}`, status: 'running', kind: 'ask' }).catch(() => undefined);
+    await this.owner?.send?.(runId, wp?.id || '', { jobName: o.jobName, question: o.question, choices: o.choices }).catch(() => undefined);
+    this.tokens.revokeRun(runId);
+    return wp;
+  }
+
+  /**
+   * A can't-undo call was reached (BEA-1348 × §H). A worker has no screen to show a confirm card on,
+   * so the run parks on the gate's own question and the owner answers it on WhatsApp hours later.
+   *
+   * Nothing is journalled — the call never happened, so the resumed worker makes it again at the
+   * same place in the call order, and by then the decision is on record: a yes carries the exact
+   * arguments he was shown, a no stops the step with his words. The one thing it must never do is
+   * park in a circle, so a decision that is already settled is acted on rather than re-asked.
+   */
+  private async parkOnGate(req: any, body: any, gate: any): Promise<any> {
+    const { runId, agentId } = who(req);
+    const seq = seqOf(body);
+    const nodeId = nodeIdOf(seq);
+    const settled = await this.gates?.decisionFor?.(gate.actionId, { runId, nodeId }).catch(() => null);
+    if (settled === 'rejected') {
+      return { ok: false, credits: 0, table: null, stop: `You said no to this: ${gate.headline}. Nothing was sent.` };
+    }
+    if (settled === 'approved') {
+      // He said yes, the step ran again, and it STILL asked. Re-parking would ask the same question
+      // for ever, so it stops here and says exactly that.
+      throw new BadRequestException(`You approved "${gate.headline}", but the step asked again instead of using your approval — nothing was sent. Run the job again, or release this gate for good in /tools.`);
+    }
+    const job = agentId ? await this.agent.getAgent(agentId).catch(() => null) : null;
+    if (settled !== 'pending') await this.gates?.recordPending?.(gate, { runId, nodeId }).catch(() => undefined);
+    const wp = await this.park(runId, {
+      question: gate.question,
+      choices: this.gates?.options || ['Yes, run it', 'No, stop'],
+      ifNoAnswer: 'No, stop', // silence may never approve something that cannot be taken back
+      deadlineHours: ASK_DEADLINE_HOURS,
+      jobName: (job as any)?.name || 'Your agent',
+    }).catch(() => null);
+    return { paused: true, waitpointId: (wp as any)?.id || null, question: gate.question };
   }
 
   // ---- the end ---------------------------------------------------------------------------------
@@ -378,11 +459,16 @@ export class WorkerController {
    * So it comes back as the gate's own plain sentence, and NOTHING is journalled: the call never
    * happened, so a later approval may still make it. (A worker parking on a gate is piece 7.)
    */
-  private async saying<T>(work: () => Promise<T>): Promise<T> {
+  private async saying<T>(work: () => Promise<T>, park?: { req: any; body: any }): Promise<T> {
     try {
       return await work();
     } catch (e: any) {
-      if (e instanceof GatePause || e?.name === 'GatePause') throw new BadRequestException(String(e?.message || 'Held for your approval.'));
+      const gate = e instanceof GatePause || e?.name === 'GatePause';
+      // The tool route parks and asks (§H). Everywhere else — the sheet, the document — a gate is
+      // still the plain refusal it was: those calls go to fixed, known-safe actions, and a road
+      // that cannot carry the owner's approval back into the call must not pretend it can.
+      if (gate && park) return (await this.parkOnGate(park.req, park.body, (e as any).gate)) as any;
+      if (gate) throw new BadRequestException(String(e?.message || 'Held for your approval.'));
       throw e;
     }
   }
@@ -403,8 +489,14 @@ export class WorkerController {
    * a guard that cannot answer does not let the call through, and a call over the ceiling pauses the
    * job instead of being made.
    */
-  private guard(runId: string, job: any) {
+  private guard(runId: string, job: any, seq?: number) {
     return async (actionId: string): Promise<string | null> => {
+      // A gate the owner already refused is settled: the call is not made, and the step says so in
+      // his own decision rather than asking him the same thing again (BEA-1392 §H).
+      if (seq !== undefined) {
+        const settled = await this.gates?.decisionFor?.(actionId, { runId, nodeId: nodeIdOf(seq) }).catch(() => null);
+        if (settled === 'rejected') return `You said no to this one, so it was not run.`;
+      }
       let b: BudgetCheck | null = null;
       if (this.budget?.check) {
         try { b = await this.budget.check(actionId); } catch (e: any) {
@@ -419,10 +511,20 @@ export class WorkerController {
     };
   }
 
-  /** Every worker call is recorded like everyone else's: the run, the job, `runKind:'worker'`, pinned args. */
-  private ctx(runId: string, job: any) {
-    return (id: string, args: Record<string, any>) => ({ runId, runKind: 'worker', agentId: job?.id, args, argsPinned: true, label: id });
+  /**
+   * Every worker call is recorded like everyone else's: the run, the job, `runKind:'worker'`,
+   * pinned args. `nodeId` is the call's own place in the call order, which is what makes an
+   * approval spendable exactly once — the same yes can never let tomorrow's run through, and a
+   * replayed worker asks for the approval at the very position that parked (BEA-1392).
+   */
+  private ctx(runId: string, job: any, seq?: number) {
+    return (id: string, args: Record<string, any>) => ({ runId, runKind: 'worker', agentId: job?.id, args, argsPinned: true, label: id, ...(seq === undefined ? {} : { nodeId: nodeIdOf(seq) }) });
   }
+}
+
+/** A worker call's step id — its place in the run's call order, stable across every replay. */
+function nodeIdOf(seq: number): string {
+  return `worker:${seq}`;
 }
 
 /** The identity the guard put on the request. Never read from the body — that is the whole rule. */

@@ -27,6 +27,9 @@
 
 const KIT_VERSION = '1';
 
+/** How long a question waits before its `ifNoAnswer` is taken — the owner's own decision (§H). */
+const ASK_DEADLINE_HOURS = 12;
+
 /** Thrown by `kit.ask` when the owner has not answered yet: the worker must exit, not spin. */
 class WorkerPaused extends Error {
   constructor(question, waitpointId) {
@@ -100,6 +103,10 @@ function makeKit(opts) {
   const post = async (route, body) => {
     const answer = await call(route, body);
     if (answer && answer.error) throw new WorkerFailed(String(answer.error));
+    // The app parked the run and asked the owner something (a can't-undo call it will not make
+    // without a yes). The worker must EXIT, exactly as it does for `kit.ask` — the answer arrives
+    // hours later and the next spawn replays to here for free.
+    if (answer && answer.paused) throw new WorkerPaused(answer.question || 'the owner has to approve this', answer.waitpointId);
     return answer;
   };
 
@@ -239,23 +246,38 @@ function makeKit(opts) {
     /**
      * Ask the owner, and stop. Throws `WorkerPaused` when there is no answer yet — the worker must
      * let it out and exit. The re-run gets the answer at this same position and carries on.
+     *
+     * The question goes to his phone on WhatsApp with its choices NUMBERED ("reply 1, 2 or 3"), and
+     * he may answer in words too. `deadlineHours` defaults to 12 (his own decision): after that the
+     * run carries on with `ifNoAnswer` and says so on the run — or, when the question named no
+     * default, it stops honestly. A question is never left open for ever.
      */
     async ask(q) {
-      const body = { seq: seq++, question: q.question, choices: q.choices || [], deadlineHours: q.deadlineHours || 12 };
+      const body = { seq: seq++, question: q.question, choices: q.choices || [], deadlineHours: q.deadlineHours || ASK_DEADLINE_HOURS };
       if (q.ifNoAnswer !== undefined) body.ifNoAnswer = q.ifNoAnswer;
       const r = await post('ask', body);
       if (r.waiting) throw new WorkerPaused(q.question, r.waitpointId);
       return r.answer;
     },
 
-    /** Something is wrong that the worker cannot decide alone — `ask` with the run's own context. */
+    /**
+     * Something is wrong that the worker cannot decide alone — the owner's own case: *"something is
+     * not working, it has to trigger a WhatsApp"*. It is `kit.ask` with the trouble said first and a
+     * safe pair of choices, so a worker never has to word this well itself.
+     *
+     * The default when nobody answers is **Stop**, on purpose: something is already wrong, and
+     * twelve hours of silence is not permission to carry on regardless.
+     */
     async trouble(reason, q) {
-      return kit.ask({
-        question: `${reason}\n\n${(q && q.question) || 'What should I do?'}`,
-        choices: (q && q.choices) || [],
-        deadlineHours: (q && q.deadlineHours) || 12,
-        ifNoAnswer: q && q.ifNoAnswer,
+      const choices = (q && q.choices && q.choices.length ? q.choices : ['Carry on anyway', 'Stop the run']);
+      const dflt = q && q.ifNoAnswer !== undefined ? q.ifNoAnswer : choices[choices.length - 1];
+      const answer = await kit.ask({
+        question: `${reason} — ${(q && q.question) || 'what should I do?'}`,
+        choices,
+        deadlineHours: (q && q.deadlineHours) || ASK_DEADLINE_HOURS,
+        ifNoAnswer: dflt,
       });
+      return answer;
     },
 
     /** End the run honestly. Nothing after this runs. */
@@ -576,6 +598,7 @@ function mulberry32(a) {
 }
 
 exports.KIT_VERSION = KIT_VERSION;
+exports.ASK_DEADLINE_HOURS = ASK_DEADLINE_HOURS;
 exports.makeKit = makeKit;
 exports.installDeterminism = installDeterminism;
 exports.WorkerPaused = WorkerPaused;
