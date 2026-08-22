@@ -199,6 +199,15 @@ export class AgentController {
     return { brief, view, refusals: await this.briefs.whyNot(brief.id) };
   }
 
+  /** The call a "looked" line leans on — one tap turns a claim into something he can check. */
+  @Get('areas/:id/brief/proof/:callId')
+  async briefProof(@Param('callId') callId: string) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const proof = await this.briefs.proof(callId);
+    if (!proof) throw new BadRequestException('That look is not on record any more.');
+    return proof;
+  }
+
   @Post('areas/:id/brief/approve')
   async briefApprove(@Param('id') id: string) {
     if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');

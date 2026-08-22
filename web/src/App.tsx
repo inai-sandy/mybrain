@@ -48,6 +48,7 @@ import { AgentHistory } from './pages/AgentHistory';
 import { SavedByAgents } from './pages/SavedByAgents';
 import { AgentApp } from './pages/AgentApp';
 import { AgentAreaPage } from './pages/AgentAreaPage';
+import AgentBriefPage from './pages/AgentBriefPage';
 import { FlowsList } from './pages/FlowsList';
 import { FlowRunView } from './pages/FlowRunView';
 import { FlowRunsList } from './pages/FlowRunsList';
@@ -158,6 +159,8 @@ function AuthedApp() {
         <Route path="agent/agents/:id" element={<AgentApp />} />
         <Route path="agent/a/:id" element={<AgentApp />} />
         <Route path="agent/ar/:id" element={<AgentAreaPage />} />
+        {/* The brief (BEA-1406) — the first gate: he reads what will be built before it is built. */}
+        <Route path="agent/ar/:id/brief" element={<AgentBriefPage />} />
         <Route path="agent/runs/:id" element={<AgentRunView />} />
         <Route path="flows" element={<FlowsList />} />
         <Route path="flows/runs/:id" element={<FlowRunView />} />
