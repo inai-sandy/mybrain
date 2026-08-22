@@ -583,6 +583,40 @@ Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1
 
 **Deep research is ours, and it is budgeted.** `deep_research` (BEA-1196) plans sub-questions, runs the searches itself, reads pages and writes the cited report on the **flat-rate** engine — the `deep-research` entry in `LlmService.HELPERS` defaults to Codex on purpose, because the point was that a report costs only search credits (~30c) instead of Perplexity's ~$1–2. Hard caps live in `deep-research.service.ts` (`HARD_CAP`: 24 searches, 10 page reads — raised from 8 in BEA-1239, when every question started sweeping all three indexes) and no node setting can exceed them. What a run actually spent is stored on `FlowRun.spend` and shown in the Runs list.
 
+**Whole vendor answers are kept, so a worker can be tested and repaired for free (BEA-1386, agent
+workers 1/10 — `specs/AGENT-WORKERS.md` §A).** `ToolCall.result` is pretty-printed then cut to 2,000
+characters, which is why nothing could be replayed. `ToolSample` (new table, migration
+`20260822090000_tool_sample`) keeps the answer WHOLE: masked, gzipped, a **BLOB — never base64** (the
+nightly backup copies the database whole). Written from the ONE call site,
+`ServiceActionsService.runDetailed()`, beside the `ToolCall` row, on success only, through
+`ToolSampleService.maybeKeep()` (`api/src/tools/tool-sample.service.ts`) — optional + last on the
+constructor, never throws, so a harness without it behaves exactly as before. **Sampling is opt-in per
+service and never keeps anybody's messages**: `shouldSample()` in `tool-sample.ts` wants a successful,
+ungated READ of a service in `SAMPLE_SERVICES` (instagram · tiktok · youtube · twitter · linkedin ·
+facebook · threads · reddit) **that the public-scraping provider actually served** (`providerKind ===
+SAMPLE_PROVIDER`, decided at the call site by which provider `providerFor()` picked — the general
+provider has its own `twitter` signed in to the owner's OWN account, and reading his followers is his
+address book, not public content), and `NO_SAMPLE_SERVICES` (vault · whatsapp · gmail · chat · slack ·
+telegram …) plus `NO_SAMPLE_ACTION_RE` (message/dm/inbox/conversation/mail on the ACTION half only —
+the Threads platform is not a conversation) say no over the top of it. **`maskPayload()` is NOT
+`redact()`** — that one cuts at 4,000 characters and masks by key name only, so it would miss a phone
+number in `wa_id` or an e-mail in a caption. The new one has no cap and masks by key name AND value
+shape everywhere, including inside free text: e-mails, E.164, and any run of digits and separators
+whose DIGIT COUNT is 10–14 (`PHONE_RUN_RE` — "98765 43210" and "9876-543-210" are how a bio really
+writes a number, and matching only unbroken runs missed them); ids
+(`ID_KEY_RE`) and dates (`DATE_KEY_RE`) keep their digit runs on purpose — an Instagram `pk` IS a long
+number and a masked `taken_at` would break "the last 30 days". Caps, in one place: `RAW_MAX` 256 KB
+before gzip (bigger → stored truncated, `note` starts `truncated:`, `isUsable()` false, `replay()`
+skips it), `SAMPLE_MAX_BYTES` 1 MB stored, `PER_ACTION_GOOD` 5 per (actionId, argsHash),
+`PER_AGENT_FAILING` 10, `TOTAL_BUDGET_MB` 100. The 6-hourly sweep evicts per shape → per job → oldest
+first, then runs `PRAGMA incremental_vacuum` — the migration sets `auto_vacuum = INCREMENTAL` (and
+VACUUMs once) because **SQLite otherwise never gives the space back and the nightly backup grows for
+ever**; `tool-sample.store.spec.ts` proves it on a real database (55 MB in, 50 evicted, the file
+measured before and after). `replay(actionId, argsHash?)` returns the parsed payload and **has no
+provider to reach** — a repair loop costs nothing. `setPinned()` is the hook for a worker's
+`samples/index.json` (nothing registers one until the workers land; a hook that throws makes the sweep
+delete nothing that pass).
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

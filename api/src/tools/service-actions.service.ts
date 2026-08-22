@@ -6,6 +6,8 @@ import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { WhatsAppProvider } from './whatsapp.provider';
 import { ExecuteResult, parseServiceToolId, ServiceAccount, ServiceAction, ServiceProvider } from './service-provider';
 import { GatePause, PendingGate, ServiceGatesService } from './service-gates.service';
+import { ToolSampleService } from './tool-sample.service';
+import { SAMPLE_PROVIDER } from './tool-sample';
 
 /**
  * Running one outside-service action — with **no engine turn** (BEA-1347). Design: `specs/TOOLS.md`.
@@ -113,6 +115,9 @@ export class ServiceActionsService {
     // The third (BEA-1384): WhatsApp owns every `svc:whatsapp.*` id — the general provider blocks
     // that service on purpose (it is ours), so nothing else can ever answer for it.
     private readonly whatsapp?: WhatsAppProvider,
+    // The sample store (BEA-1386). Optional and last: it only ever ADDS a stored copy of an answer
+    // that already ran, so a harness without it behaves exactly as this service always did.
+    private readonly samples?: ToolSampleService,
   ) {
     this.gates = gates || new ServiceGatesService(prisma, provider);
   }
@@ -288,6 +293,26 @@ export class ServiceActionsService {
     const summary = this.summarise(res.data);
     // `gated` on a real success means "this one had to be approved, and it was" (BEA-1348).
     await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary, gated: mustAsk, credits }, ctx);
+    // The WHOLE answer, kept for the workers to be tested and repaired against (BEA-1386). The row
+    // above is cut to 2,000 characters and cannot be replayed; this one is masked and gzipped whole.
+    // `maybeKeep` decides — opt-in service, a read, ungated — and never throws: a call that really
+    // happened must not be reported as failed because our own store could not be written.
+    await this.samples?.maybeKeep?.({
+      actionId,
+      service,
+      action: parsed.action,
+      agentId: ctx.agentId,
+      args,
+      data: res.data,
+      ok: true,
+      gated: mustAsk,
+      readOnly: p.readOnly === true,
+      method: action.method,
+      // WHICH provider answered, not just which slug was asked: the general provider has a `twitter`
+      // signed in to the owner's own account, and reading his own followers is his address book, not
+      // public content. Only the public-scraping provider's answers may be kept.
+      providerKind: this.social && (p as any) === (this.social as any) ? SAMPLE_PROVIDER : 'other',
+    });
     say(`   ✅ ${name}: ${action.name} — done in ${(ms / 1000).toFixed(1)}s`);
     return {
       ok: true,
