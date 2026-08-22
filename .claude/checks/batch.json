@@ -10,8 +10,8 @@
     { "id": "BEA-1391", "title": "6/10 contracts - fail loudly", "status": "done", "sha": "a462e7b" },
     { "id": "BEA-1392", "title": "7/10 ask and wait (WhatsApp question + resume)", "status": "done", "sha": "dea8ec2" },
     { "id": "BEA-1393", "title": "8/10 self-heal", "status": "done", "sha": "845a435" },
-    { "id": "BEA-1394", "title": "9/10 housekeeping + Worker tab + the dispatch switch", "status": "in_progress" },
-    { "id": "BEA-1395", "title": "10/10 acceptance on a real agent", "status": "pending" },
+    { "id": "BEA-1394", "title": "9/10 housekeeping + Worker tab + the dispatch switch", "status": "done", "sha": "b439b07" },
+    { "id": "BEA-1395", "title": "10/10 acceptance on a real agent", "status": "in_progress" },
     { "id": "FINAL-VERIFY", "title": "Owner asked (2026-08-22) for a full re-verification AFTER all 10 pieces: independent adversarial review of the built system vs specs/AGENT-WORKERS.md + live checks on the running server (routes, host runner, a real build+repair, contacts/reminders untouched, owner's 6 agents unchanged, cost + disk). Report findings honestly, fix what is broken.", "status": "pending" }
   ]
 }

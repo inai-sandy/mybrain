@@ -106,6 +106,52 @@ describe('parity: a worker and the plan runner produce the same rows from the sa
     expect(planWorld.sheets.writes[0].values).toHaveLength(1 + 4); // p1 p2 p3 p4, p3 de-duped across the two pages
   });
 
+  it('names the sources the way the plan runner does, whatever id the worker hands the merge (BEA-1395)', async () => {
+    // The acceptance run found the one real difference between the two roads here, on the owner's own
+    // job: it has TEN sources on ONE action (BEA-1374), so the plan runner names them by their labels
+    // — "instagram.search_hashtag · smarthomeindia" — while the worker Codex wrote handed `kit.merge`
+    // the SOURCE IDS, which read "instagram.search_hashtag#2". That value is the `source` column he
+    // reads in his sheet. The app names it now, so a worker cannot get it wrong.
+    const twoOnOne = () => ({
+      ...job(),
+      tools: [HASHTAG],
+      toolArgs: {
+        [HASHTAG]: { actionId: HASHTAG, args: { hashtag: 'smarthomeindia' } },
+        [`${HASHTAG}#2`]: { actionId: HASHTAG, args: { hashtag: 'homeautomation' } },
+      },
+    });
+    const samples: SampleFixture[] = [
+      { actionId: HASHTAG, args: { hashtag: 'smarthomeindia' }, data: { posts: [post('p1'), post('p2')] } },
+      { actionId: HASHTAG, args: { hashtag: 'homeautomation' }, data: { posts: [post('p6')] } },
+    ];
+
+    const planWorld = await makeWorld({ job: twoOnOne(), samples, cards: {} });
+    await planWorld.social.run('run-plan', planWorld.agent.job, { title: 'Smart home India' });
+
+    const workerWorld = await makeWorld({ job: twoOnOne(), samples, cards: {} });
+    const { kit } = await spawnKit(workerWorld, 'run-worker', 'ag1');
+    // …the same script, but merging on the source ids rather than the labels `fetchSource` answered.
+    const tables: any[] = [];
+    for (const sourceId of [HASHTAG, `${HASHTAG}#2`]) {
+      const got = await kit.fetchSource(sourceId);
+      if (got.table) tables.push({ id: sourceId, table: got.table });
+    }
+    const merged = await kit.merge(tables);
+    const shaped = await kit.shape(merged, { prompt: twoOnOne().prompt });
+    const w = await kit.writeSheet({ columns: shaped.columns, rows: shaped.rows }, { title: 'Smart home India' });
+    await kit.finish({ resultText: `${shaped.rows.length} rows`, outputUrl: w.url });
+
+    // The ids the worker handed in came back as the plan runner's own labels…
+    expect(merged.columns[0]).toBe('source');
+    expect([...new Set(merged.rows.map((r: any[]) => String(r[0])))].sort()).toEqual([
+      'instagram.search_hashtag · homeautomation',
+      'instagram.search_hashtag · smarthomeindia',
+    ]);
+    // …so what the shaping step is shown — the merged rows themselves — is identical on both roads.
+    expect(workerWorld.shaped).toEqual(planWorld.shaped);
+    expect(workerWorld.sheets.writes[0].values).toEqual(planWorld.sheets.writes[0].values);
+  });
+
   it('a worker that asks for a call nothing was saved for fails — it never invents an answer', async () => {
     const world = await makeWorld({ job: job(), samples: SAMPLES, cards: CARDS });
     const { kit } = await spawnKit(world, 'run-worker', 'ag1');

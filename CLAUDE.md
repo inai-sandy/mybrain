@@ -605,9 +605,10 @@ shape everywhere, including inside free text: e-mails, E.164, and any run of dig
 whose DIGIT COUNT is 10–14 (`PHONE_RUN_RE` — "98765 43210" and "9876-543-210" are how a bio really
 writes a number, and matching only unbroken runs missed them); ids
 (`ID_KEY_RE`) and dates (`DATE_KEY_RE`) keep their digit runs on purpose — an Instagram `pk` IS a long
-number and a masked `taken_at` would break "the last 30 days". Caps, in one place: `RAW_MAX` 256 KB
+number and a masked `taken_at` would break "the last 30 days". Caps, in one place: `RAW_MAX` **2 MB**
 before gzip (bigger → stored truncated, `note` starts `truncated:`, `isUsable()` false, `replay()`
-skips it), `SAMPLE_MAX_BYTES` 1 MB stored, `PER_ACTION_GOOD` 5 per (actionId, argsHash),
+skips it — it was 256 KB until BEA-1395 measured a real Instagram profile answer at 436 KB, which
+meant every answer the owner's flagship job gets was kept truncated and unusable), `SAMPLE_MAX_BYTES` 1 MB stored, `PER_ACTION_GOOD` 5 per (actionId, argsHash),
 `PER_AGENT_FAILING` 10, `TOTAL_BUDGET_MB` 100. The 6-hourly sweep evicts per shape → per job → oldest
 first, then runs `PRAGMA incremental_vacuum` — the migration sets `auto_vacuum = INCREMENTAL` (and
 VACUUMs once) because **SQLite otherwise never gives the space back and the nightly backup grows for
@@ -866,6 +867,23 @@ repair history and the held-repair buttons. Proved end to end on a throwaway job
 calls**: OFF → the plan runner; ON → a real worker process on the host, its steps on the run screen,
 `runKind:'worker'`, done; plan edited → "the plan changed since worker v1 was built" and the old way;
 runner stopped → said so and went the old way instead of failing; deleted → no rows, no folder.
+
+**The worker road, honestly, as it stands after the acceptance run (BEA-1395).** All ten pieces are
+built and proved on the owner's own job ("Smart Home Instagram Profiles", `743d0852…`) on the live
+system for **3 credits**: a worker compiled from his live plan gives the plan runner's rows cell for
+cell on the same saved answers; a broken saved answer makes it fail loudly, keeps the evidence, and
+the app repairs and re-promotes itself with **zero vendor calls**; a question really reaches his phone
+and the answer resumes the run from where it stopped, repeating no fetch, no write and no message.
+Three things a fresh session must know: **(1) it is OFF everywhere.** `Agent.useWorker` is false on
+every job, including his; nothing converts automatically and turning it on is his tap in the Worker
+row. **(2) The runner is not installed as a service.** `services/host/worker-runner.server.js` needs a
+systemd unit and that needs root; until then it is started by hand
+(`WORKER_API=https://mybrain.1site.ai WORKER_ROOT=<a writable dir> node …/worker-runner.server.js`,
+port 8769) and dies with the box — and while it is down every run simply goes the old way and says so,
+which is what the BEA-1394 fallback is for. **(3) A worker only repairs what is IN the worker.** The
+acceptance break (a vendor answer the row reader could not read) was repaired with a new test and no
+code change, because the reading lives in the app — `tableOf`/`itemsOf` — not in the worker. Do not
+expect self-heal to fix an app-side shape bug.
 
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.

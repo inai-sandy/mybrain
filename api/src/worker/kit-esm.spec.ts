@@ -22,4 +22,20 @@ describe('the kit loads the way a generated worker will load it', () => {
     const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
     expect(out).toBe('kit 1');
   });
+
+  it('says "waiting" on stdout before a parked worker exits (BEA-1395)', () => {
+    // The runner reads ONE `{type:'result'}` line off the child's stdout. Without it a parked
+    // worker's clean exit reads as `done`, the app finishes the run, and `finishRun` cancels the
+    // question the owner was just asked. Only a real child process can prove this line is written.
+    const kit = pathToFileURL(join(__dirname, 'kit', 'kit.js')).href;
+    const script = `
+      import { makeKit } from ${JSON.stringify(kit)};
+      const k = makeKit({ runId: 'r', seed: { now: 42, random: 7 }, fetchImpl: async () => ({ waiting: true, waitpointId: 'wp1' }) });
+      try { await k.ask({ question: 'Carry on?', choices: ['Yes', 'No'], ifNoAnswer: 'No' }); }
+      catch (e) { if (!e.paused) throw e; }
+    `;
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+    const line = out.trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((x: any) => x && x.type === 'result');
+    expect(line).toMatchObject({ type: 'result', status: 'waiting', waitpointId: 'wp1' });
+  });
 });
