@@ -860,7 +860,11 @@ model Waitpoint {
   status       String    @default("pending") // pending | answered | expired | cancelled
   answer       String? // JSON of the user's answer
   resumeToken  String    @unique
-  answeredVia  String? // telegram | web
+  answeredVia  String? // telegram | web | whatsapp | timeout
+  /// Where the question was SENT (BEA-1392): 'whatsapp' when it went out on the owner's phone. An
+  /// inbound owner reply may only answer a question WhatsApp itself asked — never one the run
+  /// screen or Telegram is holding, which he would answer there.
+  askedVia     String?
   expiresAt    DateTime?
   createdAt    DateTime  @default(now())
   answeredAt   DateTime?

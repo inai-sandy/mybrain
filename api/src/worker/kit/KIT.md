@@ -84,6 +84,37 @@ write, and **let a `ContractError` out** — the kit refuses `writeSheet`, `writ
 
 It is free and local: no HTTP call, no credits, and no place in the call order.
 
+## Asking the owner, and waiting
+
+```js
+const answer = await kit.ask({
+  question: 'Instagram hashtag search has failed 6 times. Carry on with creators only, or stop?',
+  choices: ['Carry on', 'Stop'],   // read out to him as "reply 1, 2"
+  deadlineHours: 12,               // the default; 1 … 336
+  ifNoAnswer: 'Carry on',          // REQUIRED when you give choices
+});
+
+const what = await kit.trouble('Instagram has answered not_found 6 times in a row');
+```
+
+The question goes to the owner's phone on WhatsApp (template first, Meta's real verdict, Telegram if
+Meta refuses) and **the worker process exits** — a two-day wait costs nothing. `kit.ask` throws
+`WorkerPaused`; let it out, exactly like the shape above does. When he answers, the worker is run
+again from the top, every earlier call returns its recorded answer, and `kit.ask` answers his words
+at the same place in the call order.
+
+- Answers come back as the **choice's own text** ("Carry on"), whether he replied `1` or `carry on`.
+  A free-text question answers with whatever he wrote.
+- After `deadlineHours` with no reply the run carries on with `ifNoAnswer` and **says so** on the run
+  screen. A question with no default stops the run honestly instead — never silently.
+- `kit.trouble(reason)` is `kit.ask` with the trouble said first and a safe pair of choices; its
+  default when nobody answers is **Stop**, because something is already wrong.
+- A **can't-undo** call (a delete, a refund) parks the run the same way, with the gate's own question.
+  You do not write that code: `kit.tool(...)` throws `WorkerPaused` and the resumed call goes through
+  only if he said yes.
+
+Only ask when a wrong guess would waste the run. Every question costs the owner a message.
+
 ## Discipline
 
 ```js
@@ -96,6 +127,11 @@ kit.now(); kit.random(); kit.uuid();    // the run's frozen clock and seeded ran
 
 `status` is `done` | `failed` | `info` | `running`. Write a step for every real thing that happens:
 each source fetched (with its credits), the merge, the shaping, the write, the message.
+
+`kit.checkpoint` is how a long job proves it is alive: a run that writes no step and no checkpoint
+for **20 minutes** is failed as stuck, told to the owner, and its job is freed. The app already
+checkpoints inside its own loops (every page, every creator, every shaping batch), so you only need
+one for milestones of your own — "4 of 9 sources done".
 
 ## The three rules a worker must never break
 

@@ -241,7 +241,7 @@ export class SocialAgentRunService {
       if (plan.shape) {
         const shapeStart = new Date();
         await step({ label: 'Shaping the rows the way you asked', status: 'running', kind: 'log', nodeId: 'shape' });
-        const shaped = await this.shape(plan.shape.prompt, table, existing?.header?.length ? existing.header : null);
+        const shaped = await this.shape(plan.shape.prompt, table, existing?.header?.length ? existing.header : null, (n, of) => progress(`shaping batch ${n} of ${of}`));
         try { aiTokens = (await this.llm.tokensSince?.('social-shape', shapeStart)) || 0; } catch { aiTokens = 0; }
         if (!shaped.ok) { await step({ label: `Could not shape the rows: ${shaped.error}`, status: 'failed', nodeId: 'shape' }); return fail(`Could not shape the rows: ${shaped.error}`); }
         table = { columns: shaped.columns!, rows: shaped.rows!, itemCount: table.itemCount };
@@ -658,13 +658,21 @@ export class SocialAgentRunService {
    * is not one 200k-character prompt; the first batch (or the sheet's own header) decides the
    * columns, later batches fill them. Recall over precision: when unsure, keep the item.
    */
-  async shape(prompt: string, table: { columns: string[]; rows: any[][] }, header: string[] | null): Promise<{ ok: boolean; columns?: string[]; rows?: any[][]; note?: string; error?: string }> {
+  async shape(
+    prompt: string,
+    table: { columns: string[]; rows: any[][] },
+    header: string[] | null,
+    // Optional + LAST: one "still moving" stamp per BATCH (BEA-1392). Seven slow batches in a row
+    // are a legitimately long job, and the stall watchdog must be able to tell that from a hang.
+    onBatch?: (n: number, of: number) => any,
+  ): Promise<{ ok: boolean; columns?: string[]; rows?: any[][]; note?: string; error?: string }> {
     const items = table.rows.map((r) => shapeInput(Object.fromEntries(table.columns.map((c, i) => [c, r[i]]))));
     const batches: any[][] = [];
     for (let i = 0; i < items.length && batches.length < SHAPE_MAX_BATCHES; i += SHAPE_BATCH) batches.push(items.slice(i, i + SHAPE_BATCH));
     let columns: string[] | null = header && header.length ? header : null;
     const rows: any[][] = [];
     for (const [bi, batch] of batches.entries()) {
+      try { await onBatch?.(bi + 1, batches.length); } catch { /* a progress line is never worth a run */ }
       const out = await this.shapeBatch(prompt, batch, columns, bi + 1, batches.length);
       if (!out.ok) return out;
       if (!columns) columns = out.columns!;

@@ -66,6 +66,50 @@ Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-4
     still only says so out loud there — the owner's six live jobs run exactly as they did. The
     contract is the worker road's, which is where a run can be failed without changing what he
     already relies on.
+- **7/10 — §H ask and wait** (BEA-1392): `kit.ask` / `kit.trouble` / `kit.checkpoint` with the
+  question really going out — `OwnerAskService` → `AlertsService.askOwner()` → `sendOwnerAlert()`,
+  so the template-first order, Meta's real verdict and the Telegram fallback (BEA-1379) come free;
+  the owner-number check AHEAD of the Contact lookup in `postbox-callback.controller.ts`; the
+  12-hour deadline; `WorkerSweeperService` (the worker road's own resume sweeper, the deadline and
+  the stall watchdog); and the overtaken-run rule. How the pieces were settled:
+  - **v1 is free text with numbered choices**, as the design said. The question reads "reply 1, 2"
+    and `readOwnerAnswer()` takes `1`, `carry on`, or his own words; tappable buttons stay a later
+    piece (there is no `send_buttons` tool, and `send_list` is a 24-hour-window free-form send).
+  - **the reply road is deliberately narrow**, because `postbox-callback.controller.ts` carries
+    Contacts, Reminders, the tap handler and the claims/daily-report loop every day. The new check
+    intercepts ONLY when the message is from his number AND a question that WhatsApp itself asked is
+    still open — a new `Waitpoint.askedVia` column, so an owner message can never answer a question
+    the run screen or Telegram is holding. Everything else falls through to the contact handling
+    untouched, including his own number when nothing is open. `owner-reply.ts` is pure functions
+    plus one registry (the `setOwnerAlertTelegram` pattern — an import back from ContactsModule
+    would be a cycle), and `owner-reply-callback.spec.ts` drives the REAL controller with realistic
+    inbound payloads: an owner reply with a question open, one with none, and a contact's reply
+    proved field-for-field against today's behaviour while a worker waits.
+  - **a parked run is marked parked** (`parkRun(runId, 'worker')` → `sessionId: 'worker'`), which is
+    what keeps `reconcileOrphans` from failing it on the next deploy; the Codex sweeper still skips
+    it on `runKind`. The worker sweeper claims it with the same atomic `claimResume()`.
+  - **the deadline has two roads**: a question WITH a default is applied by the existing
+    `AgentService.sweepExpired()` and comes back as an ordinary answer (the run then says "No answer
+    in 12 hours — carrying on with …, the default this question named"); a question with NO default
+    is failed honestly by the worker sweeper, and the owner is told.
+  - **the stall watchdog covers `worker` and `plan`, not `engine`** — a Codex turn has its own
+    watchdog and its own idea of slow. It reads the last step or checkpoint off the run's own log,
+    and `shape()` gained an optional per-BATCH progress stamp on both roads, because seven slow
+    shaping batches in a row were the one legitimate way to look stuck for 20 minutes.
+  - **a can't-undo call parks and asks too**, on the `tool` route only. `ServiceGatesService` gained
+    `recordPending` / `settlePending` / `decisionFor`: the gate is written `pending` when the run
+    parks, his answer settles it, and the resumed worker's call at the same `nodeId` (`worker:<seq>`
+    — the call's own place in the call order) finds the approval and goes through with the exact
+    arguments he saw. A no stops that step in his own words; a decision that is already settled is
+    acted on rather than asked again, so a gate can never park in a circle. The sheet and document
+    routes keep the plain refusal they had — they call fixed, known-safe actions, and a road that
+    cannot carry an approval back into the call must not pretend it can.
+  - **the decision is settled where every road meets**, not on the WhatsApp road: `AgentService`
+    gained `setAnswerHook()`, fired inside `resolve()`, which the run screen, Telegram, WhatsApp and
+    the timeout applying a question's own default all pass through. The review caught this as the
+    one real trap in the piece — a gate whose 12-hour "No, stop" default fired would have left the
+    `ServiceGate` row `pending` for ever, so the resumed worker met the same gate, parked again and
+    messaged the owner again, every twelve hours. A test now covers exactly that sequence.
 
 ## The owner's words
 

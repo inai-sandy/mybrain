@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from '../contacts/postbox.service';
 import { OwnerAlertResult, ownerFirstName, sendOwnerAlert } from '../contacts/owner-alert';
+import { askDetail } from '../contacts/owner-reply';
 
 const clean = (s: unknown) => String(s || '').trim();
 
@@ -99,6 +100,34 @@ export class AlertsService {
       { headline: clean(subject) || 'What the Lab noticed this week', detail: body, path: '/lab', longBody: body },
       { gate: 'whatsapp.outputs', log: 'weekly Lab line' },
     );
+  }
+
+  /**
+   * The owner's number, as Settings holds it (BEA-1392). One reader, so "who is the owner" can
+   * never differ between the message going out and the reply coming back. `OWNER_WHATSAPP_NUMBER`
+   * overrides it for a server whose Settings row is not filled in yet.
+   */
+  async ownerNumber(): Promise<string | null> {
+    const env = String(process.env.OWNER_WHATSAPP_NUMBER || '').trim();
+    if (env) return env;
+    return (await this.setting('alerts.whatsappNumber')) || null;
+  }
+
+  /**
+   * A run has STOPPED and needs an answer (BEA-1392 §H) — the worker's `kit.ask` / `kit.trouble`.
+   *
+   * The same one road as every other owner message (template first, Meta's real verdict, Telegram
+   * when Meta refuses), so BEA-1379 comes free. Two differences from the alerts above, both on
+   * purpose: it is NOT behind the `whatsapp.outputs` switch — that switch is about results, and a
+   * question is a run that cannot carry on until he answers — and it is not rate-limited, because a
+   * silently-dropped question would strand the run until its 12-hour deadline.
+   */
+  async askOwner(msg: { jobName: string; question: string; choices?: string[]; tag?: string; path: string }): Promise<AlertResult> {
+    const who = clean(msg.jobName).slice(0, 100) || 'Your agent';
+    const tag = clean(msg.tag);
+    const headline = `${who} needs your answer${tag ? ` ${tag}` : ''}`;
+    const detail = askDetail(clean(msg.question), msg.choices);
+    return this.ownerAlert({ headline, detail, path: msg.path, longBody: `${headline}\n\n${detail}` }, { log: 'a question from a run' });
   }
 
   /** An automation failed — WhatsApp the owner (if configured), quietly rate-limited. */

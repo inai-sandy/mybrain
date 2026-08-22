@@ -10,6 +10,8 @@ import { WorkerController } from './worker.controller';
 import { WorkerRunnerClient } from './worker-runner.client';
 import { WorkerTokenGuard } from './worker-token.guard';
 import { WorkerTokenService } from './worker-token.service';
+import { OwnerAskService } from './owner-ask.service';
+import { WorkerSweeperService } from './worker-sweeper.service';
 
 /**
  * Agent workers (BEA-1387 — `specs/AGENT-WORKERS.md`): the callback API a worker program on the host
@@ -22,11 +24,17 @@ import { WorkerTokenService } from './worker-token.service';
  *
  * The build turn (BEA-1390) lives here too: it compiles a job's approved plan into a worker through
  * the host runner and decides — on the tests, and only on the tests — whether that version goes live.
+ *
+ * And the question road (BEA-1392): `OwnerAskService` sends a parked run's question to the owner's
+ * phone and reads his reply back — it registers itself on the callback controller's registry at
+ * boot rather than being imported by ContactsModule, which would be a cycle. `WorkerSweeperService`
+ * is the worker road's own resume sweeper, its 12-hour deadline, and the stall watchdog that covers
+ * the plan runner too.
  */
 @Module({
   imports: [AgentModule, SocialModule, ToolCatalogModule, PushModule], // PrismaModule + LlmModule are @Global
   controllers: [WorkerController, WorkerBuildController],
-  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService],
-  exports: [RunJournalService, WorkerTokenService, WorkerBuildService],
+  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService, OwnerAskService, WorkerSweeperService],
+  exports: [RunJournalService, WorkerTokenService, WorkerBuildService, OwnerAskService],
 })
 export class WorkerModule {}

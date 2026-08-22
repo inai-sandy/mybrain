@@ -6,6 +6,11 @@ import { plainArgs } from '../social/plan';
 import { RunJournalService } from './run-journal.service';
 import { WorkerController } from './worker.controller';
 import { WorkerTokenService } from './worker-token.service';
+import { OwnerAskService } from './owner-ask.service';
+import { GatePause } from '../tools/service-gates.service';
+
+/** The owner's WhatsApp number in the tests — never used to send anything, only to be recognised. */
+export const OWNER_NUMBER = '919999000111';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { makeKit } = require('./kit/kit.js');
@@ -70,8 +75,42 @@ export function fakeAgent(job: any) {
   const runKinds: string[] = [];
   const progress: string[] = [];
   const outputs: string[] = [];
+  /** Runs parked on a question, in order — `parkRun(runId, 'worker')` (BEA-1392). */
+  const parked: { runId: string; sessionId: string | null }[] = [];
+  /** What the real `resolve()` runs after an answer is applied — registered by `OwnerAskService`. */
+  const hooks: { answered: ((runId: string, answer: string, via: string) => any) | null } = { answered: null };
   return {
-    steps, finished, waitpoints, runKinds, progress, outputs, job,
+    steps, finished, waitpoints, runKinds, progress, outputs, parked, job,
+    parkRun: async (runId: string, sessionId?: string | null) => { parked.push({ runId, sessionId: sessionId ?? null }); },
+    /** The real hook `resolve()` fires on EVERY answered question (BEA-1392). */
+    setAnswerHook: (h: any) => { hooks.answered = h; },
+    /** Exactly what the real one answers: the pending questions WhatsApp itself asked. */
+    openWhatsAppAsks: async () => waitpoints.filter((w) => w.status === 'pending' && w.askedVia === 'whatsapp'),
+    /** The real `answerById` shape — `applied:false` when it was already resolved, hook and all. */
+    answerById: async (id: string, answer: unknown, via = 'web') => {
+      const wp = waitpoints.find((w) => w.id === id);
+      if (!wp) return { applied: false, alreadyResolved: true };
+      if (wp.status !== 'pending') return { applied: false, alreadyResolved: true, status: wp.status };
+      wp.status = 'answered';
+      wp.answer = answer;
+      wp.answeredVia = via;
+      await hooks.answered?.(wp.runId, typeof answer === 'string' ? answer : JSON.stringify(answer ?? ''), via);
+      return { applied: true, alreadyResolved: false, status: 'answered' };
+    },
+    /**
+     * What `AgentService.sweepExpired()` does at the deadline to a question that named a default:
+     * it is `resolve(wp, wp.defaultValue, 'timeout')` — the same road, the same hook.
+     */
+    timeout: async (id: string) => {
+      const wp = waitpoints.find((w) => w.id === id);
+      if (!wp || wp.status !== 'pending') return false;
+      if (wp.defaultValue == null) { wp.status = 'expired'; return true; }
+      wp.status = 'answered';
+      wp.answer = wp.defaultValue;
+      wp.answeredVia = 'timeout';
+      await hooks.answered?.(wp.runId, String(wp.defaultValue), 'timeout');
+      return true;
+    },
     appendStep: async (_runId: string, s: any) => { steps.push(s); },
     stampProgress: async (_runId: string, label: string) => { progress.push(label); },
     setRunKind: async (_runId: string, kind: string) => { runKinds.push(kind); },
@@ -79,8 +118,20 @@ export function fakeAgent(job: any) {
     attachOutput: async (_runId: string, docId: string) => { outputs.push(docId); },
     getAgent: async (id: string) => (id === job.id ? job : null),
     updateAgent: async (_id: string, patch: any) => { Object.assign(job, patch); return job; },
-    ask: async (_runId: string, q: any) => {
-      const wp = { id: `wp${waitpoints.length + 1}`, question: q.question, status: 'pending', answer: null, defaultValue: q.defaultValue ?? null };
+    ask: async (runId: string, q: any) => {
+      const wp: any = {
+        id: `wp${waitpoints.length + 1}`,
+        runId,
+        question: q.question,
+        kind: q.kind || 'choice',
+        options: Array.isArray(q.options) ? q.options : [],
+        status: 'pending',
+        answer: null,
+        answeredVia: null,
+        askedVia: q.askedVia ?? null,
+        defaultValue: q.defaultValue ?? null,
+        createdAt: new Date(Date.now() + waitpoints.length), // asked in order, so "oldest" is real
+      };
       waitpoints.push(wp);
       return wp;
     },
@@ -116,8 +167,24 @@ export async function makeWorld(opts: {
   const calls: { id: string; args: any; ctx: any }[] = [];
   const sheets = { created: [] as string[], writes: [] as any[] };
   const actions = {
+    /** Action ids that stop and ask before they run — a real `GatePause`, as the runner throws it. */
+    gated: new Set<string>(),
+    /** Action ids that simply succeed — a write has no saved answer to replay, it just happens. */
+    succeed: new Set<string>(),
     runDetailed: async (id: string, _input: string, ctx: any) => {
       calls.push({ id, args: ctx?.args, ctx });
+      if (actions.gated.has(id)) {
+        throw new GatePause({
+          actionId: id,
+          service: 'github',
+          serviceName: 'GitHub',
+          actionName: 'Delete a repository',
+          args: ctx?.args || {},
+          headline: 'Delete a repository on GitHub — inai-sandy/old-notes',
+          question: 'Delete a repository on GitHub — inai-sandy/old-notes? This cannot be undone.',
+        });
+      }
+      if (actions.succeed.has(id)) return { ok: true, credits: 0, data: { done: true } };
       if (id === 'svc:googlesheets.create_google_sheet1') { sheets.created.push(ctx.args.title); return { ok: true, data: { spreadsheetId: 'SHEET_1' } }; }
       if (id === 'svc:googlesheets.batch_update') { sheets.writes.push(ctx.args); return { ok: true, data: { totalUpdatedRows: ctx.args.values.length } }; }
       if (id === 'svc:googlesheets.batch_get') return { ok: true, data: { valueRanges: [{ values: [] }, { values: [] }] } };
@@ -140,7 +207,31 @@ export async function makeWorld(opts: {
     tokensSince: async () => 120,
   };
   const documents = { created: [] as any[], create: async (d: any) => { (documents.created as any[]).push(d); return { id: `doc${documents.created.length}` }; } };
-  const alerts = { sent: [] as any[], runFinished: async (title: string, headline: string) => { alerts.sent.push({ title, headline }); return { sent: true, label: 'WhatsApp sent (template)' }; }, runFailed: async () => ({ sent: false }) };
+  const alerts = {
+    sent: [] as any[],
+    /** Every question that went to the owner's phone (BEA-1392) — never a real send in a test. */
+    asked: [] as any[],
+    failures: [] as any[],
+    runFinished: async (title: string, headline: string) => { alerts.sent.push({ title, headline }); return { sent: true, label: 'WhatsApp sent (template)' }; },
+    runFailed: async (name: string, reason: string) => { alerts.failures.push({ name, reason }); return { sent: false }; },
+    ownerNumber: async () => OWNER_NUMBER,
+    askOwner: async (m: any) => { alerts.asked.push(m); return { sent: true, via: 'template' as const }; },
+  };
+  /** The gates, as far as a worker can see them: what was held, and what the owner decided. */
+  const gates = {
+    options: ['Yes, run it', 'No, stop'],
+    pending: [] as any[],
+    settled: [] as any[],
+    decisions: {} as Record<string, string>,
+    recordPending: async (gate: any, ctx: any) => { gates.pending.push({ gate, ctx }); gates.decisions[`${ctx.runId}:${ctx.nodeId}`] = 'pending'; return 'g1'; },
+    settlePending: async (runId: string, answer: string) => {
+      const decision = /^(y|yes|ok|okay|go|run|do it|approve|allow|confirm|sure|proceed)\b/i.test(String(answer)) ? 'approved' : 'rejected';
+      for (const k of Object.keys(gates.decisions)) if (k.startsWith(`${runId}:`) && gates.decisions[k] === 'pending') gates.decisions[k] = decision;
+      gates.settled.push({ runId, answer, decision });
+      return { settled: 1, decision };
+    },
+    decisionFor: async (_actionId: string, ctx: any) => (ctx?.runId && ctx?.nodeId ? gates.decisions[`${ctx.runId}:${ctx.nodeId}`] || null : null),
+  };
   const budget = { checks: [] as string[], check: async (id: string) => { budget.checks.push(id); return { ok: true, spent: 0, ceiling: null, estimate: 1 }; }, pauseAgent: async () => undefined, pushAlert: async () => ({ sent: true }) };
   const knowledge = { card: async (id: string) => opts.cards?.[id] ?? null };
 
@@ -149,9 +240,12 @@ export async function makeWorld(opts: {
   const social = new SocialAgentRunService(agent as any, actions as any, llm as any, documents as any, alerts as any, undefined, budget as any, undefined, knowledge as any, sources);
   const journal = new RunJournalService(prisma);
   const tokens = new WorkerTokenService(journal, agent as any);
-  const controller = new WorkerController(journal, tokens, agent as any, actions as any, sources, social, llm as any, budget as any, alerts as any);
+  // The REAL question road (BEA-1392): the same service the app registers on the callback
+  // controller, with only the WhatsApp send itself faked.
+  const owner = new OwnerAskService(agent as any, alerts as any, gates as any);
+  const controller = new WorkerController(journal, tokens, agent as any, actions as any, sources, social, llm as any, budget as any, alerts as any, owner, gates as any);
 
-  return { prisma, store, calls, sheets, shaped, documents, alerts, budget, agent, social, sources, journal, tokens, controller, llm };
+  return { prisma, store, calls, sheets, shaped, documents, actions, alerts, budget, gates, agent, social, sources, journal, tokens, controller, owner, llm };
 }
 
 /**

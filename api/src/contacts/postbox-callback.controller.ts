@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { ReminderAgentService } from './reminder-agent.service';
 import { AppEventsService } from '../events/events.service';
+import { ownerReplyHandler } from './owner-reply';
 
 /**
  * Receives Postbox callbacks for My Brain's reminder conversations (BEA-729):
@@ -64,6 +65,29 @@ export class PostboxCallbackController {
         if (wasDeleted) {
           this.log.log(`ignored a redelivery of a message the owner deleted (${body.wamid})`);
           return { ok: true };
+        }
+        /**
+         * The OWNER's own reply, ahead of the Contact lookup (BEA-1392 — `specs/AGENT-WORKERS.md` §H).
+         *
+         * He is not a Contact, so until now his messages matched nothing and this method returned
+         * having done nothing at all. A worker that parks on a question needs exactly this road back.
+         *
+         * The rule is deliberately narrow, because everything below it is a live feature he uses
+         * every day: this only intercepts when the message is from HIS number AND a question that
+         * WhatsApp itself asked is still open. Anything else — his number with no open question, or
+         * anyone else's number — falls straight through to the contact handling below, untouched.
+         * A contact's reply can never reach the question matcher.
+         *
+         * A redelivered owner reply is harmless: answering is atomic, and the handler remembers the
+         * message id, so a retry cannot answer the NEXT open question with the same words.
+         */
+        const owner = ownerReplyHandler();
+        if (owner && (await owner.isOwnerNumber(from).catch(() => false))) {
+          const r = await owner.onOwnerReply(text, { wamid: body.wamid || null }).catch((e: any) => {
+            this.log.warn(`owner reply: ${e?.message || e}`);
+            return { answered: false };
+          });
+          if (r?.answered) return { ok: true, answered: true };
         }
         // Store the reply on this CONTACT's conversation (shared across their reminders). (BEA-742)
         // WhatsApp's `from` always carries the country code, but a contact may be saved without it
