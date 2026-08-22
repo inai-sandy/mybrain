@@ -330,8 +330,10 @@ export function BriefView({ brief, refusals, busy, approving, onEdit, onStrike, 
       {/* `pr-16` on a phone keeps the button clear of the floating chat bubble, which sits bottom-right. */}
       <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 py-3 pl-4 pr-16 backdrop-blur sm:pr-4 dark:border-zinc-800 dark:bg-zinc-900/95">
         {approved ? (
+          /* Once approved, the trial card above says what happens next in more detail — repeating it
+             here in a sticky bar just eats a third of a phone screen. */
           <p data-testid="brief-approved" className="flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-300">
-            <Check className="h-4 w-4" />You approved this. Next it gets built, and you see it run once before anything is saved.
+            <Check className="h-4 w-4" />You approved this.
           </p>
         ) : (
           <>
