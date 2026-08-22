@@ -32,7 +32,7 @@ function job(over: any = {}) {
   };
 }
 
-function world(opts: { job?: any; worker?: any; runner?: any; journal?: { seq: number; fn: string }[] } = {}) {
+function world(opts: { job?: any; worker?: any; runner?: any; journal?: { seq: number; fn: string }[]; waitpoints?: any[] } = {}) {
   const steps: any[] = [];
   const finished: any[] = [];
   const kinds: any[] = [];
@@ -59,7 +59,11 @@ function world(opts: { job?: any; worker?: any; runner?: any; journal?: { seq: n
     list: async () => opts.journal ?? [{ seq: -1, fn: 'seed' }],
     forget: async (runId: string) => { forgotten.push(runId); return 1; },
   };
-  const svc = new WorkerDispatchService(agent, builds, tokens, runner, journal);
+  // The waitpoints of the run, as the database holds them — the dispatcher asks it before it
+  // finishes a run as done (BEA-1395).
+  const waitpoints: any[] = opts.waitpoints ?? [];
+  const prisma: any = { waitpoint: { findFirst: async ({ where }: any) => waitpoints.find((w) => w.runId === where.runId && w.status === where.status) || null } };
+  const svc = new WorkerDispatchService(agent, builds, tokens, runner, journal, undefined, prisma);
   return { svc, agent, steps, finished, kinds, spawned, forgotten, removed, runner };
 }
 
@@ -118,6 +122,23 @@ describe('The dispatch switch — which road a run takes (BEA-1394)', () => {
 
   it('a worker that parked on a question owns the run — nothing is finished or fallen back', async () => {
     const { svc, finished } = world({ job: job({ useWorker: true }), worker: promoted(), runner: { status: 'waiting', waitpointId: 'wp1' } });
+    const out = await svc.run('run-1', 'job-1');
+    expect(out.fallback).toBeUndefined();
+    expect(finished).toHaveLength(0);
+  });
+
+  it('a clean EXIT with a question still open is a parked run, not a finished one (BEA-1395)', async () => {
+    // A worker that asks exits, and an exit says nothing: the runner reads that as `done`, and
+    // `finishRun` cancels every pending waitpoint. The acceptance run met exactly this — a real
+    // question on the owner's phone that could never be answered, and a run that claimed it was
+    // done having written nothing. The kit now says "waiting" on its way out; this is the belt to
+    // that brace, and it covers every worker already built against the older kit.
+    const { svc, finished } = world({
+      job: job({ useWorker: true }),
+      worker: promoted(),
+      runner: { status: 'done', rows: null },
+      waitpoints: [{ id: 'wp1', runId: 'run-1', status: 'pending' }],
+    });
     const out = await svc.run('run-1', 'job-1');
     expect(out.fallback).toBeUndefined();
     expect(finished).toHaveLength(0);

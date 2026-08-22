@@ -168,7 +168,9 @@ describe('shouldSample', () => {
 
 describe('the caps', () => {
   it('are the numbers the design names, in one place', () => {
-    expect(RAW_MAX).toBe(256 * 1024);
+    // 2 MB since BEA-1395: a real Instagram profile answer is 436 KB, so 256 KB kept every one of
+    // them truncated and unusable. The gzipped cap and the total budget are what bound the disk.
+    expect(RAW_MAX).toBe(2 * 1024 * 1024);
     expect(SAMPLE_MAX_BYTES).toBe(1024 * 1024);
     expect(PER_ACTION_GOOD).toBe(5);
     expect(PER_AGENT_FAILING).toBe(10);

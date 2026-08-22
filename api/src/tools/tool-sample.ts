@@ -16,9 +16,18 @@ import { createHash } from 'crypto';
 
 // ---- caps: one place, exported, so nothing invents its own number ---------------------------
 
-/** Per payload, BEFORE gzip. A bigger answer is stored truncated and marked unusable for tests. */
-export const RAW_MAX = 256 * 1024;
-/** Per payload, AFTER gzip. 256 KB of JSON never gets near this — it is the belt to the braces. */
+/**
+ * Per payload, BEFORE gzip. A bigger answer is stored truncated and marked unusable for tests.
+ *
+ * **2 MB, not 256 KB, since BEA-1395.** The acceptance run measured the owner's own flagship job:
+ * one real `svc:instagram.profile` answer is **436 KB** — the profile carries its whole video
+ * timeline, dash manifests and all — so at 256 KB every single answer that job ever gets would be
+ * kept truncated and marked unusable, and no worker for it could ever be built, tested or repaired
+ * against a real answer. The store stays bounded by the two caps that actually cost disk: the
+ * gzipped ceiling below (that 436 KB answer is 64 KB gzipped) and `TOTAL_BUDGET_MB`.
+ */
+export const RAW_MAX = 2 * 1024 * 1024;
+/** Per payload, AFTER gzip. Vendor JSON at the raw cap gzips far below this — belt to the braces. */
 export const SAMPLE_MAX_BYTES = 1024 * 1024;
 /** How many good samples are kept per (actionId, argsHash) — one call shape, five real answers. */
 export const PER_ACTION_GOOD = 5;

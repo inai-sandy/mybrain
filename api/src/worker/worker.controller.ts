@@ -145,12 +145,33 @@ export class WorkerController {
    * so it is not journalled: a replay recomputes it from what it was given.
    */
   @Post('merge')
-  async merge(@Body() body: any) {
+  async merge(@Req() req: any, @Body() body: any) {
     const tables = Array.isArray(body?.tables) ? body.tables : [];
     if (!tables.length) throw new BadRequestException('Nothing to merge.');
-    const clean = tables.map((t: any, i: number) => ({ id: String(t?.id || `source ${i + 1}`), table: asTable(t?.table) }));
+    // A table's id becomes the `source` column the owner reads in his sheet, so it is the app that
+    // names it, never the worker (BEA-1395). The acceptance run found the one real difference
+    // between the two roads here, on his own job: it has TEN sources on ONE action (BEA-1374), so
+    // the plan runner writes each source's LABEL ("instagram.search_profiles · smart home") while
+    // the worker Codex wrote handed in the source ids, which `mergeTables` renders as
+    // "instagram.search_profiles#2". A source id of this job's own plan is translated to that
+    // source's label here — the same `sourceLabel()` — and anything else is left exactly as it came,
+    // so a worker that already passes labels (the documented shape) is completely unaffected.
+    const name = await this.sourceNames(req);
+    const clean = tables.map((t: any, i: number) => ({ id: name(String(t?.id || `source ${i + 1}`)), table: asTable(t?.table) }));
     if (clean.length === 1) return { ...clean[0].table };
     return mergeTables(clean);
+  }
+
+  /** `sourceId → the label the plan runner would write`, for this run's job. Unknown ids pass through. */
+  private async sourceNames(req: any): Promise<(id: string) => string> {
+    const { agentId } = who(req);
+    try {
+      const plan = planFromAgent(await this.job(agentId));
+      const labels = new Map(plan.sources.map((s) => [s.id, sourceLabel(s, plan.sources)]));
+      return (id: string) => labels.get(id) || id;
+    } catch {
+      return (id: string) => id;
+    }
   }
 
   // ---- the AI step ---------------------------------------------------------------------------

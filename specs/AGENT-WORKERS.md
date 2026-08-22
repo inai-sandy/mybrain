@@ -1,6 +1,17 @@
 # Agent workers — Codex builds a small program per agent, and repairs it when it breaks
 
-**Status: approved and being built.** Written 2026-08-22.
+**Status: BUILT — all ten pieces, and accepted on the owner's own agent on 2026-08-22 (BEA-1395).**
+Written 2026-08-22. **It is OFF for every one of his jobs** (`Agent.useWorker` defaults to false):
+the road exists, is proven, and converts nothing until he taps the switch in the Worker row.
+**One thing still needs root**, which this build did not have:
+`services/host/mybrain-worker-runner.service` is written but NOT installed
+(`sudo cp services/host/mybrain-worker-runner.service /etc/systemd/system/ && sudo systemctl enable
+--now mybrain-worker-runner`), so the runner is started by hand and dies with the box
+(`WORKER_API=https://mybrain.1site.ai WORKER_ROOT=<a writable dir> node
+services/host/worker-runner.server.js`; the acceptance run used `/home/sandy/worker-root`, because
+`/srv` is not writable without root). Until it is installed,
+a run on the worker road falls back to the plan runner and says so — never a failure — which is
+exactly what BEA-1394 built the fallback for.
 Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-44a051754e16>
 
 **Built so far**
@@ -189,6 +200,62 @@ Owner-facing version: <https://claude.ai/code/artifact/cbbddb85-2021-40b3-9943-4
     `runKind:'worker'`; the plan was then edited and the next run said "the plan changed since worker v1
     was built" and went the old way; with the runner stopped the run said so and went the old way
     rather than failing; and deleting the job left no rows and no folder behind.
+
+- **10/10 — the acceptance run** (BEA-1395), on the live system, on the owner's own
+  "Smart Home Instagram Profiles" (`743d0852…`, ten creators-first sources on one action, 101 credits
+  a run). **Three credits were spent in the whole acceptance, and the owner's job was never re-run
+  against a vendor.** What it proved, and the three real things it found:
+  - **Parity.** Worker v1 was compiled from his live plan by a real Codex session (146 s, 7 tests
+    green, promoted) and measured against the plan runner on the SAME saved answers: **41 columns,
+    identical and in the same order; 1 row on each road** (all ten sources replay the one saved
+    answer, and both roads de-dupe nine of ten on the `id` column); **41 of 41 cells identical**;
+    26 calls, each source fetched exactly once. Cost of the comparison: **0 credits**.
+  - **The cap that made his job un-buildable** — found first, before anything could be measured.
+    One real `svc:instagram.profile` answer is **436 KB** (a profile carries its whole video timeline
+    and every dash manifest), and `RAW_MAX` was 256 KB, so every answer his only source action ever
+    gives was stored truncated and marked unusable: no fixture, no test, no repair could ever stand
+    on a real answer for that job. `RAW_MAX` is **2 MB** now; the gzipped ceiling (that answer is
+    64 KB gzipped) and `TOTAL_BUDGET_MB` are what bound the disk, and a test locks a real-sized
+    profile answer being kept whole.
+  - **The one difference between the roads, and it was real.** His job has ten sources on ONE action,
+    so the plan runner names them by their labels ("instagram.search_profiles · smart home") while the
+    worker Codex wrote handed `kit.merge` the SOURCE IDS ("instagram.search_profiles#2") — and that
+    value is the `source` column he reads in his sheet. 40 of 41 cells matched before the fix.
+    **`POST /api/worker/merge` now names them**, from the same `sourceLabel()` the plan runner uses,
+    so a worker cannot get it wrong whatever id it hands in.
+  - **Self-heal, zero vendor calls.** The saved answer was corrupted the way a vendor change looks —
+    the profile object at `data.user` emptied, the BEA-1377 shape — and the row reader recognised 0
+    rows out of 1. v1, measured on it, failed loudly and readably: *"Fetched 10 answers but recognised
+    0 rows — this is a My Brain bug, not the vendor (instagram.search_profiles · smart home); … Nothing
+    was written: this is not an empty day at the vendor, it is a bug here."* Ten failing answers were
+    kept, the cause was named `unrecognised on svc:instagram.profile` (attempt 1 of 2), and **the live
+    app's own repair loop** ran a real Codex session, wrote v2 (8 tests green), had the promotion guard
+    measure it — *"it gives exactly the same 1 row as before"* — and promoted it. 120 s wall clock,
+    **`ToolCall` rows for the job before and after: 203 and 203. Zero vendor calls, zero credits.**
+    Said plainly: **the repair changed no worker code** — v2's `worker.mjs` is byte-for-byte v1's, plus
+    one more test. That is the honest answer for this break: the shape reading lives in the app, not in
+    the worker, and the worker was already doing the right thing (fail loudly, write nothing). A worker
+    can be repaired when the worker is what is wrong; it cannot repair the app around it.
+  - **Ask and wait, end to end — and the bug that made it impossible.** A worker asked a real question,
+    the WhatsApp template really reached the owner, and **the run was then marked `done` and his
+    question cancelled**: a parked worker EXITS, an exit says nothing, the runner reads a clean exit as
+    `done`, and `finishRun` cancels every pending waitpoint. He would have been left holding a question
+    that could never be answered, on a run claiming it had finished having written nothing. Two fixes,
+    both locked by tests: **the kit says `{"type":"result","status":"waiting"}` on stdout before a
+    parked worker exits** (proved through a real child process, because only a child can show it), and
+    **the dispatcher never finishes a run as done while a question of that run is still open** — the
+    database is asked, which also covers every worker already built against the older kit. With the
+    question re-opened, the owner's reply came in through the real inbound-WhatsApp callback, matched
+    the open question, and the sweeper resumed the run **12 seconds later**: the fetch came out of the
+    journal (**the run's `ToolCall` count stayed at 1 — no second fetch, no second message, no second
+    write**), the document was written once and the run finished `done`. Named limitation: the pause
+    fix was re-proved by tests, not by a second live run, because that would have cost the owner a
+    second WhatsApp message.
+  - **What the acceptance did NOT prove**, said out loud: only one saved answer existed for his job, so
+    all ten sources replay the same one — the parity number covers the merge, the de-dupe, the columns,
+    the order and the call pattern, not ten different answers; the repair notice road (Telegram/WhatsApp
+    on a promoted or held repair) was deliberately not wired up in the harness, so nothing messaged him
+    about it; and the runner still needs its systemd unit.
 
 ## The owner's words
 

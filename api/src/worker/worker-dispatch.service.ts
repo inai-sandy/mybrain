@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
 import { isJobBusy } from '../agent/run-lock.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { isDirectFetchAgent, planFromAgent } from '../social/plan';
 import { planHashOf } from './build-brief';
@@ -54,6 +55,7 @@ export class WorkerDispatchService implements OnModuleInit {
     private readonly journal: RunJournalService,
     // Optional + LAST — spec harnesses build this positionally with fewer args.
     private readonly bridge?: HermesBridgeService,
+    private readonly prisma?: PrismaService,
   ) {}
 
   onModuleInit() {
@@ -128,6 +130,14 @@ export class WorkerDispatchService implements OnModuleInit {
 
     if (r.status === 'waiting') return {}; // parked on a question — the sweeper owns it from here
     if (r.status === 'done') {
+      // …unless a question of this run is still open. A worker that parks EXITS, and an exit with
+      // nothing else said reads as a clean `done` at the runner — so a worker built against a kit
+      // that does not say "waiting" on its way out would have its run finished here, and
+      // `finishRun` cancels every pending waitpoint: the owner is left holding a question on his
+      // phone that can never be answered, and the run says it is done having written nothing. The
+      // BEA-1395 acceptance run met exactly that. The database is the authority on whether a
+      // question is open, so it is asked here rather than trusted from the child's exit code.
+      if (await this.questionOpen(runId)) return {};
       // The worker called `/api/worker/finish` itself, which is the authority on the result;
       // `finishRun` is a no-op on a run that already reached a terminal state.
       await this.agent.finishRun(runId, { status: 'done' }).catch(() => undefined);
@@ -148,6 +158,14 @@ export class WorkerDispatchService implements OnModuleInit {
     }
     await this.agent.finishRun(runId, { status: 'failed', error: r.error || 'The worker stopped without saying why.' }).catch(() => undefined);
     return {};
+  }
+
+  /** Is a question of this run still waiting for the owner? Then the run is parked, not finished. */
+  private async questionOpen(runId: string): Promise<boolean> {
+    const open = await this.prisma?.waitpoint
+      ?.findFirst?.({ where: { runId, status: 'pending' }, select: { id: true } })
+      .catch(() => null);
+    return !!open;
   }
 
   /**

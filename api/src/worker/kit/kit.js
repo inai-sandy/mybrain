@@ -30,6 +30,21 @@ const KIT_VERSION = '1';
 /** How long a question waits before its `ifNoAnswer` is taken — the owner's own decision (§H). */
 const ASK_DEADLINE_HOURS = 12;
 
+/**
+ * One line of the worker's own protocol on stdout — the runner reads `{type:'result'}` off it and
+ * treats it as the worker's last word (BEA-1389). Silent wherever there is no stdout to write to
+ * (the app's own tests build the kit in-process).
+ */
+function say(line) {
+  try {
+    if (typeof process !== 'undefined' && process.stdout && typeof process.stdout.write === 'function') {
+      process.stdout.write(`${JSON.stringify(line)}\n`);
+    }
+  } catch {
+    // Saying it is best-effort: a broken pipe must never turn a parked run into a failed one.
+  }
+}
+
 /** Thrown by `kit.ask` when the owner has not answered yet: the worker must exit, not spin. */
 class WorkerPaused extends Error {
   constructor(question, waitpointId) {
@@ -256,7 +271,14 @@ function makeKit(opts) {
       const body = { seq: seq++, question: q.question, choices: q.choices || [], deadlineHours: q.deadlineHours || ASK_DEADLINE_HOURS };
       if (q.ifNoAnswer !== undefined) body.ifNoAnswer = q.ifNoAnswer;
       const r = await post('ask', body);
-      if (r.waiting) throw new WorkerPaused(q.question, r.waitpointId);
+      if (r.waiting) {
+        // Say WHY this process is about to exit, before it does (BEA-1395). The runner reads one
+        // `{type:'result'}` line off stdout and, without it, a clean exit reads as `done` — so the
+        // app finished the run and cancelled the very question the owner had just been asked. The
+        // acceptance run met exactly that: a real question on his phone that could never be answered.
+        say({ type: 'result', status: 'waiting', rows: null, waitpointId: r.waitpointId || null });
+        throw new WorkerPaused(q.question, r.waitpointId);
+      }
       return r.answer;
     },
 

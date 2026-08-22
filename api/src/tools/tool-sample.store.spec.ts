@@ -160,6 +160,40 @@ describe('ToolSample — the store (BEA-1386)', () => {
     expect(await samples.replay('svc:tiktok.search')).toBeNull();
   });
 
+  it('keeps a real-sized Instagram profile answer whole — 436 KB is a normal answer, not an outlier (BEA-1395)', async () => {
+    // Measured on the owner's own job during the acceptance run: ONE `svc:instagram.profile` answer
+    // was 436 KB, because a profile carries its whole video timeline and every dash manifest with it.
+    // At the old 256 KB cap every answer that job ever gets was kept truncated and unusable, so no
+    // worker for it could be built, tested or repaired against anything real.
+    const profile = {
+      data: {
+        user: {
+          pk: '80262880207',
+          username: 'smart.home.fixes',
+          full_name: 'Smart Home Fixes',
+          follower_count: 13_590,
+          edge_felix_video_timeline: {
+            edges: Array.from({ length: 12 }, (_, i) => ({ node: { id: `396904114771660813${i}`, dash_info: { video_dash_manifest: `<MPD>${'x'.repeat(35_000)}</MPD>` } } })),
+          },
+        },
+      },
+    };
+    const size = Buffer.byteLength(JSON.stringify(profile));
+    expect(size).toBeGreaterThan(400 * 1024);
+    expect(size).toBeLessThan(RAW_MAX);
+
+    const { svc } = actions(prisma, samples, profile);
+    await svc.runDetailed('svc:instagram.profile', '', { args: { handle: 'smart.home.fixes' }, argsPinned: true });
+
+    const row = await prisma.toolSample.findFirst({ where: { actionId: 'svc:instagram.profile' } });
+    expect(row.note).toBeNull();
+    expect(isUsable(row)).toBe(true);
+    // …and it comes back whole, which is what a worker's fixtures and every repair stand on.
+    const replayed = await samples.replay('svc:instagram.profile');
+    expect(replayed?.data?.user?.username).toBe('smart.home.fixes');
+    expect(replayed?.data?.user?.follower_count).toBe(13_590);
+  });
+
   it('replays without touching a provider', async () => {
     const { svc, provider } = actions(prisma, samples);
     await svc.runDetailed('svc:instagram.search_hashtag', '', { args: { hashtag: 'x' }, argsPinned: true });
