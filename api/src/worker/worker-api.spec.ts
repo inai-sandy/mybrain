@@ -1,7 +1,7 @@
 import { RunJournalService, NOT_REPEATABLE, SEED_SEQ } from './run-journal.service';
 import { WorkerTokenService, TOKEN_TTL_MS } from './worker-token.service';
 import { WorkerTokenGuard } from './worker-token.guard';
-import { WORKER_HELPERS } from './worker.controller';
+import { WORKER_HELPERS, WorkerController } from './worker.controller';
 import { fakePrisma, makeWorld, spawnKit, SampleFixture } from './worker-harness.testing';
 
 /**
@@ -128,6 +128,12 @@ describe('the journal does each call once, and says so when it cannot', () => {
 });
 
 describe('the callback routes', () => {
+  it('live under /api/worker — the app adds the /api itself, so the controller must NOT repeat it', () => {
+    // `main.ts` calls `setGlobalPrefix('api')`. A controller declared as 'api/worker' answers at
+    // /api/api/worker and every worker call 404s — found live, seconds after the first deploy.
+    expect(Reflect.getMetadata('path', WorkerController)).toBe('worker');
+  });
+
   const HASHTAG = 'svc:instagram.search_hashtag';
   const SAMPLES: SampleFixture[] = [{ actionId: HASHTAG, args: { hashtag: 'x' }, data: { posts: [{ id: 'p1', url: 'https://instagram.com/p/p1', caption: 'hello' }] } }];
   const job = () => ({ id: 'ag1', name: 'J', prompt: 'Columns id, caption, link.', tools: [HASHTAG], toolArgs: { [HASHTAG]: { actionId: HASHTAG, args: { hashtag: 'x' } } }, outputDest: 'sheet', mode: 'run' });

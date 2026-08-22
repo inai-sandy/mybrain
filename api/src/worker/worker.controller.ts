@@ -44,7 +44,7 @@ const AI_MAX_TOKENS = SHAPE_MAX_TOKENS;
  */
 @Public()
 @UseGuards(WorkerTokenGuard)
-@Controller('api/worker')
+@Controller('worker') // the app prefixes every route with /api (`main.ts`), so this IS /api/worker/*
 export class WorkerController {
   constructor(
     private readonly journal: RunJournalService,

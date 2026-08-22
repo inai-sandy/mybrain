@@ -654,7 +654,9 @@ any other source, because the plan already holds it; `kit.merge` has its own tin
 `mergeTables()` may not be re-implemented in a worker; `kit.watchDiff`/`kit.expect` are NOT here
 (contracts are piece 6). Automatic checkpoints are `AgentService.stampProgress()` — ONE live line
 that updates itself (never fifty), stamped every page and every creator by the fetcher itself, which
-is what the piece-7 stall watchdog will read. Traps: `SocialAgentRunService`'s constructor gained
+is what the piece-7 stall watchdog will read. Traps: `main.ts` already calls `setGlobalPrefix('api')`, so the controller is `@Controller('worker')`
+— declaring it `api/worker` answers at `/api/api/worker` and every call 404s (found live, seconds
+after the first deploy; a test now reads the path metadata); `SocialAgentRunService`'s constructor gained
 `sources?` LAST; the worker routes are exercised in-process (`worker-harness.testing.ts`) because
 the worker runner is piece 4 — nothing spawns a process yet.
 
