@@ -1,13 +1,39 @@
 {
   "startedAt": "2026-08-22T17:55:00Z",
   "status": "running",
-  "note": "Brief First — replacing the 8-box agent form with a brief the owner reads and approves, a program Codex builds from the brief plus the WHOLE transcript, and a real trial run before Create. Plan: https://claude.ai/code/artifact/5c17fc65-a717-43b3-9bc6-4221968b0d94 · briefs in specs/briefs/. Owner decisions 2026-08-22: the full conversation goes to Codex (not a summary), with the approved brief on top as the decider; struck lines are marked, never deleted; a trial run shows the real message on screen and never delivers it unless he taps send. Strictly in order — 1405 (model+interview) then 1406 (screen), 1407 (Codex) then 1408 (trial gate), 1409 (self-learning), and 1410 is the proof on his real email agent. The nine existing agents are untouched and keep running the old road.",
+  "note": "Brief First \u2014 replacing the 8-box agent form with a brief the owner reads and approves, a program Codex builds from the brief plus the WHOLE transcript, and a real trial run before Create. Plan: https://claude.ai/code/artifact/5c17fc65-a717-43b3-9bc6-4221968b0d94 \u00b7 briefs in specs/briefs/. Owner decisions 2026-08-22: the full conversation goes to Codex (not a summary), with the approved brief on top as the decider; struck lines are marked, never deleted; a trial run shows the real message on screen and never delivers it unless he taps send. Strictly in order \u2014 1405 (model+interview) then 1406 (screen), 1407 (Codex) then 1408 (trial gate), 1409 (self-learning), and 1410 is the proof on his real email agent. The nine existing agents are untouched and keep running the old road.",
   "issues": [
-    { "id": "BEA-1405", "title": "1/6 the brief: model + the interview that writes it", "status": "pending" },
-    { "id": "BEA-1406", "title": "2/6 the brief screen: read it, fix it, approve it", "status": "pending" },
-    { "id": "BEA-1407", "title": "3/6 Codex builds from the brief and the whole transcript", "status": "pending" },
-    { "id": "BEA-1408", "title": "4/6 the trial run: see the real thing before Create", "status": "pending" },
-    { "id": "BEA-1409", "title": "5/6 the app learns each tool by trying it", "status": "pending" },
-    { "id": "BEA-1410", "title": "6/6 rebuild the nightly email agent the new way (the proof)", "status": "pending" }
+    {
+      "id": "BEA-1405",
+      "title": "1/6 the brief: model + the interview that writes it",
+      "status": "done",
+      "sha": "cc64810",
+      "note": "evidence is the ToolCall row, not a ToolSample \u2014 Gmail/WhatsApp are never sampled on purpose, so a sample id could never evidence the very agent this exists to fix"
+    },
+    {
+      "id": "BEA-1406",
+      "title": "2/6 the brief screen: read it, fix it, approve it",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1407",
+      "title": "3/6 Codex builds from the brief and the whole transcript",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1408",
+      "title": "4/6 the trial run: see the real thing before Create",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1409",
+      "title": "5/6 the app learns each tool by trying it",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1410",
+      "title": "6/6 rebuild the nightly email agent the new way (the proof)",
+      "status": "pending"
+    }
   ]
 }

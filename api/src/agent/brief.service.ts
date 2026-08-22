@@ -292,6 +292,28 @@ export class BriefService {
     return { ok: true, brief: saved };
   }
 
+  /**
+   * The proof behind a `tool` line: the call it leans on, as it was written down at the time.
+   * Tapping the line opens this — so "I looked and Gmail gave me 47 emails" is checkable in one tap
+   * instead of taken on trust. Arguments are already masked in the row; nothing new is exposed.
+   */
+  async proof(callId: string): Promise<{ ok: boolean; actionId?: string; args?: any; result?: string; error?: string; credits?: number; ms?: number; at?: string } | null> {
+    const row = await this.prisma?.toolCall?.findUnique?.({ where: { id: String(callId) } });
+    if (!row) return null;
+    let args: any = null;
+    try { args = row.arguments ? JSON.parse(String(row.arguments)) : null; } catch { args = row.arguments || null; }
+    return {
+      ok: !!row.ok,
+      actionId: String(row.action || ''),
+      args,
+      result: row.result ? String(row.result) : undefined,
+      error: row.error ? String(row.error) : undefined,
+      credits: row.credits === null || row.credits === undefined ? undefined : Number(row.credits),
+      ms: row.ms === null || row.ms === undefined ? undefined : Number(row.ms),
+      at: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
+    };
+  }
+
   // ---- handing it on ---------------------------------------------------------------------------------
 
   /** What a build turn is given: the brief on top, the whole conversation under it (BEA-1407). */
