@@ -29,6 +29,9 @@ RUN npm install --omit=dev
 COPY api/prisma ./prisma
 RUN npx prisma generate
 COPY --from=api /api/dist ./dist
+# The kit and its docs are plain files, not TypeScript, so `tsc` does not carry them into dist — and
+# the build turn (BEA-1390) reads them at run time to pin them into each new worker version folder.
+COPY --from=api /api/src/worker/kit ./dist/worker/kit
 COPY --from=web /web/dist ./public
 EXPOSE 8080
 # Apply migrations against the mounted data volume, then start.

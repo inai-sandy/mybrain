@@ -3,7 +3,8 @@
 //
 //   GET  /status                                   -> readiness, same shape as the codex runner's
 //   POST /run   {jobId, runId, token, seed?, timeoutMs?, kit?}  -> ndjson stream, final {type:'result'}
-//   POST /build {jobId, brief, model?, timeoutMs?} -> {ok, version, tests, log}   (piece 5 drives this)
+//   POST /build {jobId, brief, files?, model?, timeoutMs?} -> {ok, version, dir, tests, sessionId, log}
+//   POST /promote {jobId, version, meta?}          -> {ok, version, previous} — the `current` symlink move
 //
 // Why it lives on the host and not in the container: the app image has no `child_process` usage at
 // all, and a second container must not write the same SQLite file. This is a sibling of
@@ -415,6 +416,67 @@ function runCommand(cmd, args, cwd, timeoutMs, env) {
   });
 }
 
+// The build's own files — the brief, the pinned kit, the saved answers the tests stand on — are
+// written by the app (BEA-1390), because the app is the only side that knows the plan, the kit it is
+// running and which `ToolSample`s a version was tested against. They arrive as a plain
+// `{ "<relative path>": "<contents>" }` map, and every path is checked as a path, never trusted.
+const MAX_FILES = 200;
+const MAX_FILE_BYTES = 2_000_000;
+const MAX_FILES_BYTES = 6_000_000;
+
+/** A relative path inside `dir`, or null. No absolutes, no `..`, no `.`, no empty segments. */
+function safeFilePath(dir, rel) {
+  const r = String(rel == null ? '' : rel).trim().replace(/\\/g, '/');
+  if (!r || r.length > 200) return null;
+  if (path.isAbsolute(r) || /^[A-Za-z]:/.test(r)) return null;
+  if (r.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) return null;
+  const full = path.resolve(dir, r);
+  if (full !== dir && !full.startsWith(dir + path.sep)) return null;
+  return full;
+}
+
+/** Every path and size checked BEFORE anything is created, so a bad request leaves no folder behind. */
+function checkFiles(files) {
+  if (files === undefined || files === null) return [];
+  if (typeof files !== 'object' || Array.isArray(files)) throw new Error('"files" must be a { path: contents } object');
+  const entries = Object.entries(files);
+  if (entries.length > MAX_FILES) throw new Error(`too many files (${entries.length}, at most ${MAX_FILES})`);
+  let total = 0;
+  const clean = [];
+  for (const [rel, content] of entries) {
+    if (!safeFilePath(path.resolve('/tmp/check'), rel)) throw new Error(`bad file path "${String(rel).slice(0, 80)}"`);
+    const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+    const size = Buffer.byteLength(text);
+    if (size > MAX_FILE_BYTES) throw new Error(`"${rel}" is ${size} bytes — at most ${MAX_FILE_BYTES}`);
+    total += size;
+    if (total > MAX_FILES_BYTES) throw new Error(`the files add up to more than ${MAX_FILES_BYTES} bytes`);
+    clean.push([rel, text]);
+  }
+  return clean;
+}
+
+function writeFiles(dir, clean) {
+  for (const [rel, text] of clean) {
+    const full = safeFilePath(dir, rel);
+    if (!full) throw new Error(`bad file path "${rel}"`); // checked already; belt and braces
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, text);
+  }
+  return clean.map(([rel]) => rel);
+}
+
+/**
+ * The Codex session this build ran in, read off its own `--json` event stream. It goes into
+ * `meta.json` (§D) so a build can be traced back to the turn that wrote it.
+ */
+function sessionIdOf(out) {
+  // `codex exec --json` announces the thread first: {"type":"thread.started","thread_id":"…"} — the
+  // same field the codex runner reuses to resume a session. The older key names are kept as a
+  // fallback so a Codex upgrade cannot quietly empty `meta.sessionId`.
+  const m = /"(?:thread_id|session_id|conversation_id)"\s*:\s*"([^"]{6,})"/.exec(String(out || ''));
+  return m ? m[1] : null;
+}
+
 /** Node's own test runner prints TAP: `# pass 7` / `# fail 0`. */
 function parseTap(out) {
   const pass = /^#\s*pass\s+(\d+)/m.exec(out);
@@ -438,6 +500,10 @@ async function handleBuild(req, res) {
   if (!jobDir) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad or missing jobId' })); return; }
   if (!brief.trim()) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'no brief' })); return; }
   if (live.has(jobId)) { res.statusCode = 409; res.end(JSON.stringify({ ok: false, error: `This job is busy here (${live.get(jobId).kind}) — try again when it settles.` })); return; }
+  // Checked before the folder is made: a bad file map must not leave a junk version behind.
+  let files = [];
+  try { files = checkFiles(body.files); }
+  catch (e) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) })); return; }
 
   const version = nextVersion(jobDir);
   const dir = path.join(jobDir, `v${version}`);
@@ -450,12 +516,24 @@ async function handleBuild(req, res) {
       res.end(JSON.stringify({ ok: false, version, error: `could not create ${dir}: ${String((e && e.message) || e)}` }));
       return;
     }
-    // The kit is pinned into the version folder so a worker keeps the parts box it was tested with.
-    if (KIT_DIR && fs.existsSync(KIT_DIR)) {
-      try { fs.cpSync(KIT_DIR, path.join(dir, 'kit'), { recursive: true }); log.push(`kit pinned from ${KIT_DIR}`); }
-      catch (e) { log.push(`kit copy failed: ${String((e && e.message) || e)}`); }
-    } else {
-      log.push('no kit copy configured (WORKER_KIT_DIR) — the brief must bring its own');
+    // The app's own files first (the pinned kit, its docs, the saved answers the tests stand on).
+    try {
+      const written = writeFiles(dir, files);
+      if (written.length) log.push(`wrote ${written.length} file${written.length === 1 ? '' : 's'} from the app: ${written.slice(0, 12).join(', ')}${written.length > 12 ? `, +${written.length - 12} more` : ''}`);
+    } catch (e) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ ok: false, version, error: `could not write the build's files: ${String((e && e.message) || e)}` }));
+      return;
+    }
+    // A kit copy on the host is the fallback for a hand-driven build; the app normally sends its own,
+    // because the app is the authority on which kit it is running.
+    if (!fs.existsSync(path.join(dir, 'kit'))) {
+      if (KIT_DIR && fs.existsSync(KIT_DIR)) {
+        try { fs.cpSync(KIT_DIR, path.join(dir, 'kit'), { recursive: true }); log.push(`kit pinned from ${KIT_DIR}`); }
+        catch (e) { log.push(`kit copy failed: ${String((e && e.message) || e)}`); }
+      } else {
+        log.push('no kit in the request and no WORKER_KIT_DIR — this build has no parts box');
+      }
     }
     fs.writeFileSync(path.join(dir, 'BRIEF.md'), brief);
 
@@ -464,6 +542,7 @@ async function handleBuild(req, res) {
     args.push(brief);
     const timeoutMs = Math.min(3_600_000, Math.max(30_000, Number(body.timeoutMs) > 0 ? Number(body.timeoutMs) : BUILD_TIMEOUT));
     const built = await runCommand('codex', args, dir, timeoutMs, process.env);
+    const sessionId = sessionIdOf(built.stdout);
     pruneWorkerTrust();
     log.push(built.timedOut ? `codex was stopped after ${Math.round(timeoutMs / 1000)}s` : `codex exited ${built.code}`);
     if (built.stderr.trim()) log.push(built.stderr.trim().slice(-2000));
@@ -482,11 +561,60 @@ async function handleBuild(req, res) {
     }
 
     const ok = wrote && !!tests && tests.failed === 0 && tests.passed > 0;
-    // No promotion here: moving `current` is the build turn's decision (piece 5), not the runner's.
-    res.end(JSON.stringify({ ok, version, dir, tests, log: log.join('\n').slice(-20_000) }));
+    // No promotion here: moving `current` is the build turn's decision (piece 5, POST /promote), not
+    // the runner's — green tests are the only thing that may move a job onto a new worker.
+    res.end(JSON.stringify({ ok, version, dir, wrote, tests, sessionId, timedOut: !!built.timedOut, log: log.join('\n').slice(-20_000) }));
   } finally {
     live.delete(jobId);
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// POST /promote — the `current` symlink move, and the same move back for a rollback. The app
+// decides (green tests, and only green tests); the runner is the only thing that can touch the
+// disk, so it does the move. `meta` is written into the version folder first, so a promoted worker
+// is never live for a moment without the facts of how it was built (§D).
+// ---------------------------------------------------------------------------------------------
+async function handlePromote(req, res) {
+  let body = {};
+  try { body = JSON.parse(await readBody(req)); }
+  catch (e) {
+    const msg = String((e && e.message) || '');
+    if (/too large/.test(msg)) { res.statusCode = 413; try { res.end(JSON.stringify({ ok: false, error: 'request body too large (8MB max)' }), () => req.destroy()); } catch (e2) { try { req.destroy(); } catch (e3) {} } return; }
+    if (/socket|aborted|ECONN|hang up/i.test(msg)) return;
+    res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad body' })); return;
+  }
+  const jobId = String(body.jobId || '');
+  const version = Math.floor(Number(body.version));
+  const jobDir = jobDirOf(jobId);
+  if (!jobDir) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad or missing jobId' })); return; }
+  if (!Number.isFinite(version) || version < 1) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad or missing version' })); return; }
+  if (live.has(jobId)) { res.statusCode = 409; res.end(JSON.stringify({ ok: false, error: `This job is busy here (${live.get(jobId).kind}) — nothing was promoted.` })); return; }
+
+  const dir = path.join(jobDir, `v${version}`);
+  if (!fs.existsSync(path.join(dir, 'worker.mjs'))) {
+    res.statusCode = 400;
+    res.end(JSON.stringify({ ok: false, error: `v${version} has no worker.mjs — there is nothing to promote.` }));
+    return;
+  }
+  const previousDir = currentDirOf(jobDir);
+  const previous = previousDir ? path.basename(previousDir) : null;
+  try {
+    if (body.meta && typeof body.meta === 'object') {
+      const existing = readMeta(dir) || {};
+      fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ ...existing, ...body.meta }, null, 2));
+    }
+    // Atomic: a new symlink under a temporary name, then renamed over `current`. A reader either
+    // sees the old version or the new one, never a missing link.
+    const tmp = path.join(jobDir, `.current.${process.pid}.${Date.now()}`);
+    fs.symlinkSync(`v${version}`, tmp, 'dir');
+    fs.renameSync(tmp, path.join(jobDir, 'current'));
+  } catch (e) {
+    res.statusCode = 500;
+    res.end(JSON.stringify({ ok: false, error: `could not promote v${version}: ${String((e && e.message) || e)}`, previous }));
+    return;
+  }
+  res.end(JSON.stringify({ ok: true, version, previous, dir }));
 }
 
 /**
@@ -513,6 +641,7 @@ const server = http.createServer(async (req, res) => {
     if (!allowed(req)) { res.statusCode = 401; res.end(JSON.stringify({ error: 'this runner needs its shared token' })); return; }
     if (req.method === 'POST' && req.url === '/run') { await handleRun(req, res); return; }
     if (req.method === 'POST' && req.url === '/build') { await handleBuild(req, res); return; }
+    if (req.method === 'POST' && req.url === '/promote') { await handlePromote(req, res); return; }
     res.statusCode = 404;
     res.end(JSON.stringify({ error: 'not found' }));
   } catch (e) {

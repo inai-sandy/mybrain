@@ -27,3 +27,9 @@ and nothing pretends to have run.
 
 What that means in practice after a rollback: the affected jobs fail honestly and stay on their old
 road until the app is forward again or the worker is rebuilt. Nothing to undo by hand.
+
+**A rebuild is a Codex session, so it is never automatic (BEA-1390).** The build turn runs on the
+owner's tap (`POST /api/agent/agents/:id/worker/build`) and puts a version live only when that
+version's own tests pass — a deploy, a rollback and a restart never build or promote anything. The
+kit the build pins comes out of the image (`dist/worker/kit`, copied there by the Dockerfile because
+`tsc` does not carry plain files), so an app image and the workers it builds always agree on the kit.

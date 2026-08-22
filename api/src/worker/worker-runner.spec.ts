@@ -301,6 +301,143 @@ describe('the worker runner (BEA-1389)', () => {
     }
   });
 
+  // -------------------------------------------------------------------------------------------
+  // The build turn's half of the runner (BEA-1390): the app's files land in a NEW version folder,
+  // ONE fresh Codex session runs in it, its tests are really run, and `current` moves only when the
+  // app says so. Codex itself is a stand-in here — a real build turn is minutes long and is proved
+  // live, not in the test suite — but every other part is the real file doing the real thing.
+  // -------------------------------------------------------------------------------------------
+  describe('building a worker (BEA-1390)', () => {
+    let buildRunner: Awaited<ReturnType<typeof startRunner>>;
+    let bin = '';
+
+    beforeAll(async () => {
+      bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-codex-'));
+      // A stand-in for Codex: it writes the two files a build must produce, and writes a FAILING
+      // test when the brief asks for one — so the same runner proves both roads.
+      fs.writeFileSync(
+        path.join(bin, 'codex'),
+        `#!/bin/sh
+printf '%s\\n' "$*" > argv.txt
+echo '{"id":"0","msg":{"type":"session_configured","session_id":"fake-session-42"}}'
+cat > worker.mjs <<'EOF'
+export async function run(kit) { return { rows: 1 }; }
+EOF
+if [ -f BRIEF.md ] && grep -q "MAKE THE TESTS FAIL" BRIEF.md; then
+cat > worker.test.mjs <<'EOF'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { run } from './worker.mjs';
+test('the rows are counted', async () => { assert.equal((await run({})).rows, 99); });
+EOF
+else
+cat > worker.test.mjs <<'EOF'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { run } from './worker.mjs';
+test('the rows are counted', async () => { assert.equal((await run({})).rows, 1); });
+test('the saved answers came through', () => {
+  const index = JSON.parse(readFileSync(new URL('./samples/index.json', import.meta.url)));
+  assert.equal(index.sources.length, 1);
+});
+EOF
+fi
+exit 0
+`,
+        { mode: 0o755 },
+      );
+      buildRunner = await startRunner(root, app.url, { PATH: `${bin}:${process.env.PATH}` });
+    });
+
+    afterAll(() => {
+      try { buildRunner.child.kill('SIGKILL'); } catch { /* already gone */ }
+      try { fs.rmSync(bin, { recursive: true, force: true }); } catch { /* best effort */ }
+    });
+
+    const build = async (body: Record<string, any>) =>
+      (await fetch(`${buildRunner.url}/build`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json() as any;
+    const promote = async (body: Record<string, any>) => {
+      const res = await fetch(`${buildRunner.url}/promote`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+
+    const FILES = {
+      'kit/kit.js': fs.readFileSync(KIT, 'utf8'),
+      'kit/KIT.md': '# kit\n',
+      'plan.json': '{"sources":[]}',
+      'samples/index.json': JSON.stringify({ sources: [{ sourceId: 'svc:instagram.search_hashtag', file: 'samples/a.json' }] }),
+      'samples/a.json': JSON.stringify({ answer: { ok: true, table: { columns: ['id'], rows: [['p1']] } } }),
+    };
+
+    it('writes the app\'s files, runs ONE fresh Codex session in the new folder, and runs its tests', async () => {
+      const out = await build({ jobId: 'built', brief: 'Write the worker.', files: FILES });
+      expect(out).toMatchObject({ ok: true, version: 1, wrote: true, sessionId: 'fake-session-42' });
+      expect(out.tests).toMatchObject({ passed: 2, failed: 0 });
+
+      const dir = path.join(root, 'built', 'v1');
+      expect(fs.existsSync(path.join(dir, 'worker.mjs'))).toBe(true);
+      expect(fs.existsSync(path.join(dir, 'worker.test.mjs'))).toBe(true);
+      expect(fs.readFileSync(path.join(dir, 'BRIEF.md'), 'utf8')).toBe('Write the worker.');
+      expect(fs.readFileSync(path.join(dir, 'samples', 'index.json'), 'utf8')).toContain('search_hashtag');
+      expect(fs.readFileSync(path.join(dir, 'kit', 'kit.js'), 'utf8')).toContain('makeKit');
+      // the sandbox and the cwd are the point: `codex exec resume` cannot change either, so a build
+      // must be a fresh session, in workspace-write, pinned to this version folder
+      const argv = fs.readFileSync(path.join(dir, 'argv.txt'), 'utf8');
+      expect(argv).toContain('-s workspace-write');
+      expect(argv).toContain(`-C ${dir}`);
+      expect(argv).not.toContain('resume');
+
+      // …and it does NOT promote: nothing is live until the app says so.
+      expect(fs.existsSync(path.join(root, 'built', 'current'))).toBe(false);
+    });
+
+    it('a build whose tests fail is not ok, and still leaves nothing live', async () => {
+      const out = await build({ jobId: 'redtests', brief: 'Write the worker. MAKE THE TESTS FAIL', files: FILES });
+      expect(out.ok).toBe(false);
+      expect(out.tests).toMatchObject({ passed: 0, failed: 1 });
+      expect(fs.existsSync(path.join(root, 'redtests', 'current'))).toBe(false);
+    });
+
+    it('promotion is the symlink move, and a rollback is the same move back', async () => {
+      await build({ jobId: 'promoted', brief: 'Write the worker.', files: FILES });
+      const first = await promote({ jobId: 'promoted', version: 1, meta: { jobId: 'promoted', version: 1, kit: '1', planHash: 'sha256:aaa', tests: { passed: 2, failed: 0 } } });
+      expect(first.body).toMatchObject({ ok: true, version: 1, previous: null });
+      expect(fs.realpathSync(path.join(root, 'promoted', 'current'))).toBe(fs.realpathSync(path.join(root, 'promoted', 'v1')));
+      expect(JSON.parse(fs.readFileSync(path.join(root, 'promoted', 'v1', 'meta.json'), 'utf8'))).toMatchObject({ planHash: 'sha256:aaa', kit: '1' });
+
+      const second = await build({ jobId: 'promoted', brief: 'Write the worker again.', files: FILES });
+      expect(second.version).toBe(2);
+      const moved = await promote({ jobId: 'promoted', version: 2, meta: { planHash: 'sha256:bbb' } });
+      expect(moved.body).toMatchObject({ ok: true, version: 2, previous: 'v1' });
+      expect(fs.realpathSync(path.join(root, 'promoted', 'current'))).toBe(fs.realpathSync(path.join(root, 'promoted', 'v2')));
+
+      const back = await promote({ jobId: 'promoted', version: 1 });
+      expect(back.body).toMatchObject({ ok: true, version: 1, previous: 'v2' });
+      expect(fs.realpathSync(path.join(root, 'promoted', 'current'))).toBe(fs.realpathSync(path.join(root, 'promoted', 'v1')));
+      // a rollback does not rewrite the version's own meta
+      expect(JSON.parse(fs.readFileSync(path.join(root, 'promoted', 'v1', 'meta.json'), 'utf8')).planHash).toBe('sha256:aaa');
+    });
+
+    it('refuses to promote a version that has no worker in it', async () => {
+      fs.mkdirSync(path.join(root, 'empty', 'v1'), { recursive: true });
+      const out = await promote({ jobId: 'empty', version: 1 });
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/no worker\.mjs/i);
+      expect(fs.existsSync(path.join(root, 'empty', 'current'))).toBe(false);
+    });
+
+    it('a file map that tries to escape the folder is refused, and no folder is left behind', async () => {
+      for (const bad of ['../escape.txt', '/etc/passwd', 'a/../../b.txt']) {
+        const out = await build({ jobId: 'escape', brief: 'x', files: { [bad]: 'no' } });
+        expect(out.ok).toBe(false);
+        expect(String(out.error)).toMatch(/bad file path/i);
+      }
+      expect(fs.existsSync(path.join(root, 'escape'))).toBe(false);
+      expect(fs.existsSync(path.join(root, 'escape.txt'))).toBe(false);
+    });
+  });
+
   it('runs one worker per job at a time', async () => {
     install(root, 'twice', `
       await new Promise((r) => setTimeout(r, 2500));

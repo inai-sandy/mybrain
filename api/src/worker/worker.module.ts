@@ -4,7 +4,10 @@ import { PushModule } from '../push/push.module';
 import { SocialModule } from '../social/social.module';
 import { ToolCatalogModule } from '../tools/tool-catalog.module';
 import { RunJournalService } from './run-journal.service';
+import { WorkerBuildController } from './worker-build.controller';
+import { WorkerBuildService } from './worker-build.service';
 import { WorkerController } from './worker.controller';
+import { WorkerRunnerClient } from './worker-runner.client';
 import { WorkerTokenGuard } from './worker-token.guard';
 import { WorkerTokenService } from './worker-token.service';
 
@@ -16,11 +19,14 @@ import { WorkerTokenService } from './worker-token.service';
  * shaping step, the sheet writer and the owner alerts are the ones the plan runner already uses.
  * The worker runner itself (the host service that spawns a worker) is a later piece — until then the
  * kit is exercised in-process by its tests.
+ *
+ * The build turn (BEA-1390) lives here too: it compiles a job's approved plan into a worker through
+ * the host runner and decides — on the tests, and only on the tests — whether that version goes live.
  */
 @Module({
   imports: [AgentModule, SocialModule, ToolCatalogModule, PushModule], // PrismaModule + LlmModule are @Global
-  controllers: [WorkerController],
-  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard],
-  exports: [RunJournalService, WorkerTokenService],
+  controllers: [WorkerController, WorkerBuildController],
+  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService],
+  exports: [RunJournalService, WorkerTokenService, WorkerBuildService],
 })
 export class WorkerModule {}

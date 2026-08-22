@@ -545,6 +545,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // …and what a Watch/Alert job saw last time (BEA-1358) — no FK, so by hand.
     await (this.prisma as any).socialWatch?.deleteMany?.({ where: { agentId: id } }).catch(() => undefined);
     await this.locks?.releaseJob(id).catch(() => undefined); // …and its run lock (BEA-1388) — no FK either.
+    // …and the history of the workers Codex built for it (BEA-1390). The version folders on the host
+    // are the worker runner's to clean up — that is piece 9's housekeeping, and it is written down there.
+    await (this.prisma as any).workerBuild?.deleteMany?.({ where: { agentId: id } }).catch(() => undefined);
     try {
       const flows = await this.prisma.flow.findMany({ where: { agentId: id }, select: { id: true } });
       for (const f of flows) await this.prisma.flowRun.deleteMany({ where: { flowId: f.id } }).catch(() => undefined);

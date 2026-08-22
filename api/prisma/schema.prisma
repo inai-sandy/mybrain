@@ -757,6 +757,45 @@ model SocialWatch {
   @@index([agentId])
 }
 
+/// ONE build turn (BEA-1390, `specs/AGENT-WORKERS.md` §C, §D): Codex compiling an approved plan into
+/// a worker, and what became of it. The newest `promoted` row IS the live worker of a job — there is
+/// no "current version" column anywhere else, so the history and the truth cannot disagree.
+///
+/// `planHash` is the hash of the plan the worker was compiled from; when the job's plan hashes to
+/// something else, that worker is STALE — it keeps running until it is rebuilt, and the owner is told.
+/// No FK on purpose (like `SocialWatch` and `JobRunLock`) — `deleteAgent` drops the rows by hand.
+model WorkerBuild {
+  id         String    @id @default(uuid())
+  agentId    String
+  /// The version folder this build wrote: `<jobId>/v<version>`.
+  version    Int
+  /// building | promoted | failed. `promoted` is only ever written after green tests.
+  status     String    @default("building")
+  /// build (the first worker for this job) | rebuild (the plan changed, or the owner asked again).
+  origin     String    @default("build")
+  /// Why this build was asked for, in plain words — shown to the owner beside the version.
+  reason     String?
+  planHash   String
+  /// The kit major this worker was compiled and tested against (`meta.kit`).
+  kit        String    @default("1")
+  /// JSON {passed, failed, at} as the runner parsed it out of `node --test`.
+  tests      String?
+  /// How many saved `ToolSample`s the tests stood on, and which ones (JSON string array of ids) —
+  /// the sweep must never evict a sample a live worker's tests depend on.
+  sampleIds  String    @default("[]")
+  /// The Codex session that wrote it (§D), for tracing a build back to its turn.
+  sessionId  String?
+  /// The honest reason a build did not go live. Null on a promoted one.
+  error      String?
+  /// The tail of the runner's own log — the Codex exit, the TAP output, what was written.
+  log        String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([agentId, startedAt])
+  @@index([status])
+}
+
 /// ONE run at a time per job (BEA-1388, `specs/AGENT-WORKERS.md` §G). Before anything starts a job —
 /// the scheduler, a manual tap, an event trigger, the worker road, later the repair loop — it claims
 /// this row. `jobId` is UNIQUE, and that uniqueness IS the claim: an INSERT either wins or is rejected,
