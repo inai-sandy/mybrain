@@ -13,6 +13,10 @@ function mapErr(e: any): never {
     const name = TOOLKIT_LABEL[toolkit] || 'that Google service';
     throw new BadRequestException(`${name} isn’t connected yet — open Tools (/tools), find ${name} and tap Connect, then try again.`);
   }
+  if (m.startsWith('gmail-cap:')) {
+    const [, calls, cap] = m.split(':');
+    throw new BadRequestException(`Gmail’s daily call cap (${cap || calls}) is used up for today — it resets at midnight. Raise it in Settings → Google if you really need more.`);
+  }
   throw new BadRequestException(m);
 }
 
@@ -165,6 +169,23 @@ export class GoogleController {
   @Get('hints')
   async hints() {
     return this.google.hints();
+  }
+
+  /** Today's Gmail calls against the daily cap, and the next scheduled read. (BEA-1399) */
+  @Get('gmail/usage')
+  async gmailUsage() {
+    return this.google.gmailUsage();
+  }
+
+  @Put('gmail/cap')
+  async setGmailCap(@Body() body: { cap?: number }) {
+    const n = Number(body?.cap);
+    if (!Number.isFinite(n) || n < 0) throw new BadRequestException('The cap must be a whole number of calls per day (0 = no cap).');
+    try {
+      return { cap: await this.google.setGmailCap(n) };
+    } catch (e) {
+      mapErr(e);
+    }
   }
 
   // ---- Gmail ----

@@ -110,6 +110,16 @@ export function importantDayQuery(day: string): string {
   return `after:${day.replace(/-/g, '/')} before:${next.replace(/-/g, '/')} -category:promotions -category:social -category:updates -in:chats`;
 }
 
+/**
+ * The important mail of one local day that arrived AFTER a moment (epoch seconds) — what the final
+ * pass reads so the early pass's mails are never fetched twice. Gmail's `after:` accepts epoch
+ * seconds; `before:` keeps it inside the day. (BEA-1399)
+ */
+export function importantSinceQuery(day: string, sinceEpochSeconds: number): string {
+  const next = dayAdd(day, 1);
+  return `after:${Math.floor(sinceEpochSeconds)} before:${next.replace(/-/g, '/')} -category:promotions -category:social -category:updates -in:chats`;
+}
+
 /** The Gmail search for one local day's unread mail. */
 export function unreadDayQuery(day: string): string {
   const next = dayAdd(day, 1);

@@ -263,7 +263,7 @@ function BriefSectionCard({ section, onOpen }: { section: BriefSection; onOpen: 
   );
 }
 
-function DailyBriefCard() {
+export function DailyBriefCard() {
   const [today, setToday] = useState<string | null>(null);
   const [day, setDay] = useState<string | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
@@ -293,9 +293,8 @@ function DailyBriefCard() {
       goTo(d.day);
       if (!target) setToday(d.day); // first load with no arg → server's "today"
       setBrief(d);
-      // On "today" with no brief yet, build it now (first-open backfill). Past days stay on-demand.
-      const isTodayTarget = !target || target === today;
-      if (!d.generated && isTodayTarget) generate(d.day, true);
+      // An unwritten day is shown as unwritten. The scheduled passes (21:00 / 23:30) write it; a
+      // page open never reads Gmail — Refresh is the explicit, counted call. (BEA-1399)
     } catch (e: any) {
       toast('error', e.message || 'Could not load your brief');
     } finally {
@@ -412,6 +411,14 @@ function DailyBriefCard() {
             </button>
           </div>
         </>
+      ) : isToday ? (
+        <div className="py-6 text-center">
+          <p data-testid="brief-schedule-note" className="text-sm text-zinc-500 mb-1">Today’s brief is written at <b>21:00</b> and finished at <b>23:30</b>.</p>
+          <p className="text-xs text-zinc-400 mb-3">Nothing is read from Gmail until then — every read counts against your daily cap.</p>
+          <button onClick={() => day && generate(day)} disabled={generatingDay === day} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">
+            <RefreshCw size={14} /> Refresh now
+          </button>
+        </div>
       ) : (
         <div className="py-6 text-center">
           <p className="text-sm text-zinc-400 mb-3">No brief was written for this day.</p>

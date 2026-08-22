@@ -5,17 +5,26 @@ import { GoogleWorkspaceService } from './google-workspace.service';
 import { MemoryService } from '../memory/memory.service';
 import { EmailMemoryService } from './email-memory.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { EARLY_AT, FINAL_AT } from './gmail-schedule';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
-const BRIEF_AT = '23:58'; // 11:58 PM local — write today's email brief
 const BRIEF_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+/** How many of the day's important mails one read takes. */
+const DAY_MAX = 25;
+/** Settings the two passes leave behind — all per local day. (BEA-1399) */
+const EARLY_DONE = 'gmailbrief.earlyDone';
+const EARLY_AT_KEY = 'gmailbrief.earlyAt'; // epoch seconds the early read started
+const EARLY_METAS = 'gmailbrief.earlyMetas'; // the mails it read, so the final pass re-summarises without re-reading
+const FINAL_DONE = 'gmailbrief.nightlyDone';
+const CATCHUP_TRIED = 'gmailbrief.catchupTried';
 
 type BriefItem = { from: string; subject: string; time: string; threadId?: string };
 type BriefSection = { heading: string; points: string[]; link: string | null; threadId?: string };
 export type Brief = { day: string; unread: number | null; overview: string; summary: string | null; sections: BriefSection[]; items: BriefItem[]; generated: boolean; generatedAt: string | null };
 
 /** Builds the Gmail "Daily Brief": per-day unread count + an AI summary of that day's important emails.
- *  Runs nightly at 11:58 PM local and on first open; pushes the finished brief to Telegram. */
+ *  Reads Gmail at 21:00 (early brief) and 23:30 (final pass) local and at no other time in the
+ *  background; pushes the finished brief to Telegram. A page open never reads Gmail. (BEA-1399) */
 @Injectable()
 export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(GmailBriefService.name);
@@ -109,30 +118,84 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
   }
 
-  /** Once past 11:58 PM local, write today's brief if it isn't done. If that window was missed
-   *  (restart), backfill yesterday's the next day so the history has no gaps. */
+  private async getSetting(key: string): Promise<string | null> {
+    const row = await this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    return row?.value ? String(row.value) : null;
+  }
+  /** Seconds since the epoch — a method so a spec can pin the clock. */
+  private nowSeconds(): number {
+    return Math.floor(Date.now() / 1000);
+  }
+
+  /**
+   * Gmail is read at two local times a day and at no other time in the background (BEA-1399).
+   * The clock is checked FIRST — outside the windows this touches nothing, not even a status
+   * probe. 21:00 = the early brief (full read, Telegram, email memory). 23:30 = the final pass:
+   * only mail that arrived after the early read, a re-summary and a second push only when
+   * something new came; with no early pass behind it (restart) it does the full read. Each
+   * window is tried ONCE (the marker is set even when the read fails — a bad night costs one
+   * attempt, never one a minute), and a night missed altogether is caught up once the next day.
+   */
   async briefTick(): Promise<void> {
-    const st = await this.google.status();
-    if (!st.connected) return;
     const tz = await this.tz();
     const today = this.dayKey(tz);
-    // Catch-up: index any complete PAST-day brief that isn't linked yet (covers mid-day-only builds,
-    // missed nights, downtime). Runs before the nightly-generate branch so its early returns don't skip it. (BEA-343)
+    const hm = this.localHM(tz);
+    // Catch-up: index any complete PAST-day brief that isn't linked yet — database only. (BEA-343)
     await this.finalizeRecentBriefs(today).catch(() => undefined);
-    if (this.localHM(tz) >= BRIEF_AT) {
-      // Nightly: build the FULL brief once and push. A midday on-demand build may already have
-      // created a partial row for today; that used to make this return early, so the night's full
-      // brief never ran and the Telegram push never fired. Regenerate (force) and push, guarded by a
-      // self-contained marker so we don't rebuild/re-push every minute after 23:58. (BEA-803)
-      const doneDay = (await this.prisma.setting.findUnique({ where: { key: 'gmailbrief.nightlyDone' } }).catch(() => null))?.value;
-      if (doneDay === today) return;
-      await this.generate(today, true, true).catch((e) => this.log.warn(`brief ${today}: ${e?.message || e}`));
-      await this.setSetting('gmailbrief.nightlyDone', today).catch(() => undefined);
+    if (hm >= FINAL_AT) {
+      if ((await this.getSetting(FINAL_DONE)) === today) return;
+      const earlyAt = (await this.getSetting(EARLY_DONE)) === today ? Number(await this.getSetting(EARLY_AT_KEY)) : NaN;
+      await this.finalPass(today, Number.isFinite(earlyAt) ? earlyAt : null).catch((e) => this.log.warn(`final brief ${today}: ${e?.message || e}`));
+      await this.setSetting(FINAL_DONE, today).catch(() => undefined);
+    } else if (hm >= EARLY_AT) {
+      if ((await this.getSetting(EARLY_DONE)) === today) return;
+      const startedAt = this.nowSeconds();
+      await this.earlyPass(today).catch((e) => this.log.warn(`early brief ${today}: ${e?.message || e}`));
+      await this.setSetting(EARLY_DONE, today).catch(() => undefined);
+      await this.setSetting(EARLY_AT_KEY, String(startedAt)).catch(() => undefined);
     } else {
+      if ((await this.getSetting(CATCHUP_TRIED)) === today) return;
+      await this.setSetting(CATCHUP_TRIED, today).catch(() => undefined);
       const y = this.dayAdd(today, -1);
       if (await this.prisma.gmailBrief.findUnique({ where: { day: y } })) return;
-      await this.generate(y, false, true).catch(() => undefined);
+      await this.generate(y, false, true).catch((e) => this.log.warn(`catch-up brief ${y}: ${e?.message || e}`));
     }
+  }
+
+  /** 21:00 — the full read of the day, pushed; the mails are kept for the final pass. */
+  private async earlyPass(day: string): Promise<void> {
+    await this.google.rememberEmail?.().catch?.(() => null);
+    const { unread, emails } = await this.readDay(day);
+    await this.setSetting(EARLY_METAS, JSON.stringify(emails)).catch(() => undefined);
+    await this.writeBrief(day, unread, emails, { push: true, finalize: true, syncEmails: emails });
+  }
+
+  /**
+   * 23:30 — with an early pass behind it, read ONLY what arrived after it; nothing new → refresh
+   * the unread count and stop (no push, no memory sync); new mail → re-summarise early + new
+   * together, push again, sync only the new. No early pass → the full read.
+   */
+  private async finalPass(day: string, earlyAt: number | null): Promise<void> {
+    const row = earlyAt == null ? null : await this.prisma.gmailBrief.findUnique({ where: { day } });
+    if (earlyAt == null || !row) {
+      await this.generate(day, true, true);
+      return;
+    }
+    let early: GmailMetaLike[] = [];
+    try {
+      early = JSON.parse((await this.getSetting(EARLY_METAS)) || '[]');
+      if (!Array.isArray(early)) early = [];
+    } catch {
+      early = [];
+    }
+    const [unread, fresh] = await Promise.all([this.google.gmailDayUnread(day).catch(() => null), this.google.gmailImportantSince(day, earlyAt, DAY_MAX)]);
+    if (!fresh.length) {
+      if (unread != null) await this.prisma.gmailBrief.update({ where: { day }, data: { unread } }).catch(() => undefined);
+      return;
+    }
+    const seen = new Set(fresh.map((m) => m.id));
+    const all = [...fresh, ...early.filter((m) => m?.id && !seen.has(m.id))].slice(0, DAY_MAX * 2);
+    await this.writeBrief(day, unread ?? row.unread, all, { push: true, finalize: true, syncEmails: fresh });
   }
 
   /** Index complete PAST-day briefs (last 3 days) that aren't linked yet. Idempotent — only fires while
@@ -165,27 +228,37 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     return { day: row.day, unread: row.unread, overview, summary: row.summary || null, sections, items, generated: true, generatedAt: row.generatedAt };
   }
 
-  /** Read a day's brief. Returns the stored one, or (for a day with none yet) a live unread count
-   *  with no summary — the caller can then trigger generate() for an on-demand build. */
+  /** Read a day's brief — the stored one, or an empty shell for a day with none. Never reads Gmail:
+   *  the page shows what the scheduled passes stored, and a Refresh is an explicit, counted call. (BEA-1399) */
   async getForDay(day: string): Promise<Brief> {
     const row = await this.prisma.gmailBrief.findUnique({ where: { day } });
     if (row) return this.shape(row);
-    const unread = await this.google.gmailDayUnread(day).catch(() => null);
-    return { day, unread, overview: '', summary: null, sections: [], items: [], generated: false, generatedAt: null };
+    return { day, unread: null, overview: '', summary: null, sections: [], items: [], generated: false, generatedAt: null };
   }
 
   /** Build (or rebuild) a day's brief: count unread, summarise the day's important emails, store.
-   *  Only the nightly run pushes to Telegram (push=true) — on-demand/refresh builds stay silent. */
+   *  Only a scheduled pass pushes to Telegram (push=true) — on-demand/refresh builds stay silent. */
   async generate(day: string, force = false, push = false): Promise<Brief> {
     if (!force) {
       const existing = await this.prisma.gmailBrief.findUnique({ where: { day } });
       if (existing) return this.shape(existing);
     }
-    const [unread, emails] = await Promise.all([
-      this.google.gmailDayUnread(day).catch(() => null),
-      this.google.gmailImportantForDay(day, 25).catch(() => [] as { id: string; threadId: string; from: string; subject: string; date: string; snippet: string }[]),
-    ]);
+    const { unread, emails } = await this.readDay(day);
+    const todayKey = this.dayKey(await this.tz());
+    const finalize = push || day < todayKey;
+    return this.writeBrief(day, unread, emails, { push, finalize, syncEmails: finalize ? emails : [] });
+  }
 
+  /** The day's two reads: the unread count (best effort) and the important list — which must succeed,
+   *  or the brief would honestly say "no important emails" about a day it never read. */
+  private async readDay(day: string): Promise<{ unread: number | null; emails: GmailMetaLike[] }> {
+    const [unread, emails] = await Promise.all([this.google.gmailDayUnread(day).catch(() => null), this.google.gmailImportantForDay(day, DAY_MAX)]);
+    return { unread, emails };
+  }
+
+  /** Summarise + store a day's brief from the mails already read; index/sync/push as asked. */
+  private async writeBrief(day: string, unread: number | null, emails: GmailMetaLike[], opts: { push: boolean; finalize: boolean; syncEmails: GmailMetaLike[] }): Promise<Brief> {
+    const push = opts.push;
     const items: BriefItem[] = emails.map((e) => ({ from: cleanFrom(e.from), subject: e.subject, time: e.date, threadId: e.threadId }));
     let summary: string;
     let sections: BriefSection[] = [];
@@ -229,19 +302,20 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       create: { day, unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: briefModelUsed },
       update: { unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: briefModelUsed },
     });
-    // Index only a FINALIZED brief — the nightly build (push), or a PAST day (already complete).
-    // A partial mid-day on-open build of TODAY's brief is NOT indexed; tonight's finalize handles it. (BEA-343)
-    const todayKey = this.dayKey(await this.tz());
-    if (push || day < todayKey) {
+    // Index only a FINALIZED brief — a scheduled pass, or a PAST day (already complete).
+    // A partial on-demand build of TODAY's brief is NOT indexed; tonight's pass handles it. (BEA-343)
+    if (opts.finalize) {
       this.indexBrief(row);
-      // Also store each important email itself (full body) in memory — same finalize gate. (BEA-439)
-      void this.emailMemory.syncDay(day, emails).catch(() => undefined);
+      // Also store each important email itself (full body) in memory — only the mails this pass read. (BEA-439 / BEA-1399)
+      if (opts.syncEmails.length) void this.emailMemory.syncDay(day, opts.syncEmails).catch(() => undefined);
     }
-    // Only the nightly build hands the brief to the Telegram push loop (same mechanism as the Story of the Day).
+    // Only a scheduled pass hands the brief to the Telegram push loop (same mechanism as the Story of the Day).
     if (push) await this.setSetting('telegram.pushGmailBrief', day).catch(() => undefined);
     return this.shape(row);
   }
 }
+
+type GmailMetaLike = { id: string; threadId: string; from: string; subject: string; date: string; snippet: string };
 
 /** "Sandeep K <s@x.com>" → "Sandeep K"; bare address kept as-is. */
 function cleanFrom(from: string): string {

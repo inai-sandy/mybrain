@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
 import { SERVICES } from './registry';
 import { SERVICE_LOGOS, type GoogleServiceKey } from './logos';
+import { GmailUsageLine } from './GmailUsageLine';
 
 type Status = { connected: boolean; email: string | null };
-type Hints = { connected: boolean; gmailUnread: number | null; calendarNext: { summary: string; start: string | null } | null; tasksOpen: number | null };
+type Hints = { connected: boolean; gmailUnread: number | null; gmailUnreadDay?: string | null; calendarNext: { summary: string; start: string | null } | null; tasksOpen: number | null };
 
 export function GoogleHome() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -20,7 +21,7 @@ export function GoogleHome() {
 
   function hintFor(key: GoogleServiceKey): string | null {
     if (!hints || !hints.connected) return null;
-    if (key === 'gmail') return hints.gmailUnread != null ? `${hints.gmailUnread} unread` : null;
+    if (key === 'gmail') return hints.gmailUnread != null ? `${hints.gmailUnread} unread at last read` : null;
     if (key === 'calendar') return hints.calendarNext ? `Next: ${hints.calendarNext.summary}` : null;
     if (key === 'tasks') return hints.tasksOpen != null ? `${hints.tasksOpen} open` : null;
     return null;
@@ -41,6 +42,8 @@ export function GoogleHome() {
           <Link to="/tools" className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 text-amber-600 px-3 py-1 text-xs font-medium hover:bg-amber-500/20">Not connected — connect Gmail</Link>
         ) : null}
       </div>
+
+      {connected && <GmailUsageLine />}
 
       {status && !connected && (
         <div className="rounded-xl border border-amber-300/50 dark:border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-300">

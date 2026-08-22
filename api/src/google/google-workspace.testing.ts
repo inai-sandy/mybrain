@@ -56,12 +56,35 @@ export function serveBytes(files: Record<string, Buffer>) {
   return () => { global.fetch = orig; };
 }
 
-export function build(answer: (actionId: string, args: any) => any, opts: { connected?: string[] | 'none' } = {}) {
+/**
+ * Build the service over a provider stub and a tiny in-memory Prisma: Settings (the remembered
+ * address, the Gmail cap), the ToolCall rows it writes (so the daily count is real), and the
+ * stored briefs `hints()` reads. `toolCalls` and `settings` are handed back for assertions.
+ */
+export function build(
+  answer: (actionId: string, args: any) => any,
+  opts: { connected?: string[] | 'none'; settings?: Record<string, string>; toolCalls?: any[]; briefs?: any[] } = {},
+) {
   const lib = fakeLibrary();
   const provider = fakeProvider(answer, opts);
-  const prisma = { toolCall: { create: jest.fn(async () => ({})) } };
+  const settings: Record<string, string> = { ...(opts.settings || {}) };
+  const toolCalls: any[] = [...(opts.toolCalls || [])];
+  const briefs: any[] = [...(opts.briefs || [])];
+  const prisma = {
+    toolCall: {
+      create: jest.fn(async ({ data }: any) => { toolCalls.push({ ...data, createdAt: new Date() }); return {}; }),
+      findMany: jest.fn(async ({ where }: any) => toolCalls.filter((r) => (!where?.service || r.service === where.service) && (!where?.createdAt?.gte || r.createdAt >= where.createdAt.gte))),
+    },
+    setting: {
+      findUnique: jest.fn(async ({ where }: any) => (where.key in settings ? { key: where.key, value: settings[where.key] } : null)),
+      upsert: jest.fn(async ({ where, create, update }: any) => { settings[where.key] = update?.value ?? create?.value; return {}; }),
+    },
+    gmailBrief: {
+      findFirst: jest.fn(async () => briefs.slice().sort((a, b) => String(b.day).localeCompare(String(a.day)))[0] ?? null),
+    },
+  };
   const svc = new GoogleWorkspaceService(provider as any, lib as any, prisma as any);
-  return { svc, lib, provider, prisma };
+  return { svc, lib, provider, prisma, settings, toolCalls };
 }
 
 export const calls = (provider: any) => (provider.execute as jest.Mock).mock.calls.map((c: any[]) => ({ id: c[0], args: c[1], opts: c[2] }));
