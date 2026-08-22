@@ -863,6 +863,9 @@ export class AgentAreasService {
     // `SocialWatch` and `RunJournal` — and each one holds a whole conversation, so leaving them
     // behind would pile up transcripts nothing can ever read again.
     await Promise.resolve((this.prisma as any).agentBrief?.deleteMany?.({ where: { areaId: id } })).catch(() => undefined);
+    // And its trials (BEA-1408) — same hand-kept rule, and each one holds the rows and the message a
+    // rehearsal produced.
+    await Promise.resolve((this.prisma as any).agentTrial?.deleteMany?.({ where: { areaId: id } })).catch(() => undefined);
     return { ok: true, jobsDeleted: opts.withJobs ? jobs.length : 0 };
   }
 

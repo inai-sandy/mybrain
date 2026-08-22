@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Loader2, X } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
 import { useToast } from '../ui/Toast';
 import { Brief, BriefRefusal, BriefView, SectionKey } from '../ui/BriefView';
+import { TrialCard, TrialState } from '../ui/TrialCard';
 
 /**
  * The brief screen (BEA-1406, "Brief First") — the first of the two gates between an idea and a
@@ -17,6 +18,7 @@ import { Brief, BriefRefusal, BriefView, SectionKey } from '../ui/BriefView';
  */
 export default function AgentBriefPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const goBack = useGoBack('/agent');
   const toast = useToast();
   const [brief, setBrief] = useState<Brief | null>(null);
@@ -26,12 +28,21 @@ export default function AgentBriefPage() {
   const [approving, setApproving] = useState(false);
   const [area, setArea] = useState<any>(null);
   const [proof, setProof] = useState<any | null>(null);
+  // The second gate (BEA-1408): the real run he judges before anything can be created.
+  const [trial, setTrial] = useState<TrialState | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const take = useCallback((d: any) => {
     if (!d?.brief) return;
     setBrief(d.brief);
     setRefusals(Array.isArray(d.refusals) ? d.refusals : []);
   }, []);
+
+  const loadTrial = useCallback(async () => {
+    const d = await fetch(`/api/agent/areas/${id}/brief/trial`).then((r) => r.json()).catch(() => null);
+    if (d && typeof d === 'object' && !d.statusCode) setTrial(d);
+    return d;
+  }, [id]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,10 +52,20 @@ export default function AgentBriefPage() {
     ]);
     take(b);
     setArea(a);
+    await loadTrial();
     setLoading(false);
-  }, [id, take]);
+  }, [id, take, loadTrial]);
 
   useEffect(() => { load(); }, [load]);
+
+  // A build turn is a real Codex session and takes minutes, so the screen polls rather than holding
+  // a request open. The poll stops the moment it settles — never a timer left running.
+  useEffect(() => {
+    if (!trial?.running) { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } return; }
+    if (pollRef.current) return;
+    pollRef.current = setInterval(() => { loadTrial(); }, 4000);
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  }, [trial?.running, loadTrial]);
 
   /** Every call answers the whole brief, so the screen can never show half of a change. */
   async function send(path: string, body?: any, method = 'POST') {
@@ -73,11 +94,47 @@ export default function AgentBriefPage() {
     setProof(d);
   }
 
+  async function trialPost(path: string, body?: any) {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/agent/areas/${id}/brief/trial${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast('error', d?.message || 'That did not work.'); return null; }
+      return d;
+    } catch {
+      toast('error', 'That did not work — check your connection.');
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runTrial() {
+    const d = await trialPost('/run');
+    if (d) setTrial(d);
+  }
+
+  async function createIt() {
+    const d = await trialPost('/create');
+    if (!d) return;
+    if (d.ok) { toast('success', 'Kept. It is yours now.'); navigate(`/agent/a/${d.agentId}?created=1`); }
+    else toast('error', d.whyNot || 'Not yet.');
+  }
+
+  async function sendBack(note: string) {
+    const d = await trialPost('/send-back', { note });
+    if (d) { setTrial(d); await load(); toast('success', 'Sent back. Change what you need, then run it again.'); }
+  }
+
   async function approve() {
     setApproving(true);
     try {
       const d = await send('/approve');
-      if (d?.ok) toast('success', 'Approved. Next it gets built.');
+      if (d?.ok) { toast('success', 'Approved. Now run it once and see what it really does.'); await loadTrial(); }
     } finally {
       setApproving(false);
     }
@@ -118,6 +175,17 @@ export default function AgentBriefPage() {
           Read this before anything is built. Anything marked <span className="font-semibold text-amber-700 dark:text-amber-300">my guess</span> is the AI's own idea, not yours — change it or cross it out.
         </p>
       </header>
+
+      {/* The second gate — shown only once the brief is approved: there is nothing to run before that. */}
+      {brief.status === 'approved' && trial && (
+        <TrialCard
+          state={trial}
+          busy={busy}
+          onRun={runTrial}
+          onCreate={createIt}
+          onSendBack={sendBack}
+        />
+      )}
 
       <BriefView
         brief={brief}

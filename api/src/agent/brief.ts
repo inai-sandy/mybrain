@@ -295,3 +295,56 @@ export function forCodexPayload(brief: Brief): {
     transcript: brief.transcript,
   };
 }
+
+
+// ---- from a brief to a job -----------------------------------------------------------------------
+
+/**
+ * The structured minimum an `Agent` row needs so a worker can be built and run for this brief
+ * (BEA-1408).
+ *
+ * Deliberately thin. Under the old design the plan WAS the agent, so every behaviour had to be a
+ * column. Here the behaviour lives in the brief and in the program Codex writes from it; the job row
+ * only has to carry the sources (so `kit.fetchSource` can find them), where the result goes, and
+ * whether the owner is told. Anything this cannot read from the structured half is left at its
+ * default rather than guessed — a guess here is how the eight-box form used to lose things.
+ */
+export function briefToAgentInput(brief: Brief): {
+  name: string;
+  prompt: string;
+  tools: string[];
+  toolArgs: Record<string, any>;
+  outputDest: string;
+  notifyWhatsApp: boolean;
+  origin: string;
+  enabled: boolean;
+  useWorker: boolean;
+} {
+  const tools: string[] = [];
+  const toolArgs: Record<string, any> = {};
+  for (const s of brief.sources || []) {
+    if (!tools.includes(s.actionId)) tools.push(s.actionId);
+    toolArgs[s.id] = { actionId: s.actionId, args: { ...(s.args || {}) } };
+  }
+  // The task, in HIS words — what he wants, then what to keep and what to drop. Never reworded.
+  const prompt = [...live(brief.sections?.want), ...live(brief.sections?.filter)].map((l) => l.text).join(' ').trim();
+  // A sheet only when he actually said sheet; otherwise a Document, which cannot be the wrong choice
+  // for a first run because a trial writes neither.
+  const wantsSheet = live(brief.sections?.output).some((l) => /\bsheet\b|\bspreadsheet\b/i.test(l.text));
+  return {
+    name: brief.name || 'New agent',
+    prompt: prompt || KEEP_AS_FETCHED_TEXT,
+    tools,
+    toolArgs,
+    outputDest: wantsSheet ? 'sheet' : 'document',
+    notifyWhatsApp: !!brief.delivery?.whatsapp,
+    origin: 'brief',
+    // Created switched OFF and on the worker road: nothing runs on a schedule until he taps Create,
+    // and a job made from a brief has never been meant for the plan runner.
+    enabled: false,
+    useWorker: true,
+  };
+}
+
+/** Mirrors `KEEP_AS_FETCHED` in `social/plan.ts` without importing it — this file stays pure. */
+const KEEP_AS_FETCHED_TEXT = 'Keep every result as fetched.';

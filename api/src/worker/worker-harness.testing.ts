@@ -37,8 +37,17 @@ export type SampleFixture = { actionId: string; args: Record<string, any>; data?
 export function fakePrisma() {
   const journal = new Map<string, any>();
   const samples: any[] = [];
+  // Trials (BEA-1408): the rows and the message a trial run held back instead of writing and sending.
+  const trials: any[] = [];
   return {
-    rows: { journal, samples },
+    rows: { journal, samples, trials },
+    agentTrial: {
+      create: async ({ data }: any) => { const row = { id: `t${trials.length + 1}`, createdAt: new Date(), updatedAt: new Date(), rows: '[]', columns: '[]', rowCount: 0, message: '', credits: 0, aiTokens: 0, verdict: '', error: '', ...data }; trials.push(row); return row; },
+      update: async ({ where, data }: any) => { const row = trials.find((t) => t.id === where.id); Object.assign(row, data); return row; },
+      findUnique: async ({ where }: any) => trials.find((t) => t.id === where.id) || null,
+      findFirst: async ({ where }: any) => trials.filter((t) => (!where.runId || t.runId === where.runId) && (!where.areaId || t.areaId === where.areaId) && (where.briefVersion === undefined || t.briefVersion === where.briefVersion)).slice(-1)[0] || null,
+      deleteMany: async ({ where }: any) => { const before = trials.length; for (let i = trials.length - 1; i >= 0; i--) if (trials[i].areaId === where.areaId) trials.splice(i, 1); return { count: before - trials.length }; },
+    },
     runJournal: {
       findUnique: async ({ where }: any) => journal.get(`${where.runId_seq.runId}:${where.runId_seq.seq}`) || null,
       upsert: async ({ where, create, update }: any) => {
@@ -273,9 +282,9 @@ export async function makeWorld(opts: {
  * A kit wired straight to the controller — what the worker runner will do over HTTP, minus the
  * process. The token is minted per spawn, exactly as it will be, and identity comes off it.
  */
-export async function spawnKit(world: any, runId: string, agentId: string) {
-  const spawn = await world.tokens.mint(runId, agentId);
-  const req = { worker: { runId: spawn.runId, agentId: spawn.agentId, expiresAt: spawn.expiresAt } };
+export async function spawnKit(world: any, runId: string, agentId: string, opts: { trial?: boolean } = {}) {
+  const spawn = await world.tokens.mint(runId, agentId, opts.trial ? { trial: true } : {});
+  const req = { worker: { runId: spawn.runId, agentId: spawn.agentId, expiresAt: spawn.expiresAt, ...(opts.trial ? { trial: true } : {}) } };
   const routes: Record<string, string> = { tool: 'tool', merge: 'merge', ai: 'ai', step: 'step', output: 'output', notify: 'notify', ask: 'ask', finish: 'finish' };
   const fetchImpl = async (route: string, body: any) => {
     if (!world.tokens.verify(spawn.token)) throw new Error('This route is for a worker run, and needs its own run token.');

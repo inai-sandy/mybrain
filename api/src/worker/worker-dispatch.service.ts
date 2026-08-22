@@ -110,15 +110,20 @@ export class WorkerDispatchService implements OnModuleInit {
    * or parked on a question) and `{ fallback }` when nothing of ours ran, in which case the caller
    * carries on down the ordinary road with the SAME run row and writes the reason as a step.
    */
-  async run(runId: string, agentId: string, opts: { version?: number } = {}): Promise<{ fallback?: string }> {
+  async run(runId: string, agentId: string, opts: { version?: number; trial?: boolean } = {}): Promise<{ fallback?: string }> {
     await this.agent
-      .appendStep(runId, { label: `Running this job's worker${opts.version ? ` (v${opts.version})` : ''}`, status: 'info' })
+      .appendStep(runId, {
+        label: opts.trial
+          ? 'Trying it once, for real — nothing will be saved and nothing will be sent'
+          : `Running this job's worker${opts.version ? ` (v${opts.version})` : ''}`,
+        status: 'info',
+      })
       .catch(() => undefined);
 
     let token = '';
     let seed: any;
     try {
-      const minted = await this.tokens.mint(runId, agentId);
+      const minted = await this.tokens.mint(runId, agentId, { trial: !!opts.trial });
       token = minted.token;
       seed = minted.seed;
     } catch (e: any) {
