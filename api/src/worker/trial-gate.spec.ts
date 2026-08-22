@@ -180,3 +180,33 @@ describe('the job a brief becomes', () => {
     expect(briefToAgentInput(withSheet).outputDest).toBe('sheet');
   });
 });
+
+/**
+ * "Read ALL my emails" has to survive the whole way (BEA-1410).
+ *
+ * It was expressible in the brief (BEA-1405) and runnable by the fetcher (BEA-1407) — and it still
+ * died on the way from one to the other, because the job row had nowhere to put it. That is the
+ * same silent drop, one layer down, and it is exactly what this redesign exists to end.
+ */
+describe('"every page there is", from the brief into the job', () => {
+  const withPages = (pages: any) => ({
+    name: 'n',
+    sections: { want: [{ id: '1', text: 'x', origin: 'owner' }], filter: [], output: [], sources: [], when: [], success: [], trouble: [], killed: [] },
+    sources: [{ id: 'svc:gmail.fetch_emails', actionId: 'svc:gmail.fetch_emails', args: { query: 'newer_than:1d' }, ...(pages === undefined ? {} : { pages }) }],
+    delivery: { whatsapp: false, telegram: false, messageText: '' },
+  }) as any;
+
+  it('"all" becomes the runner\'s until-it-runs-out', () => {
+    const args = briefToAgentInput(withPages('all')).toolArgs['svc:gmail.fetch_emails'];
+    expect(args._pages).toBe(-1); // ALL_PAGES
+  });
+
+  it('a number is carried as that number', () => {
+    expect(briefToAgentInput(withPages(4)).toolArgs['svc:gmail.fetch_emails']._pages).toBe(4);
+  });
+
+  it('one page needs no instruction at all', () => {
+    expect(briefToAgentInput(withPages(1)).toolArgs['svc:gmail.fetch_emails']._pages).toBeUndefined();
+    expect(briefToAgentInput(withPages(undefined)).toolArgs['svc:gmail.fetch_emails']._pages).toBeUndefined();
+  });
+});
