@@ -89,6 +89,16 @@ export type ServiceRunResult = {
   notFound?: boolean;
   actionName?: string;
   serviceName?: string;
+  /**
+   * The `ToolCall` row this call wrote (BEA-1405). It is the EVIDENCE a brief line leans on: a line
+   * that says "I looked, and Gmail gave me 47 emails" must be able to point at the call that proves
+   * it. A `ToolSample` cannot serve that purpose on its own — Gmail, WhatsApp and every other
+   * message-carrying service is in `NO_SAMPLE_SERVICES` on purpose, so the answer is deliberately
+   * never kept, while the `ToolCall` row is always written.
+   */
+  callId?: string;
+  /** The whole saved answer, when this service is one we may keep (BEA-1386). Often absent. */
+  sampleId?: string;
 };
 
 @Injectable()
@@ -292,12 +302,12 @@ export class ServiceActionsService {
 
     const summary = this.summarise(res.data);
     // `gated` on a real success means "this one had to be approved, and it was" (BEA-1348).
-    await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary, gated: mustAsk, credits }, ctx);
+    const callId = await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary, gated: mustAsk, credits }, ctx);
     // The WHOLE answer, kept for the workers to be tested and repaired against (BEA-1386). The row
     // above is cut to 2,000 characters and cannot be replayed; this one is masked and gzipped whole.
     // `maybeKeep` decides — opt-in service, a read, ungated — and never throws: a call that really
     // happened must not be reported as failed because our own store could not be written.
-    await this.samples?.maybeKeep?.({
+    const sampleId = await this.samples?.maybeKeep?.({
       actionId,
       service,
       action: parsed.action,
@@ -320,6 +330,8 @@ export class ServiceActionsService {
       data: res.data,
       credits,
       ms,
+      ...(callId ? { callId } : {}),
+      ...(sampleId ? { sampleId } : {}),
       actionName: action.name,
       serviceName: name,
     };
@@ -446,9 +458,9 @@ export class ServiceActionsService {
   private async record(
     call: { actionId: string; service: string; ok: boolean; args?: any; accountId?: string; ms?: number; result?: string; error?: string; gated?: boolean; credits?: number },
     ctx: ServiceCallContext,
-  ): Promise<void> {
+  ): Promise<string | null> {
     try {
-      await this.prisma?.toolCall?.create?.({
+      const row = await this.prisma?.toolCall?.create?.({
         data: {
           runId: ctx.runId || null,
           runKind: ctx.runKind || null,
@@ -467,8 +479,12 @@ export class ServiceActionsService {
           credits: Number.isFinite(call.credits) ? Math.round(call.credits as number) : null,
         },
       });
+      // A harness's stub may answer anything at all — only a real id counts as evidence.
+      const id = row && typeof row === 'object' ? String((row as any).id || '') : '';
+      return id || null;
     } catch (e: any) {
       this.log.warn(`could not write the ToolCall row for ${call.actionId}: ${e?.message || e}`);
+      return null;
     }
   }
 

@@ -70,6 +70,13 @@ export type SampleView = {
   error?: string;
   notFound?: boolean;
   refused?: boolean;
+  /**
+   * The `ToolCall` row this look wrote (BEA-1405) — the proof a brief line can point at. Every real
+   * call writes one, including the services whose answers are deliberately never kept.
+   */
+  callId?: string;
+  /** The whole saved answer, when this service is one we may keep. Absent for Gmail and the rest. */
+  sampleId?: string;
   /** Where the conversation's budget stands AFTER this call. */
   budget: { used: number; calls: number; credits: number; maxCredits: number };
 };
@@ -208,7 +215,8 @@ export class BuilderSampleService {
       table.columns.forEach((c, i) => { o[c] = trimCell(row[i]); });
       return o;
     });
-    return this.view({ ok: true, actionId, name: shown, args, count: table.itemCount, listKey: table.listKey || undefined, fields, hasDate: fields.some((f) => f.kind === 'date'), items, credits, ms: r.ms || 0 }, counter);
+    // `callId`/`sampleId` ride through so a brief line can point at the call that proves it (BEA-1405).
+    return this.view({ ok: true, actionId, name: shown, args, count: table.itemCount, listKey: table.listKey || undefined, fields, hasDate: fields.some((f) => f.kind === 'date'), items, credits, ms: r.ms || 0, callId: r.callId, sampleId: r.sampleId }, counter);
   }
 
   private view(v: Partial<SampleView> & { ok: boolean; actionId: string; name: string }, counter: SampleCounter): SampleView {
@@ -227,6 +235,8 @@ export class BuilderSampleService {
       ...(v.error ? { error: v.error } : {}),
       ...(v.notFound ? { notFound: true } : {}),
       ...(v.refused ? { refused: true } : {}),
+      ...(v.callId ? { callId: v.callId } : {}),
+      ...(v.sampleId ? { sampleId: v.sampleId } : {}),
       budget: this.budgetView(counter),
     };
   }

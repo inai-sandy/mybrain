@@ -251,3 +251,42 @@ describe('runDetailed — the same run, answered as a shape (BEA-1356)', () => {
     expect(provider.execute).toHaveBeenCalledWith('svc:github.create_an_issue', {}, { connectionId: 'ca_1' });
   });
 });
+
+/**
+ * A call has to be able to prove itself (BEA-1405).
+ *
+ * The brief lets the builder write "I looked at Gmail and it gave me 47 emails" — but only as a
+ * line that carries the row proving the call really happened. Without this, an evidence tag is just
+ * more prose, and prose is what cost the owner nine hours.
+ */
+describe('a successful call hands back the row that proves it (BEA-1405)', () => {
+  function withIds(over: any = {}) {
+    const rows: any[] = [];
+    let n = 0;
+    const h = harness(over);
+    (h.svc as any).prisma = { toolCall: { create: async ({ data }: any) => { const row = { id: `tc${++n}`, ...data }; rows.push(row); return row; } } };
+    return { ...h, rows };
+  }
+
+  it('a success carries the ToolCall id', async () => {
+    const { svc } = withIds();
+    const r = await svc.runDetailed('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' }, argsPinned: true });
+    expect(r.ok).toBe(true);
+    expect(r.callId).toBe('tc1');
+  });
+
+  it('a failure carries no proof — a call that did not work proves nothing', async () => {
+    const { svc } = withIds({ result: { ok: false, error: 'nope' } });
+    const r = await svc.runDetailed('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' }, argsPinned: true });
+    expect(r.ok).toBe(false);
+    expect(r.callId).toBeUndefined();
+  });
+
+  it('a store that cannot write a row does not fail the call — it just has no proof to offer', async () => {
+    const { svc } = harness();
+    (svc as any).prisma = { toolCall: { create: async () => { throw new Error('disk full'); } } };
+    const r = await svc.runDetailed('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' }, argsPinned: true });
+    expect(r.ok).toBe(true);
+    expect(r.callId).toBeUndefined();
+  });
+});
