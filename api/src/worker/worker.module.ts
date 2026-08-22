@@ -12,6 +12,7 @@ import { WorkerTokenGuard } from './worker-token.guard';
 import { WorkerTokenService } from './worker-token.service';
 import { OwnerAskService } from './owner-ask.service';
 import { WorkerSweeperService } from './worker-sweeper.service';
+import { WorkerRepairService } from './worker-repair.service';
 
 /**
  * Agent workers (BEA-1387 — `specs/AGENT-WORKERS.md`): the callback API a worker program on the host
@@ -30,11 +31,15 @@ import { WorkerSweeperService } from './worker-sweeper.service';
  * boot rather than being imported by ContactsModule, which would be a cycle. `WorkerSweeperService`
  * is the worker road's own resume sweeper, its 12-hour deadline, and the stall watchdog that covers
  * the plan runner too.
+ *
+ * And self-heal (BEA-1393): `WorkerRepairService` catches a failed worker run at `finishRun()`, keeps
+ * the answer that broke it, and gives Codex two tries — against saved answers only, never a vendor —
+ * with a promotion guard that holds back any repair which changes what the agent returns.
  */
 @Module({
   imports: [AgentModule, SocialModule, ToolCatalogModule, PushModule], // PrismaModule + LlmModule are @Global
   controllers: [WorkerController, WorkerBuildController],
-  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService, OwnerAskService, WorkerSweeperService],
-  exports: [RunJournalService, WorkerTokenService, WorkerBuildService, OwnerAskService],
+  providers: [RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService, OwnerAskService, WorkerSweeperService, WorkerRepairService],
+  exports: [RunJournalService, WorkerTokenService, WorkerBuildService, OwnerAskService, WorkerRepairService],
 })
 export class WorkerModule {}

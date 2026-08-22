@@ -154,6 +154,23 @@ export class RunJournalService {
   }
 
   /**
+   * Everything this run recorded, with the values — what the self-heal loop reads off a failed run
+   * (BEA-1393) to keep the answer that broke it. Called BEFORE `forget()`, on the failure road only:
+   * a healthy run's journal is never unpacked, so the gunzip cost lands where it is worth paying.
+   */
+  async entries(runId: string): Promise<{ seq: number; fn: string; value: any }[]> {
+    const find = this.prisma?.runJournal?.findMany;
+    if (!find) return [];
+    const rows: any[] = await this.prisma.runJournal.findMany({ where: { runId }, orderBy: { seq: 'asc' } }).catch(() => []);
+    const out: { seq: number; fn: string; value: any }[] = [];
+    for (const r of rows || []) {
+      const value = await this.parse(r.result).catch(() => undefined);
+      out.push({ seq: r.seq, fn: r.fn, value: value === undefined ? null : value });
+    }
+    return out;
+  }
+
+  /**
    * Forget a finished run's journal. It exists for exactly one purpose — making a RESUME free — and
    * a run that has reached a terminal state is never resumed. Dropping it at `finish` keeps the
    * store self-cleaning: without this every run's whole fetched table would sit in the database for

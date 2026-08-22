@@ -102,6 +102,10 @@ export class WorkerController {
         const label = sourceLabel(src, plan.sources);
         return {
           ok: !out.stop,
+          // Which source this was. The worker knows (it asked), but the JOURNAL does not record the
+          // arguments of a call — and the self-heal loop (BEA-1393) reads the journal off a failed
+          // run to keep the answer that broke it. Without this it would have to match on the label.
+          sourceId: src.id,
           label,
           credits: out.credits,
           empty: !!out.empty,

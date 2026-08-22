@@ -8,7 +8,7 @@ import { ToolSampleService } from '../tools/tool-sample.service';
 import { AgentPlan, PlanBlock, isDirectFetchAgent, planActionIds, planFromAgent, sourceActionId, sourceLabel } from '../social/plan';
 import { tableOf } from '../social/rows';
 import { argsHashOf } from '../tools/tool-sample';
-import { BuildSample, buildRequest, planHashOf } from './build-brief';
+import { BuildRequest, BuildSample, buildRequest, planHashOf } from './build-brief';
 import { WorkerRunnerClient } from './worker-runner.client';
 
 /** A build that has been going this long is not going to finish — its row stops blocking the next one. */
@@ -23,6 +23,13 @@ export type WorkerState = {
   /** The plan the job would run today. When it differs from the worker's, the worker is stale. */
   planHash: string;
   stale: boolean;
+  /**
+   * A repair that passed its tests but changes the rows, waiting for the owner to decide (BEA-1393).
+   * Never live — the promotion guard held it back on purpose.
+   */
+  held?: any | null;
+  /** A repair is queued or running for this job right now. */
+  repairing?: boolean;
   /** Why there is no worker road for this job at all (an engine job has no plan to compile). */
   compilable: boolean;
   reason?: string;
@@ -82,9 +89,14 @@ export class WorkerBuildService implements OnModuleInit {
     const rows = await this.rows(agentId, 10);
     const worker = rows.find((b: any) => b.status === 'promoted') || null;
     const building = rows.some((b: any) => b.status === 'building' && Date.now() - new Date(b.startedAt).getTime() < BUILD_STUCK_MS);
+    // A repair held for the owner only counts while it is NEWER than the live worker — once a later
+    // version went live, the offer is history, not a decision he still owes.
+    const heldRow = rows.find((b: any) => b.status === 'held' && (!worker || new Date(b.startedAt) > new Date(worker.startedAt))) || null;
     return {
       agentId,
       worker: worker ? this.shape(worker, planHash) : null,
+      held: heldRow ? this.shape(heldRow, planHash) : null,
+      repairing: rows.some((b: any) => b.origin === 'repair' && (b.status === 'queued' || (b.status === 'building' && Date.now() - new Date(b.startedAt).getTime() < BUILD_STUCK_MS))),
       planHash,
       stale: !!worker && worker.planHash !== planHash,
       compilable,
@@ -108,17 +120,8 @@ export class WorkerBuildService implements OnModuleInit {
     const before = await this.state(agentId);
     if (before.building) throw new BadRequestException('A build for this job is already going. Wait for it to finish.');
 
-    const plan = planFromAgent(job);
-    const cards = await this.cards(plan);
-    const samples = await this.samplesFor(plan, cards);
-    const kit = this.kit();
     const origin: 'build' | 'rebuild' = before.worker ? 'rebuild' : 'build';
-    const req = buildRequest({
-      job: { id: job.id, name: job.name },
-      plan,
-      cards,
-      samples,
-      kit,
+    const { req, kit } = await this.materials(job, {
       // The runner picks the real version number (the folders on disk are the truth); this is only
       // what the brief SAYS, so the two agree in the normal case and the brief is never wrong by more
       // than a number nobody dispatches on.
@@ -187,6 +190,43 @@ export class WorkerBuildService implements OnModuleInit {
   }
 
   // ---- the pieces the build turn is made of -----------------------------------------------------
+
+  /**
+   * Everything a version folder is made of, as it is TODAY: the job's plan, the fact card for every
+   * action it calls, the saved answers its tests stand on, the pinned kit — and out of those, the
+   * files and the brief.
+   *
+   * Shared with the repair turn (BEA-1393), on purpose: a repair that was compiled against different
+   * material from the build would be measured against a version it cannot be compared with.
+   */
+  async materials(
+    job: any,
+    opts: { version: number; previousVersion?: number | null; origin?: 'build' | 'rebuild'; reason?: string | null } = { version: 1 },
+  ): Promise<{ plan: AgentPlan; cards: ToolKnowledge[]; kit: { version: string; js: string; doc: string }; req: BuildRequest }> {
+    const plan = planFromAgent(job);
+    const cards = await this.cards(plan);
+    const samples = await this.samplesFor(plan, cards);
+    const kit = this.kit();
+    const req = buildRequest({
+      job: { id: job.id, name: job.name },
+      plan,
+      cards,
+      samples,
+      kit,
+      version: opts.version,
+      previousVersion: opts.previousVersion ?? null,
+      origin: opts.origin || 'build',
+      reason: opts.reason ?? null,
+    });
+    return { plan, cards, kit, req };
+  }
+
+  /** The live worker of a job: the newest build that passed its tests and was put live. */
+  async livePromoted(agentId: string): Promise<any | null> {
+    return await this.prisma.workerBuild
+      .findFirst({ where: { agentId, status: 'promoted' }, orderBy: { startedAt: 'desc' } })
+      .catch(() => null);
+  }
 
   /** The fact card for every action the plan calls — the know-how, not a one-line name. */
   private async cards(plan: AgentPlan): Promise<ToolKnowledge[]> {
@@ -302,6 +342,7 @@ export class WorkerBuildService implements OnModuleInit {
       version: b.version,
       status: b.status,
       origin: b.origin,
+      cause: b.cause || null,
       reason: b.reason || null,
       planHash: b.planHash,
       kit: b.kit,
