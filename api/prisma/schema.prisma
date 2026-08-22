@@ -1876,3 +1876,41 @@ model RunJournal {
   @@unique([runId, seq])
   @@index([runId])
 }
+
+/// The brief (BEA-1405, "Brief First") — one version of what an agent is FOR, in the owner's own
+/// words, that he reads and approves before anything is built.
+///
+/// It replaces the eight-box plan as the thing an agent is made from. The plan had no box for the
+/// message an agent sends, so "WhatsApp me a summary grouped into work, personal and finance" could
+/// only ever come out as "finished · N rows" — the promise was made in a chat and dropped silently
+/// on the way to storage. A brief is language with named parts, so it can hold a job nobody has
+/// thought of yet, and every line says whether it is the owner's words, something a real call
+/// showed, or the AI's own guess.
+///
+/// `transcript` is the WHOLE conversation, every turn, nothing summarised — the owner's decision on
+/// 2026-08-22. Killed lines and killed turns are MARKED, never deleted, so a later reader can see
+/// he considered a thing and said no.
+model AgentBrief {
+  id     String @id @default(uuid())
+  areaId String
+  /// 1, 2, 3… a new row per approved change, so an old worker can still say what it was built from.
+  version Int   @default(1)
+  /// draft | approved
+  status String @default("draft")
+  name   String @default("")
+  /// JSON { want, sources, filter, output, when, success, trouble, killed } — arrays of tagged lines.
+  sections String @default("{}")
+  /// JSON [{ id, actionId, args, evidence:{callId,sampleId?}, saw }] — the machine half of "where it
+  /// comes from"; `evidence` is what makes "look before you plan" checkable instead of promised.
+  sources  String @default("[]")
+  /// JSON { whatsapp, telegram, messageText } — the exact words that will arrive on his phone.
+  delivery String @default("{}")
+  /// JSON [{ id, who, text, at, kind?, struck? }] — the whole talk.
+  transcript String @default("[]")
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([areaId, version])
+  @@index([areaId, status])
+}

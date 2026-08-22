@@ -3,6 +3,7 @@ import { AgentService, AskInput } from './agent.service';
 import { AgentsImportService } from './agents-import.service';
 import { AgentAreasService, AreaTool } from './agent-areas.service';
 import { BuilderSampleService } from './builder-sample.service';
+import { BriefService } from './brief.service';
 import { TOP_BUILDER_SESSION } from './builder-session';
 
 type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[]; folderId?: string | null; useWorker?: boolean };
@@ -20,6 +21,7 @@ export class AgentController {
     private readonly areas: AgentAreasService,
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly samples?: BuilderSampleService,
+    private readonly briefs?: BriefService,
   ) {}
 
   // ---- agent AREAS (BEA-1095): agent = area, job = the real unit ----
@@ -132,6 +134,77 @@ export class AgentController {
   jobBuilderSample(@Param('id') id: string, @Body() body: { actionId?: string; args?: Record<string, any> }) {
     if (!this.samples) throw new BadRequestException('Sampling is not available on this server.');
     return this.samples.sample(id, String(body?.actionId || ''), body?.args || {});
+  }
+
+  // ---- the brief (BEA-1405) — what the owner reads and approves before anything is built ----
+  //
+  // The screen that draws these is BEA-1406. Every route answers the whole brief, so the screen
+  // never has to stitch two answers together and can never show a half-updated page.
+
+  @Get('areas/:id/brief')
+  async brief(@Param('id') id: string) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const brief = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+  }
+
+  @Post('areas/:id/brief')
+  async briefUpdate(@Param('id') id: string, @Body() body: { name?: string; sections?: any; sources?: any; delivery?: any; transcript?: any }) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const brief = await this.briefs.update(current.id, body || {});
+    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+  }
+
+  @Post('areas/:id/brief/line')
+  async briefAddLine(@Param('id') id: string, @Body() body: { section?: string; text?: string; origin?: string }) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const section = String(body?.section || '') as any;
+    // A line added by hand is HIS unless the caller says otherwise — the safe default for a screen.
+    const origin = body?.origin === 'ai' || body?.origin === 'tool' ? (body.origin as any) : 'owner';
+    const brief = await this.briefs.addLine(current.id, section, String(body?.text || ''), origin);
+    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+  }
+
+  @Patch('areas/:id/brief/line/:lineId')
+  async briefEditLine(@Param('id') id: string, @Param('lineId') lineId: string, @Body() body: { text?: string }) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const brief = await this.briefs.editLine(current.id, lineId, String(body?.text || ''));
+    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+  }
+
+  /** Kill a line, or bring it back. It is marked, never deleted. */
+  @Post('areas/:id/brief/line/:lineId/strike')
+  async briefStrike(@Param('id') id: string, @Param('lineId') lineId: string, @Body() body: { struck?: boolean }) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const brief = await this.briefs.strike(current.id, lineId, body?.struck !== false);
+    return { brief, refusals: await this.briefs.whyNot(brief.id) };
+  }
+
+  /** Look at a source for real, and write down what it actually showed. Rule one. */
+  @Post('areas/:id/brief/look')
+  async briefLook(@Param('id') id: string, @Body() body: { actionId?: string; args?: Record<string, any>; sourceId?: string }) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const actionId = String(body?.actionId || '');
+    const args = body?.args || {};
+    const { view, saw, evidence } = await this.briefs.look(id, actionId, args);
+    // A refused or failed look records nothing: an unproved source must stay unproved.
+    const brief = evidence
+      ? await this.briefs.noteSource(current.id, { id: String(body?.sourceId || actionId), actionId, args, evidence, saw })
+      : current;
+    return { brief, view, refusals: await this.briefs.whyNot(brief.id) };
+  }
+
+  @Post('areas/:id/brief/approve')
+  async briefApprove(@Param('id') id: string) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const current = (await this.briefs.latest(id)) || (await this.briefs.draft(id));
+    const out = await this.briefs.approve(current.id);
+    return { ok: out.ok, brief: out.brief || current, refusals: out.refusals || [] };
   }
 
   @Get('areas/:id')
