@@ -13,12 +13,13 @@ import { ToolCatalogController } from './tool-catalog.controller';
 import { ServicesController } from './services.controller';
 import { ToolKnowledgeService } from './tool-knowledge.service';
 import { ToolKnowledgeController } from './tool-knowledge.controller';
+import { ToolSampleService } from './tool-sample.service';
 
 /** The single grouped tool catalog (BEA-1167) — agents, the builder chat and the flow canvas all read it. */
 @Module({
   imports: [ConnectorModule, SkillsModule], // LlmModule and PrismaModule are @Global
   controllers: [ToolCatalogController, ServicesController, ToolKnowledgeController],
-  providers: [ToolCatalogService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
-  exports: [ToolCatalogService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
+  providers: [ToolCatalogService, ToolSampleService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
+  exports: [ToolCatalogService, ToolSampleService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
 })
 export class ToolCatalogModule {}

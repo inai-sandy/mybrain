@@ -1630,6 +1630,45 @@ model ToolCall {
   @@index([createdAt])
 }
 
+/// ONE whole vendor answer, kept so a worker can be tested and repaired without spending a credit
+/// (BEA-1386, agent workers 1/10 — `specs/AGENT-WORKERS.md` §A).
+///
+/// `ToolCall.result` is pretty-printed and then cut to 2,000 characters, which is why nothing can be
+/// replayed today. This table keeps the answer WHOLE: masked, then gzipped into a BLOB — never
+/// base64, which would add ~33% to a store the nightly backup copies in full.
+///
+/// Written from `ServiceActionsService.runDetailed()` on success only, opt-in per service, and never
+/// for anything that could carry somebody's messages (see `NO_SAMPLE_SERVICES` in `tool-sample.ts`).
+model ToolSample {
+  id        String   @id @default(uuid())
+  /// Service slug, e.g. "instagram" — never a vendor-specific name.
+  service   String
+  /// The action's own name, without the `svc:<service>.` in front of it.
+  action    String
+  /// OUR id for the action: `svc:instagram.search_hashtag`, for an exact lookup.
+  actionId  String
+  /// The job this answer came from. Null for a builder, chat or Social-page call.
+  agentId   String?
+  /// sha256 of the normalised (masked, key-sorted) arguments — one set of samples per call shape.
+  argsHash  String
+  /// The arguments as JSON, masked and UNCAPPED — `redact()` cuts at 4,000 characters and masks by
+  /// key name only, which would miss a phone number in `wa_id` or an e-mail in `from`.
+  arguments String
+  /// The whole answer: masked, then gzipped. A BLOB, never base64.
+  payload   Bytes
+  /// Stored size in bytes, after gzip — what the eviction sweep counts against `TOTAL_BUDGET_MB`.
+  bytes     Int
+  /// 'good' (a real answer to test against) | 'failing' (kept as evidence of a break).
+  kind      String   @default("good")
+  /// Why a failing sample was kept, or why this one is not usable for tests (over the size cap).
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([actionId, kind, createdAt])
+  @@index([agentId])
+  @@index([argsHash])
+}
+
 /// A gate decision on an outside-service action that cannot be undone (BEA-1348).
 ///
 /// Two shapes in one table, told apart by `scope`:
