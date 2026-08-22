@@ -146,9 +146,13 @@ the whole read every minute. Now `GmailBriefService.briefTick()` checks the CLOC
 `EARLY_AT`/`FINAL_AT`, the owner's numbers): 21:00 = the early pass (full read, Telegram, email memory; the
 mails are kept in `gmailbrief.earlyMetas`), 23:30 = the final pass (`gmailImportantSince(day, earlyAt)` —
 only what arrived after the early read; nothing new → unread refreshed, no push; new → re-summarise early +
-new, push again, sync only the new); no early pass behind it → the full read. Each window is tried ONCE
-(markers `gmailbrief.earlyDone/earlyAt/nightlyDone`, set even on failure) and a missed night is caught up
-once the next day (`gmailbrief.catchupTried`). A failed list read FAILS the pass — it never writes "no
+new, push again, sync only the new); no early pass behind it → the full read. A pass that throws is tried
+again at most 3 times, 2 min apart (`gmailbrief.earlyTry`/`finalTry` = `<day>:<n>:<when>`; the 3rd failure
+marks the window done — BEA-1412, after the first live night lost its early pass to a provider that was not
+warm 60 s after boot: both calls `not-connected`, window burned), no pass runs in the first 90 s after boot
+(`BOOT_GRACE_S`, the morning catch-up included), a tick that lands while a pass is still running does nothing
+(`ticking`), `attempt()` holds the 3-try cap itself even if the done marker was lost, markers
+`gmailbrief.earlyDone/earlyAt/nightlyDone`, and a missed night is caught up once the next day (`gmailbrief.catchupTried`). A failed list read FAILS the pass — it never writes "no
 important emails" about a day it did not read. `status()` reads the remembered address (Setting
 `google.email`, learned by ONE counted probe); there are no quiet calls any more — every Gmail call is a
 ToolCall row. **Pages are stored-only**: `getForDay` never reads Gmail for a missing day, the Gmail page
@@ -163,8 +167,9 @@ Traps: a spec harness needs `prisma.setting` + `toolCall.findMany` + `gmailBrief
 (`google-workspace.testing.ts` `build()` carries them); `nowSeconds()` exists so a spec can pin the clock;
 the cap is a count-then-call, so two Gmail calls fired together (`readDay()`'s unread + list) can land at
 cap+1 — accepted for a daily cap, not a bug to "fix" with a lock; a failed address probe backs off 6 h in
-memory (`emailProbeFailedAt`) and the address is keyed to the account id (`google.emailAccount`), so a
-reconnect learns the new address once; `startOfLocalDay` reads the zone offset at `now` (an hour off on a
+memory (`emailProbeFailedAt`), callers that arrive together share ONE in-flight probe (`emailProbe`, BEA-1412
+— two page loads at once made two probes), and the address is keyed to the account id (`google.emailAccount`),
+so a reconnect learns the new address once; `startOfLocalDay` reads the zone offset at `now` (an hour off on a
 DST-change day in a DST zone — IST has none).
 
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in

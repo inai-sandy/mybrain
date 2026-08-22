@@ -46,8 +46,9 @@ function make(opts: {
   jest.spyOn(svc as any, 'dayKey').mockReturnValue('2026-08-22');
   jest.spyOn(svc as any, 'localHM').mockReturnValue(opts.hm);
   jest.spyOn(svc as any, 'finalizeRecentBriefs').mockResolvedValue(undefined);
-  jest.spyOn(svc as any, 'nowSeconds').mockReturnValue(opts.now ?? 1_787_410_800); // 2026-08-22 21:00:00 IST
-  return { svc, settings, briefs, google, llm, emailMemory };
+  const clock = { now: opts.now ?? 1_787_410_800 }; // 2026-08-22 21:00:00 IST
+  jest.spyOn(svc as any, 'nowSeconds').mockImplementation(() => clock.now);
+  return { svc, settings, briefs, google, llm, emailMemory, clock };
 }
 
 const mail = (id: string, subject = 'S' + id): Meta => ({ id, threadId: 't' + id, from: 'A <a@x.io>', subject, date: '2026-08-22T15:00:00Z', snippet: 'snip ' + id });
@@ -144,16 +145,118 @@ describe('GmailBriefService.briefTick — two windows a day, nothing in between 
     expect(google.gmailImportantForDay).not.toHaveBeenCalled();
   });
 
-  it('a failing read in a window is tried once and the window is marked, so a bad night costs one attempt', async () => {
-    const { svc, google, settings, briefs } = make({ hm: '21:05' });
+  it('a failing read never pretends — no "no important emails" brief, no push — and is not retried the next minute', async () => {
+    const { svc, google, settings, briefs, clock } = make({ hm: '21:05' });
     (google.gmailImportantForDay as jest.Mock).mockRejectedValue(new Error('gmail-cap:60:60'));
     (google.gmailDayUnread as jest.Mock).mockRejectedValue(new Error('gmail-cap:60:60'));
     await svc.briefTick();
+    clock.now += 60;
     await svc.briefTick();
     expect(google.gmailImportantForDay).toHaveBeenCalledTimes(1);
-    expect(settings['gmailbrief.earlyDone']).toBe('2026-08-22');
-    // And it never pretends: a read that failed writes no "no important emails" brief and pushes nothing.
     expect(briefs['2026-08-22']).toBeUndefined();
     expect(settings['telegram.pushGmailBrief']).toBeUndefined();
+  });
+});
+
+describe('GmailBriefService.briefTick — a pass that fails does not burn the window (BEA-1412)', () => {
+  it('a failing early pass is retried after 2 minutes, not the next minute, and gives up after 3 tries', async () => {
+    const { svc, google, settings, clock } = make({ hm: '21:05' });
+    (google.gmailImportantForDay as jest.Mock).mockRejectedValue(new Error('not-connected:gmail'));
+    await svc.briefTick(); // try 1
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(1);
+    expect(settings['gmailbrief.earlyDone']).toBeUndefined();
+    clock.now += 60;
+    await svc.briefTick(); // too soon
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(1);
+    clock.now += 70;
+    await svc.briefTick(); // try 2
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(2);
+    clock.now += 130;
+    await svc.briefTick(); // try 3 — the last
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(3);
+    expect(settings['gmailbrief.earlyDone']).toBe('2026-08-22');
+    clock.now += 200;
+    await svc.briefTick();
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(3);
+  });
+
+  it('a success after a failure marks the window done and pushes once', async () => {
+    const { svc, google, settings, clock } = make({ hm: '21:05', important: [mail('1')] });
+    (google.gmailImportantForDay as jest.Mock).mockRejectedValueOnce(new Error('not-connected:gmail'));
+    await svc.briefTick();
+    expect(settings['gmailbrief.earlyDone']).toBeUndefined();
+    expect(settings['telegram.pushGmailBrief']).toBeUndefined();
+    clock.now += 125;
+    await svc.briefTick();
+    expect(settings['gmailbrief.earlyDone']).toBe('2026-08-22');
+    expect(settings['telegram.pushGmailBrief']).toBe('2026-08-22');
+    clock.now += 125;
+    await svc.briefTick();
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(2);
+  });
+
+  it('the final pass has the same bounded retry', async () => {
+    const { svc, google, settings, clock } = make({ hm: '23:31' });
+    (google.gmailImportantForDay as jest.Mock).mockRejectedValue(new Error('fetch failed'));
+    await svc.briefTick();
+    expect(settings['gmailbrief.nightlyDone']).toBeUndefined();
+    clock.now += 30;
+    await svc.briefTick();
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(1);
+    clock.now += 100;
+    await svc.briefTick();
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(2);
+  });
+
+  it('no pass in the first 90 s after boot — the provider is not warm yet; the next tick takes the window', async () => {
+    const { svc, google, clock } = make({ hm: '22:59', important: [mail('1')] });
+    svc.onModuleInit();
+    try {
+      clock.now += 30;
+      await svc.briefTick();
+      expect(google.gmailImportantForDay).not.toHaveBeenCalled();
+      clock.now += 70;
+      await svc.briefTick();
+      expect(google.gmailImportantForDay).toHaveBeenCalledTimes(1);
+    } finally {
+      svc.onModuleDestroy();
+    }
+  });
+});
+
+describe('GmailBriefService.briefTick — review fixes (BEA-1412)', () => {
+  it('the morning catch-up also waits out the boot grace, and its one chance is not spent on a cold provider', async () => {
+    const { svc, google, settings, clock } = make({ hm: '08:00', important: [mail('1')] });
+    svc.onModuleInit();
+    try {
+      clock.now += 30;
+      await svc.briefTick();
+      expect(google.gmailImportantForDay).not.toHaveBeenCalled();
+      expect(settings['gmailbrief.catchupTried']).toBeUndefined();
+      clock.now += 70;
+      await svc.briefTick();
+      expect(google.gmailImportantForDay).toHaveBeenCalledWith('2026-08-21', 25);
+      expect(settings['gmailbrief.catchupTried']).toBe('2026-08-22');
+    } finally {
+      svc.onModuleDestroy();
+    }
+  });
+
+  it('a try-marker already at the cap stops the pass even if the done marker was lost', async () => {
+    const { svc, google } = make({ hm: '21:05', settings: { 'gmailbrief.earlyTry': '2026-08-22:3:1787400000' } });
+    await svc.briefTick();
+    expect(google.gmailImportantForDay).not.toHaveBeenCalled();
+  });
+
+  it('a tick that arrives while a pass is still running does nothing — no second read, no second push', async () => {
+    const { svc, google, llm } = make({ hm: '21:05', important: [mail('1')] });
+    let release: (v: any) => void = () => undefined;
+    (llm.completeWithModel as jest.Mock).mockImplementationOnce(() => new Promise((r) => { release = r; }));
+    const first = svc.briefTick();
+    await new Promise((r) => setTimeout(r, 5));
+    await svc.briefTick(); // overlapping tick
+    expect(google.gmailImportantForDay).toHaveBeenCalledTimes(1);
+    release({ text: '{"overview":"ok","sections":[]}', model: 'm' });
+    await first;
   });
 });

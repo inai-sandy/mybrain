@@ -140,6 +140,13 @@ describe('the seam itself', () => {
     expect(calls(provider).filter((c) => c.id === 'svc:gmail.get_profile')).toHaveLength(1);
   });
 
+  it('status() calls that run together share ONE address probe (BEA-1412)', async () => {
+    const { svc, provider } = build((id) => (id === 'svc:gmail.get_profile' ? { response_data: { emailAddress: 'o@x.io' } } : {}));
+    const all = await Promise.all([svc.status(), svc.status(), svc.status()]);
+    expect(all.map((s) => s.email)).toEqual(['o@x.io', 'o@x.io', 'o@x.io']);
+    expect(calls(provider).filter((c) => c.id === 'svc:gmail.get_profile')).toHaveLength(1);
+  });
+
   it('writes a ToolCall row for every real read, on the account it ran on', async () => {
     const { svc, prisma } = build(() => ({ messages: [] }), { settings: { 'google.email': 'sandy@kiot.io' } });
     await svc.status();

@@ -17,6 +17,13 @@ const EARLY_AT_KEY = 'gmailbrief.earlyAt'; // epoch seconds the early read start
 const EARLY_METAS = 'gmailbrief.earlyMetas'; // the mails it read, so the final pass re-summarises without re-reading
 const FINAL_DONE = 'gmailbrief.nightlyDone';
 const CATCHUP_TRIED = 'gmailbrief.catchupTried';
+/** A pass that throws is tried again — bounded. `<day>:<tries>:<epochSeconds of the last try>`. (BEA-1412) */
+const EARLY_TRY = 'gmailbrief.earlyTry';
+const FINAL_TRY = 'gmailbrief.finalTry';
+const MAX_TRIES = 3;
+const RETRY_AFTER_S = 120;
+/** No pass in the first seconds after boot — the provider's account list is not warm yet. (BEA-1412) */
+const BOOT_GRACE_S = 90;
 
 type BriefItem = { from: string; subject: string; time: string; threadId?: string };
 type BriefSection = { heading: string; points: string[]; link: string | null; threadId?: string };
@@ -29,6 +36,10 @@ export type Brief = { day: string; unread: number | null; overview: string; summ
 export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(GmailBriefService.name);
   private tick: NodeJS.Timeout | null = null;
+  /** When the service started (seconds) — the boot grace counts from here; null in a harness that never booted. */
+  private bootedAt: number | null = null;
+  /** A pass in flight — a tick that arrives while one runs does nothing (a slow summary must not double-read). */
+  private ticking = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -58,6 +69,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
+    this.bootedAt = this.nowSeconds();
     this.tick = setInterval(() => this.briefTick().catch(() => undefined), 60_000);
   }
   onModuleDestroy() {
@@ -132,33 +144,73 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
    * The clock is checked FIRST — outside the windows this touches nothing, not even a status
    * probe. 21:00 = the early brief (full read, Telegram, email memory). 23:30 = the final pass:
    * only mail that arrived after the early read, a re-summary and a second push only when
-   * something new came; with no early pass behind it (restart) it does the full read. Each
-   * window is tried ONCE (the marker is set even when the read fails — a bad night costs one
-   * attempt, never one a minute), and a night missed altogether is caught up once the next day.
+   * something new came; with no early pass behind it (restart) it does the full read. A pass
+   * that throws is tried again at most `MAX_TRIES` times, `RETRY_AFTER_S` apart (never one a
+   * minute), then the window is marked and left — the first live night lost its early pass to a
+   * provider that was not warm 60 s after boot, so the first `BOOT_GRACE_S` after boot run no
+   * pass at all. A night missed altogether is caught up once the next day.
    */
   async briefTick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      await this.tickOnce();
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  private async tickOnce(): Promise<void> {
     const tz = await this.tz();
     const today = this.dayKey(tz);
     const hm = this.localHM(tz);
     // Catch-up: index any complete PAST-day brief that isn't linked yet — database only. (BEA-343)
     await this.finalizeRecentBriefs(today).catch(() => undefined);
+    const booting = this.bootedAt != null && this.nowSeconds() - this.bootedAt < BOOT_GRACE_S;
     if (hm >= FINAL_AT) {
-      if ((await this.getSetting(FINAL_DONE)) === today) return;
-      const earlyAt = (await this.getSetting(EARLY_DONE)) === today ? Number(await this.getSetting(EARLY_AT_KEY)) : NaN;
-      await this.finalPass(today, Number.isFinite(earlyAt) ? earlyAt : null).catch((e) => this.log.warn(`final brief ${today}: ${e?.message || e}`));
-      await this.setSetting(FINAL_DONE, today).catch(() => undefined);
+      if ((await this.getSetting(FINAL_DONE)) === today || booting) return;
+      await this.attempt(FINAL_TRY, FINAL_DONE, today, async () => {
+        const earlyAt = (await this.getSetting(EARLY_DONE)) === today ? Number(await this.getSetting(EARLY_AT_KEY)) : NaN;
+        await this.finalPass(today, Number.isFinite(earlyAt) ? earlyAt : null);
+      });
     } else if (hm >= EARLY_AT) {
-      if ((await this.getSetting(EARLY_DONE)) === today) return;
-      const startedAt = this.nowSeconds();
-      await this.earlyPass(today).catch((e) => this.log.warn(`early brief ${today}: ${e?.message || e}`));
-      await this.setSetting(EARLY_DONE, today).catch(() => undefined);
-      await this.setSetting(EARLY_AT_KEY, String(startedAt)).catch(() => undefined);
+      if ((await this.getSetting(EARLY_DONE)) === today || booting) return;
+      await this.attempt(EARLY_TRY, EARLY_DONE, today, async () => {
+        const startedAt = this.nowSeconds();
+        await this.earlyPass(today);
+        await this.setSetting(EARLY_AT_KEY, String(startedAt)).catch(() => undefined);
+      });
     } else {
-      if ((await this.getSetting(CATCHUP_TRIED)) === today) return;
+      // The catch-up's one chance a day is not spent on a provider that is not warm yet either.
+      if ((await this.getSetting(CATCHUP_TRIED)) === today || booting) return;
       await this.setSetting(CATCHUP_TRIED, today).catch(() => undefined);
       const y = this.dayAdd(today, -1);
       if (await this.prisma.gmailBrief.findUnique({ where: { day: y } })) return;
       await this.generate(y, false, true).catch((e) => this.log.warn(`catch-up brief ${y}: ${e?.message || e}`));
+    }
+  }
+
+  /**
+   * Run one window's pass with bounded retries: a throw is written down as a try
+   * (`<day>:<n>:<when>`), the next try waits `RETRY_AFTER_S`, and after `MAX_TRIES` failures the
+   * window is marked done and left alone. Success marks it done at once.
+   */
+  private async attempt(tryKey: string, doneKey: string, day: string, run: () => Promise<void>): Promise<void> {
+    const now = this.nowSeconds();
+    const raw = (await this.getSetting(tryKey)) || '';
+    const [tDay, tN, tLast] = raw.split(':');
+    const tries = tDay === day ? Number(tN) || 0 : 0;
+    const last = tDay === day ? Number(tLast) || 0 : 0;
+    if (tries >= MAX_TRIES) return; // the cap holds even if the done marker was lost
+    if (tries > 0 && now - last < RETRY_AFTER_S) return;
+    try {
+      await run();
+      await this.setSetting(doneKey, day).catch(() => undefined);
+    } catch (e: any) {
+      const n = tries + 1;
+      this.log.warn(`${doneKey} ${day}: try ${n}/${MAX_TRIES} failed — ${e?.message || e}`);
+      await this.setSetting(tryKey, `${day}:${n}:${now}`).catch(() => undefined);
+      if (n >= MAX_TRIES) await this.setSetting(doneKey, day).catch(() => undefined);
     }
   }
 
