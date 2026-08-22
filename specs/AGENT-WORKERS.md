@@ -329,6 +329,18 @@ capture: save the failing answer as ToolSample(kind:"failing"), attach error + c
   compare-and-set, released on terminal state, expiring on a timeout so a crash cannot wedge a job.
   It is its own build item, not a footnote — and it fixes an existing latent bug (two overlapping runs
   of the same job are possible today).
+  **BUILT (BEA-1388).** `RunLockService` (`api/src/agent/run-lock.service.ts`) + the `JobRunLock` row.
+  Claim = an `INSERT` on the UNIQUE `jobId`, or one conditional `UPDATE … WHERE expiresAt <= now` to
+  take over an expired lock; never read-then-write. Claimed in `HermesBridgeService.startRun()` (the
+  scheduler, both manual routes, event triggers, voice), in `FlowRunnerService.start()` (the Flow tab's
+  Run is a job's second door — released by `freeJob()`, which keeps the lock while the flow is running
+  or parked), and in `WorkerTokenService.mint()` (the worker road, which re-spawns after every pause
+  and so re-claims its own run). Released on ANY terminal state
+  through `finishRun`/`cancelRun`, by the boot reconciler, and on job delete. Settled behaviour: a
+  **manual** start of a busy job is refused with HTTP 409 and a plain sentence; a **scheduled** fire is
+  skipped — not queued, not duplicated — and says so as an `info` step on the run that is still going.
+  `TTL_MS` = **30 minutes**: longer than any real run and longer than the piece-7 stall watchdog's 20,
+  short enough that a crashed holder costs one fire. The repair loop (piece 8) claims the same lock.
 - A repair that changes rows on the parity suite by more than a set tolerance is **not** auto-promoted
   — it is offered to the owner instead. (Self-healing may fix plumbing; it may not quietly change what
   the agent returns.)

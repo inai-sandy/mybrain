@@ -6,6 +6,7 @@ import { AgentToolsService } from './agent-tools.service';
 import { AgentsImportService } from './agents-import.service';
 import { AgentAreasService } from './agent-areas.service';
 import { BuilderSampleService } from './builder-sample.service';
+import { RunLockService } from './run-lock.service';
 import { DocumentsModule } from '../documents/documents.module';
 import { MemoryModule } from '../memory/memory.module';
 import { LlmModule } from '../llm/llm.module';
@@ -24,7 +25,10 @@ import { PromptsModule } from '../prompts/prompts.module';
   controllers: [AgentController, AgentToolsController],
   // BuilderSampleService (BEA-1370) runs through ToolCatalogModule's ServiceActionsService; the daily
   // ceiling reaches it through `setBudget()` from SocialModule (which imports this module — no cycle).
-  providers: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService, BuilderSampleService],
-  exports: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService, BuilderSampleService],
+  // RunLockService (BEA-1388) needs nothing but Prisma and everything that STARTS a run needs it, so
+  // it lives here — the scheduler, the manual routes, the worker road and (later) the repair loop all
+  // reach it through this module's exports.
+  providers: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService, BuilderSampleService, RunLockService],
+  exports: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService, BuilderSampleService, RunLockService],
 })
 export class AgentModule {}

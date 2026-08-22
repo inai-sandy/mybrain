@@ -757,6 +757,30 @@ model SocialWatch {
   @@index([agentId])
 }
 
+/// ONE run at a time per job (BEA-1388, `specs/AGENT-WORKERS.md` §G). Before anything starts a job —
+/// the scheduler, a manual tap, an event trigger, the worker road, later the repair loop — it claims
+/// this row. `jobId` is UNIQUE, and that uniqueness IS the claim: an INSERT either wins or is rejected,
+/// so two starts of one job can never both begin. Released on a terminal state (done/failed/cancelled)
+/// and, if the holder dies without releasing, taken over once `expiresAt` has passed. No FK on purpose
+/// (like SocialWatch) — `deleteAgent` drops the row by hand.
+model JobRunLock {
+  id        String   @id @default(uuid())
+  /// The agent this lock belongs to. Unique — one lock row per job, ever.
+  jobId     String   @unique
+  /// A token minted by whoever claimed it, never reused. Only the holder may release.
+  holder    String
+  /// The run being protected, when there is one (a repair turn claims before it has a run).
+  runId     String?
+  /// Plain words for the log and the skipped-fire step: "scheduled run", "manual run", "repair".
+  reason    String?
+  takenAt   DateTime @default(now())
+  /// The only safety net until the stall watchdog exists (piece 7): past this the lock may be taken
+  /// over, so a crashed holder cannot wedge a job for ever.
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
 /// One execution of an agent. Mirrors a Hermes session and carries our durable HITL state.
 model AgentRun {
   id          String      @id @default(uuid())

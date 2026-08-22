@@ -1,13 +1,29 @@
 import { AgentScheduler } from './agent-scheduler.service';
+import { JobBusyError } from '../agent/run-lock.service';
 
 const prisma: any = { setting: { findUnique: async () => ({ value: 'Asia/Kolkata' }) } };
 
-function build(agents: any[]) {
+function build(agents: any[], opts: { busyWith?: string | null } = {}) {
   const started: any[] = [];
   const marked: any[] = [];
-  const agent: any = { listSchedulable: async () => agents, markFired: async (id: string, key: string) => marked.push({ id, key }) };
-  const bridge: any = { startRun: async (i: any) => { started.push(i); return { id: 'run' }; }, applyAgentSkills: async (_a: any, i: any) => i };
-  return { sch: new AgentScheduler(agent, bridge, prisma), started, marked };
+  const steps: any[] = [];
+  const agent: any = {
+    listSchedulable: async () => agents,
+    markFired: async (id: string, key: string) => marked.push({ id, key }),
+    appendStep: async (runId: string, step: any) => { steps.push({ runId, ...step }); },
+  };
+  const bridge: any = {
+    startRun: async (i: any) => {
+      // The job lock (BEA-1388) lives inside startRun; a busy job throws JobBusyError from there.
+      if (opts.busyWith !== undefined && opts.busyWith !== null) {
+        throw new JobBusyError({ jobId: i.agentId, holder: 'h_1', runId: opts.busyWith, reason: 'the scheduled run', takenAt: new Date(), expiresAt: new Date(Date.now() + 60_000) });
+      }
+      started.push(i);
+      return { id: 'run' };
+    },
+    applyAgentSkills: async (_a: any, i: any) => i,
+  };
+  return { sch: new AgentScheduler(agent, bridge, prisma), started, marked, steps };
 }
 const mk = (over: any = {}) => ({ id: 'a1', name: 'Brief', prompt: 'do it', collectionId: null, lastFiredKey: null, schedule: { every: 'day', at: '07:00' }, ...over });
 
@@ -66,6 +82,27 @@ describe('AgentScheduler (BEA-623)', () => {
     const again = build([{ ...digest, lastFiredKey: '2026-08-24:08:00' }]);
     expect(await again.sch.tick(new Date('2026-08-25T02:30:00Z'))).toBe(0); // Tuesday 08:00 — not a Monday
     expect(await again.sch.tick(new Date('2026-08-31T02:30:00Z'))).toBe(1); // next Monday — fires again
+  });
+
+  it('a slot that comes round while the last run is still going is SKIPPED out loud, never doubled (BEA-1388)', async () => {
+    const { sch, started, marked, steps } = build([mk({ schedule: { every: 'hour', minute: 0 } })], { busyWith: 'run-in-flight' });
+    expect(await sch.tick(new Date('2026-06-28T01:30:00Z'))).toBe(0); // 07:00 IST — due, but busy
+    expect(started.length).toBe(0); // not queued, not duplicated
+    expect(marked.length).toBe(1); // the slot is spent, so the same minute is not retried
+    // …and the owner can SEE why: the note lands on the run that is still going.
+    expect(steps.length).toBe(1);
+    expect(steps[0]).toMatchObject({ runId: 'run-in-flight', status: 'info', kind: 'info' });
+    expect(steps[0].label).toContain('still going');
+  });
+
+  it('a busy job with no run on the lock is still skipped quietly, never started twice (BEA-1388)', async () => {
+    // A lock with no run on it (a repair turn, a spawn that has not attached its run yet) — there is
+    // nowhere to put the step, and the fire must still be skipped rather than run twice.
+    const { sch, started, steps } = build([mk()]);
+    (sch as any).bridge.startRun = async (i: any) => { throw new JobBusyError({ jobId: i.agentId, holder: 'h_1', runId: null, reason: 'a worker run', takenAt: new Date(), expiresAt: new Date() }); };
+    expect(await sch.tick(new Date('2026-06-28T01:30:00Z'))).toBe(0);
+    expect(started.length).toBe(0);
+    expect(steps.length).toBe(0);
   });
 
   it('does not re-fire a slot already fired, even within the look-back (BEA-798)', async () => {

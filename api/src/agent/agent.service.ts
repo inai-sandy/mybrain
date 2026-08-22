@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, OnModuleInit, OnMod
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { normaliseToolArgs, toolsFor } from '../social/tool-args';
+import { RunLockService } from './run-lock.service';
 
 /** The shape of a mid-task question the agent can ask. */
 export type WaitKind = 'choice' | 'free_text' | 'approve_edit_reject' | 'form';
@@ -38,7 +39,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private flowSync: AgentFlowSync | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  // `locks` is optional and LAST: spec harnesses build this service positionally with just Prisma,
+  // and every call is `?.`-guarded, so a harness without it behaves exactly as before. (BEA-1388)
+  constructor(private readonly prisma: PrismaService, private readonly locks?: RunLockService) {}
 
   /** Register the flow-picture drawer (BEA-1366). Called once by `AgentFlowSyncService.onModuleInit`. */
   setFlowSync(sync: AgentFlowSync | null) {
@@ -97,6 +100,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.agentRun
         .update({ where: { id: o.id }, data: { status: 'failed', error: msg, endedAt: now, stepLog: JSON.stringify(log) } })
         .catch(() => undefined);
+      // The restart that orphaned this run also left its lock behind (the row is in the database, not
+      // in memory). Free it here rather than waiting out the timeout — the job can fire again at once.
+      await this.locks?.releaseForRun(o.id).catch(() => undefined);
     }
     return orphans.length;
   }
@@ -538,6 +544,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.agentRun.deleteMany({ where: { agentId: id } }).catch(() => undefined);
     // …and what a Watch/Alert job saw last time (BEA-1358) — no FK, so by hand.
     await (this.prisma as any).socialWatch?.deleteMany?.({ where: { agentId: id } }).catch(() => undefined);
+    await this.locks?.releaseJob(id).catch(() => undefined); // …and its run lock (BEA-1388) — no FK either.
     try {
       const flows = await this.prisma.flow.findMany({ where: { agentId: id }, select: { id: true } });
       for (const f of flows) await this.prisma.flowRun.deleteMany({ where: { flowId: f.id } }).catch(() => undefined);
@@ -663,6 +670,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         endedAt: new Date(),
       },
     });
+    // ANY terminal state frees the job (BEA-1388). This is the natural release point: every road that
+    // ends a run — the engine, the plan runner, the worker's /finish callback, a crash caught in
+    // startRun — comes through here, and the terminal guard above means it happens exactly once. It
+    // goes AFTER the row is written: a lock freed for a run still marked 'running' would let the next
+    // start overlap the one that never actually ended.
+    await this.locks?.releaseForRun(id).catch(() => undefined);
     return this.shapeRun(updated);
   }
 
@@ -701,6 +714,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (!run) throw new NotFoundException('Run not found');
     await this.prisma.waitpoint.updateMany({ where: { runId: id, status: 'pending' }, data: { status: 'cancelled' } });
     const updated = await this.prisma.agentRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date() } });
+    await this.locks?.releaseForRun(id).catch(() => undefined); // cancelled is terminal too (BEA-1388)
     return this.shapeRun(updated);
   }
 

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
+import { isJobBusy } from '../agent/run-lock.service';
 import { HermesBridgeService } from './hermes-bridge.service';
 import { AppEventsService, AppEventName, AppEventPayload } from '../events/events.service';
 
@@ -38,7 +39,21 @@ export class AgentEvents implements OnModuleInit {
         rubric: a.rubric || undefined,
         saveCollectionId: a.collectionId ?? null,
         depth: a.defaultDepth === 'quick' ? 'quick' : 'standard',
-      })).catch((e) => this.log.warn(`event run for ${a.name} failed to start: ${e?.message}`));
+        lockReason: `a ${EVENT_LABEL[name] || name} trigger`, // one run at a time per job (BEA-1388)
+      })).catch(async (e: any) => {
+        // Busy is not a failure (BEA-1388): the job is already running, so this trigger is skipped —
+        // not queued, not doubled — and it says so ON the run that is still going, the same way a
+        // skipped scheduled fire does. Anything else is a real start failure.
+        if (!isJobBusy(e)) { this.log.warn(`event run for ${a.name} failed to start: ${e?.message}`); return; }
+        this.log.log(`event ${name} for "${a.name}" skipped: previous run still going`);
+        if (!e.held?.runId) return;
+        await this.agent.appendStep(e.held.runId, {
+          label: `Skipped a ${EVENT_LABEL[name] || name} trigger — this run was still going`,
+          status: 'info',
+          kind: 'info',
+          detail: 'One run at a time per job: the trigger was skipped, not queued.',
+        }).catch(() => undefined);
+      });
     }
   }
 }

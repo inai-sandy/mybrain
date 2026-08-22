@@ -3,8 +3,8 @@
   "note": "Agent Workers build — 10 pieces, STRICTLY SEQUENTIAL (one worker at a time in this repo; two concurrent sessions silently revert each other via branch switches). Design: specs/AGENT-WORKERS.md. Briefs: specs/briefs/AGENT-WORKERS-1-toolsample.md and specs/briefs/AGENT-WORKERS-QUEUE.md (pieces 2-10). Owner decisions 2026-08-22: two repair attempts, 12h question deadline, Brightdata/Apify AFTER (BEA-1397). Each piece: fresh worker, brief = its Linear issue + the queue file section, ship.sh is the only path to done, close in Linear with a sign-off. Known flake BEA-1376 may fail one ship test run - rerun ship.sh once.",
   "issues": [
     { "id": "BEA-1386", "title": "1/10 ToolSample - keep whole vendor answers", "status": "done", "sha": "8ddf72b" },
-    { "id": "BEA-1387", "title": "2/10 kit v1 + callback API + run journal + runKind", "status": "in_progress" },
-    { "id": "BEA-1388", "title": "3/10 per-job run lock", "status": "pending" },
+    { "id": "BEA-1387", "title": "2/10 kit v1 + callback API + run journal + runKind", "status": "done", "sha": "cab2d83", "note": "shipped 650bd06 with routes mounted at /api/api/worker; fixed and re-shipped as cab2d83 — verify routes over HTTP, not just in tests" },
+    { "id": "BEA-1388", "title": "3/10 per-job run lock", "status": "in_progress" },
     { "id": "BEA-1389", "title": "4/10 worker runner (host service)", "status": "pending" },
     { "id": "BEA-1390", "title": "5/10 the build turn (Codex compiles the plan)", "status": "pending" },
     { "id": "BEA-1391", "title": "6/10 contracts - fail loudly", "status": "pending" },
