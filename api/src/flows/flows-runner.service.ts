@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, OnModuleIni
 import { PrismaService } from '../prisma/prisma.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { AgentService } from '../agent/agent.service';
+import { JobBusyError, RunLockService } from '../agent/run-lock.service';
 import { LlmService } from '../llm/llm.service';
 import { DocumentsService } from '../documents/documents.service';
 import { MemoryService } from '../memory/memory.service';
@@ -91,6 +92,7 @@ export class FlowRunnerService implements OnModuleInit {
     // LAST, and optional: many spec harnesses build this service positionally with fewer args.
     private readonly news?: NewsPipelineService, // AI News Daily's own steps (BEA-1259)
     private readonly serviceActions?: ServiceActionsService, // outside services, run directly (BEA-1347)
+    private readonly locks?: RunLockService, // one run at a time per job (BEA-1388)
   ) {}
 
   private partSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -138,6 +140,9 @@ export class FlowRunnerService implements OnModuleInit {
       await this.prisma.flowRun
         .update({ where: { id: o.id }, data: { status: 'failed', error: msg, endedAt: now, terminal: JSON.stringify(term.slice(-300)), waitNodeId: null, waitQuestion: null, waitToken: null } })
         .catch(() => undefined);
+      // The restart that orphaned this run also left its job lock behind (BEA-1388) — free it now
+      // rather than making the job wait out the timeout.
+      await this.locks?.releaseForRun(o.id).catch(() => undefined);
     }
     this.log.warn(`reconciled ${orphans.length} orphaned flow run(s) on boot`);
     return orphans.length;
@@ -152,6 +157,7 @@ export class FlowRunnerService implements OnModuleInit {
     const term = this.parseArr(r.terminal);
     term.push({ text: '⊘ cancelled', at: Date.now() });
     await this.prisma.flowRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date(), terminal: JSON.stringify(term.slice(-300)), waitNodeId: null, waitQuestion: null, waitToken: null } });
+    await this.freeJob(id); // cancelled is terminal — the job runs again at once (BEA-1388)
     return { ok: true };
   }
 
@@ -360,13 +366,28 @@ export class FlowRunnerService implements OnModuleInit {
     // `joined` is said out loud for the caller (a trigger has nobody watching, so "it ran" and "one
     // was already going" must not look the same in its history).
     if (active) return { runId: active.id, joined: true };
-    const run = await this.prisma.flowRun.create({ data: { flowId, status: 'running', results: '{}', input: opts.input ? String(opts.input).slice(0, RUN_INPUT_CHARS) : null } });
+    // A flow that belongs to a job IS a run of that job, so it takes the same lock the Run button and
+    // the scheduler take (BEA-1388) — the Flow tab's Run and the job's own Run are two doors on one
+    // job, and without this they could both be open at once. Claimed BEFORE the run row exists, so a
+    // refused start leaves no half-run in the history; a standalone flow (no `agentId`) is not a job
+    // and is never locked.
+    const claim = flow.agentId ? await this.locks?.claim(flow.agentId, { reason: 'a flow run' }) : null;
+    if (claim && !claim.ok) throw new JobBusyError(claim.held, `"${flow.name || 'This job'}"`);
+    const holder = claim?.ok ? claim.holder : null;
+    let run: any;
+    try {
+      run = await this.prisma.flowRun.create({ data: { flowId, status: 'running', results: '{}', input: opts.input ? String(opts.input).slice(0, RUN_INPUT_CHARS) : null } });
+    } catch (e) {
+      if (holder) await this.locks?.release(holder).catch(() => undefined);
+      throw e;
+    }
+    if (holder) await this.locks?.attachRun(holder, run.id).catch(() => undefined);
     const flowForRun = this.applySkip(flow, opts.skipBranches); // per-run selection; saved flow untouched (BEA-796)
     void this.execute(run.id, flowForRun).catch(async (e) => {
       this.log.error(`flow run ${run.id} crashed: ${e?.message || e}`);
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);
       this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
-    });
+    }).finally(() => this.freeJob(run.id));
     return { runId: run.id };
   }
 
@@ -1011,8 +1032,22 @@ export class FlowRunnerService implements OnModuleInit {
     void this.execute(runId, flow).catch(async (e) => {
       this.log.error(`flow run ${runId} crashed on resume: ${e?.message || e}`);
       await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);
-    });
+    }).finally(() => this.freeJob(runId));
     return { ok: true };
+  }
+
+  /**
+   * Give the job back once this flow run has really ENDED (BEA-1388). A driver settles on a pause as
+   * well as on an ending, so the status decides: `running`/`waiting` keeps the lock (the run is still
+   * a run), anything else releases it. A pause that outlives `RunLockService.TTL_MS` frees the job by
+   * expiry instead, exactly as a parked agent run does — a flow waiting days must not wedge a
+   * schedule. Never throws: a lock that cannot be freed here still frees itself at the timeout.
+   */
+  private async freeJob(flowRunId: string): Promise<void> {
+    if (!this.locks) return;
+    const r = await this.prisma.flowRun.findUnique({ where: { id: flowRunId } }).catch(() => null);
+    if (r && (r.status === 'running' || r.status === 'waiting')) return;
+    await this.locks.releaseForRun(flowRunId).catch(() => undefined);
   }
 
   /** Persist branch parts (when >1) + the final output as Documents; returns [{id, slug, title}]. */

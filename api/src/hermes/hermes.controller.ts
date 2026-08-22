@@ -63,7 +63,7 @@ export class HermesController {
     // single-turn endpoint is hit for one, it falls back to standard depth (non-quick).
     const depth = agent.defaultDepth === 'quick' ? 'quick' : 'standard';
     const extra = body?.input?.trim() ? `\n\n[Your input this run]\n${body.input.trim().slice(0, 2000)}` : '';
-    const input = await this.bridge.applyAgentSkills(agent, { prompt: `${agent.prompt}${extra}`, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth }); // BEA-1079
+    const input = await this.bridge.applyAgentSkills(agent, { prompt: `${agent.prompt}${extra}`, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth, lockReason: 'a run you started' }); // BEA-1079
     return this.bridge.startRun(input);
   }
 
@@ -152,6 +152,7 @@ export class HermesController {
       saveCollectionId: body.saveCollectionId ?? null,
       save: depth === 'quick' ? false : body.save,
       depth,
+      lockReason: 'a run you started',
     });
   }
 }

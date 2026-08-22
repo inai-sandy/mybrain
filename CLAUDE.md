@@ -660,6 +660,42 @@ after the first deploy; a test now reads the path metadata); `SocialAgentRunServ
 `sources?` LAST; the worker routes are exercised in-process (`worker-harness.testing.ts`) because
 the worker runner is piece 4 — nothing spawns a process yet.
 
+**One run at a time per job (BEA-1388, agent workers 3/10 — `specs/AGENT-WORKERS.md` §G).** Nothing
+stopped an agent running twice at once before this: `AgentScheduler.tick()` deduped only on
+`lastFiredKey` (one fire per minute-slot) and runs are fire-and-forget promises, so a manual tap
+during a scheduled run started a second run over the first — sharing one Watch baseline, one "keep
+adding" sheet and one credit ceiling. `RunLockService` (`api/src/agent/run-lock.service.ts`, exported
+from `AgentModule`) is one `JobRunLock` row per job, `jobId` **UNIQUE**, and that uniqueness IS the
+claim: an `INSERT` either lands or the database rejects it (P2002), and taking over an expired lock is
+ONE conditional `UPDATE … WHERE jobId = ? AND expiresAt <= now` — **never read-then-write**, which is
+the race itself. Only the holder releases (`DELETE … WHERE holder = ?`), so a holder back from the
+dead cannot free the run that replaced it. **The claim lives in `HermesBridgeService.startRun()`** —
+the one door the scheduler, both manual routes, event triggers and voice all come through — and it
+happens BEFORE the run row is created, so a loser leaves no junk run in the owner's history. The
+worker road claims at `WorkerTokenService.mint()` instead, because a worker is spawned again after
+every pause: the same run re-claims (pushing `expiresAt` out), a different run of that job is refused.
+**A job has a second door and it is locked too**: the Flow tab's Run (`POST /api/flows/:id/run` →
+`FlowRunnerService.start()`) claims the same lock whenever the flow carries an `agentId`, and gives it
+back in `freeJob()` — called when the driver settles, on cancel and by the flow boot reconciler, and it
+checks the row's status first, because a driver settles on a **pause** too and a `waiting` flow is still
+a run. A standalone flow (no `agentId`) and an eval run (`flowId: null`) are not jobs and are never
+locked. An event trigger that finds the job busy says so on the run that is still going, exactly like
+the scheduler.
+**Terminal state = release**: `AgentService.finishRun()` (any of done/failed/cancelled), `cancelRun()`,
+the boot reconciler (a restart frees the jobs it orphaned) and `deleteAgent()` (no FK, by hand, like
+`SocialWatch`). **A second start is never silently swallowed**: a manual tap gets `JobBusyError` →
+**HTTP 409** with a plain sentence in the toast, and a scheduled fire is **skipped, not queued and not
+duplicated**, with the reason written as an `info` step ON the run that is still going ("Skipped the
+08:00 start — this run was still going") plus a log line; the slot still counts as fired, so the same
+minute is not retried. **`TTL_MS` is 30 minutes**, and it is the ONLY safety net until the piece-7
+stall watchdog: longer than any real run (an engine turn is capped at 250s; the longest paged/creators
+plan run is minutes) and longer than that watchdog's 20 minutes so the watchdog gets there first and
+releases properly, but short enough that a crash costs one fire instead of wedging a job for ever — a
+run parked on a question does not release, so the expiry is also what stops a 12-hour wait blocking
+the schedule. Proved against a REAL SQLite file (`api/src/agent/run-lock.spec.ts` — 20 racers, one
+holder) and over real HTTP on a running app: three simultaneous `POST /api/agent/agents/:id/run` →
+one 201, two 409, exactly one `AgentRun` row, lock row gone the moment the run ended.
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

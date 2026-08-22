@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { AgentService } from '../agent/agent.service';
+import { JobBusyError, RunLockService } from '../agent/run-lock.service';
 import { RunJournalService } from './run-journal.service';
 
 /**
@@ -36,6 +37,7 @@ export class WorkerTokenService {
     private readonly journal: RunJournalService,
     // Optional + LAST — spec harnesses build this positionally with fewer args.
     private readonly agent?: AgentService,
+    private readonly locks?: RunLockService, // one run at a time per job (BEA-1388)
   ) {}
 
   /**
@@ -43,6 +45,13 @@ export class WorkerTokenService {
    * sweeper leaves it alone from the moment it exists, and hands back the run's recorded seed.
    */
   async mint(runId: string, agentId: string | null, opts: { ttlMs?: number } = {}): Promise<WorkerSpawn> {
+    // The worker road takes the job lock here (BEA-1388) — the one moment every spawn passes through,
+    // including the resume after a pause, whose lock may well have timed out while the owner slept.
+    // A job somebody else is running is refused outright: no token, so no worker.
+    if (agentId) {
+      const claim = await this.locks?.claimForRun(agentId, runId, { reason: 'a worker run' });
+      if (claim && !claim.ok) throw new JobBusyError(claim.held, 'This job');
+    }
     await this.agent?.setRunKind?.(runId, 'worker')?.catch?.(() => undefined);
     const seed = await this.journal.seed(runId);
     const token = randomBytes(32).toString('hex');

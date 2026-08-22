@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EmoCardsService } from './emo-cards.service';
 import { AgentService } from '../agent/agent.service';
+import { isJobBusy } from '../agent/run-lock.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { AgentAreasService } from '../agent/agent-areas.service';
 
@@ -132,7 +133,16 @@ export class EmoAgentLaneService {
       rubric: a.rubric || undefined,
       depth,
     });
-    const run = await this.bridge.startRun(input);
+    // One run at a time per job (BEA-1388): a spoken "run it" while that job is already going says so
+    // on the card instead of starting a second run — or dying quietly and leaving the card spinning.
+    let run: any;
+    try {
+      run = await this.bridge.startRun({ ...input, lockReason: 'a run you started by voice' });
+    } catch (e: any) {
+      if (!isJobBusy(e)) throw e;
+      await this.cards.update(cardId, { status: 'needs_you', summary: `⏳ ${a.name} is already running`, needsQuestion: e.message }).catch(() => undefined);
+      return;
+    }
     await this.cards.update(cardId, {
       status: 'done',
       summary: `▶ Started ${a.name}`,

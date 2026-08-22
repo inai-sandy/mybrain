@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
+import { isJobBusy } from '../agent/run-lock.service';
 import { HermesBridgeService } from './hermes-bridge.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -66,14 +67,40 @@ export class AgentScheduler implements OnModuleInit, OnModuleDestroy {
         await this.agent.markFired(a.id, key);
         a.lastFiredKey = key;
         try {
-          await this.bridge.startRun(await this.bridge.applyAgentSkills(a, { prompt: a.prompt, title: a.name, agentId: a.id, saveCollectionId: a.collectionId })); // skills ride along (BEA-1079)
+          await this.bridge.startRun(await this.bridge.applyAgentSkills(a, { prompt: a.prompt, title: a.name, agentId: a.id, saveCollectionId: a.collectionId, lockReason: 'the scheduled run' })); // skills ride along (BEA-1079)
           fired++;
         } catch (e: any) {
-          this.log.error(`scheduled agent ${a.id} failed to start: ${e?.message || e}`);
+          if (isJobBusy(e)) await this.skipped(a, hm, e);
+          else this.log.error(`scheduled agent ${a.id} failed to start: ${e?.message || e}`);
         }
         break;
       }
     }
     return fired;
+  }
+
+  /**
+   * The slot came round while the last run was still going (BEA-1388). The fire is **skipped, not
+   * queued and not duplicated** — a job that takes longer than its own interval would otherwise pile
+   * runs on top of each other, sharing one Watch baseline, one "keep adding" sheet and one credit
+   * ceiling.
+   *
+   * It is never silent. The line goes in the log AND — the part the owner can actually see — a step
+   * lands on the run that is still going: open it and the reason the 08:00 fire is missing is right
+   * there in its own step list. The slot still counts as fired (`markFired` already ran), exactly
+   * like a fire that throws today, so the same slot is not retried a minute later.
+   */
+  private async skipped(a: any, hm: string, e: any): Promise<void> {
+    const heldRunId = e?.held?.runId || null;
+    this.log.log(`scheduled agent ${a.id} skipped at ${hm}: previous run still going${heldRunId ? ` (run ${heldRunId})` : ''}`);
+    if (!heldRunId) return;
+    try {
+      await this.agent.appendStep(heldRunId, {
+        label: `Skipped the ${hm} start — this run was still going`,
+        status: 'info',
+        kind: 'info',
+        detail: 'One run at a time per job: the scheduled start was skipped, not queued. It will fire again at its next time.',
+      });
+    } catch { /* a note that cannot be written is not worth a crash in the tick */ }
   }
 }

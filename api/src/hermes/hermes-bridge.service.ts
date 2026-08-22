@@ -8,6 +8,7 @@ export interface HermesRunHandlers {
 }
 export interface HermesRunResult { sessionId: string; finalText: string; status: string; error?: string; usage?: any }
 import { AgentService } from '../agent/agent.service';
+import { JobBusyError, RunLockService } from '../agent/run-lock.service';
 import { DocumentsService } from '../documents/documents.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MemoryService } from '../memory/memory.service';
@@ -45,6 +46,8 @@ export type StartRunInput = {
   allowAsk?: boolean;
   /** Run inside this deployed skill's folder (single-skill agents, BEA-1079). */
   skill?: string;
+  /** Plain words for the job lock: "scheduled run", "manual run", "by voice"… (BEA-1388). */
+  lockReason?: string;
 };
 
 /**
@@ -79,6 +82,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167/1168)
     private readonly budget?: TokenBudgetService, // the token ceiling (BEA-1204)
     private readonly socialRuns?: SocialAgentRunService, // direct fetch jobs — no engine turn (BEA-1357)
+    private readonly locks?: RunLockService, // one run at a time per job (BEA-1388)
   ) {}
 
   onModuleInit() {
@@ -540,10 +544,32 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     return out;
   }
 
-  /** Create the run row and kick off execution in the background; returns immediately. */
+  /**
+   * Create the run row and kick off execution in the background; returns immediately.
+   *
+   * **One run at a time per job (BEA-1388).** Every road that starts a run for a saved job comes
+   * through here — the scheduler, both manual routes, an event trigger, a voice card, the worker road
+   * — so this is where the job lock is claimed. The claim happens BEFORE the run row exists: a loser
+   * that created its row first would leave a junk run in the owner's history for a run that never
+   * started. A busy job throws `JobBusyError` (HTTP 409 with a plain sentence); the scheduler catches
+   * it and skips that fire out loud instead. A run with no `agentId` (a one-off prompt, bookmark
+   * research) is not a job and is never locked.
+   */
   async startRun(input: StartRunInput) {
     const depth = input.depth ?? (input.quick ? 'quick' : 'standard');
-    const run = await this.agent.createRun({ agentId: input.agentId ?? null, title: input.title || 'Agent run', input: input.prompt, depth });
+    const claim = input.agentId ? await this.locks?.claim(input.agentId, { reason: input.lockReason || 'a run' }) : null;
+    if (claim && !claim.ok) throw new JobBusyError(claim.held, `"${input.title || 'This job'}"`);
+    const holder = claim?.ok ? claim.holder : null;
+    let run: any;
+    try {
+      run = await this.agent.createRun({ agentId: input.agentId ?? null, title: input.title || 'Agent run', input: input.prompt, depth });
+    } catch (e) {
+      if (holder) await this.locks?.release(holder).catch(() => undefined); // never hold a lock for a run that does not exist
+      throw e;
+    }
+    // The lock now points at its run, so a skipped scheduled fire can say WHICH run is still going.
+    // From here on the release is `finishRun`'s job — every terminal state goes through it.
+    if (holder) await this.locks?.attachRun(holder, run.id).catch(() => undefined);
     // fire-and-forget — the run screen polls GET /api/agent/runs/:id for live progress.
     // execute() awaits appendStep/engineSettings before its own try, so a transient DB error there
     // would leave the run stuck 'running'. Always finalize on any escape. (BEA-799)
