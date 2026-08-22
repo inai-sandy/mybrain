@@ -91,7 +91,7 @@ describe('what Codex is given', () => {
     const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
     expect(req.brief).toContain('Work (14)');
     expect(req.brief).toContain('• Ravi — quote needs a reply today');
-    expect(req.brief).toContain('These are the exact words he approved');
+    expect(req.brief).toContain('This is the shape he approved');
     expect(req.brief).toContain('never a row count');
   });
 
@@ -270,5 +270,27 @@ describe('"read" and "kept" are not the same promise', () => {
   it('says the reading promise in plain words, first', () => {
     const words = contractInWords(contractFromBrief(PLAN, ['At least 10 emails read.']));
     expect(words[0]).toContain('go through at least 10');
+  });
+});
+
+/**
+ * The message he receives may not contain instructions (BEA-1410).
+ *
+ * Found on the third real trial run. His approved shape carried a line telling the builder how to
+ * fill it in — *"Put each email under ONE heading only…"* — and Codex, correctly told that the shape
+ * is literal, sent that line to his phone along with the summary. A rule about how to build the
+ * message is noise on a phone.
+ */
+describe('the shape and the rules about it are different things', () => {
+  it('tells Codex what a hole is, and that rules must not be sent', () => {
+    const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
+    expect(req.brief).toContain('<angle brackets> is a hole to fill');
+    expect(req.brief).toContain('Nothing that reads as an instruction may end up in the message he receives');
+  });
+
+  it('still insists the shape itself is sent, not a summary of it', () => {
+    const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
+    expect(req.brief).toContain('never a row count');
+    expect(req.brief).toContain('filled in with the real data');
   });
 });

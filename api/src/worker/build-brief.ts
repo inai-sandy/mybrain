@@ -228,9 +228,16 @@ export function briefInWords(payload: BriefPayload): string {
   const d = payload.brief.delivery;
   if (d.whatsapp || d.telegram) {
     out.push('## The message it sends', '');
-    out.push(`It goes to ${[d.whatsapp ? 'WhatsApp' : '', d.telegram ? 'Telegram' : ''].filter(Boolean).join(' and ')}. **These are the exact words he approved. Send these, not a summary of them, and never a row count.**`, '');
+    out.push(`It goes to ${[d.whatsapp ? 'WhatsApp' : '', d.telegram ? 'Telegram' : ''].filter(Boolean).join(' and ')}. **This is the shape he approved. Send this shape, filled in with the real data — not a summary of it, and never a row count.**`, '');
     out.push('```text', d.messageText || '(nothing written — this brief should not have been approved)', '```', '');
-    out.push('Pass it as `message` to `kit.notify`, and give `headline` a single line with no newline in it for the WhatsApp template. See `kit/KIT.md`.', '');
+    out.push(
+      'Anything in <angle brackets> is a hole to fill from the rows. Everything else is literal text he will read.',
+      '',
+      '**Nothing that reads as an instruction may end up in the message he receives.** If a line in the shape above tells YOU what to do rather than telling HIM something, follow it and leave it out of what you send. He is reading this on his phone; a rule about how to build it is noise there.',
+      '',
+      'Pass the finished message as `message` to `kit.notify`, and give `headline` a single line with no newline in it for the WhatsApp template. See `kit/KIT.md`.',
+      '',
+    );
   } else {
     out.push('## The message it sends', '', 'Nothing is sent. There is no notify step.', '');
   }
