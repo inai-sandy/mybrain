@@ -22,7 +22,7 @@
  *    which matters, because those are precisely the ones with no notes.
  */
 
-export type LessonKind = 'silent-default' | 'more-pages' | 'cap-hit' | 'ignored-argument' | 'single-object';
+export type LessonKind = 'silent-default' | 'more-pages' | 'cap-hit' | 'ignored-argument' | 'single-object' | 'shape';
 
 export type Lesson = {
   /** Stable within an action, so seeing the same thing twice raises a count instead of adding a row. */
@@ -32,6 +32,26 @@ export type Lesson = {
   text: string;
   /** The parameter it is about, when it is about one. */
   param?: string;
+  /** For a `shape` lesson: where the things are, and what one of them carries. Paths only. */
+  shape?: LearnedShape;
+};
+
+/**
+ * The shape of an answer, learned by looking at a real one (BEA-1415).
+ *
+ * **Paths and types. Never a value.** That is the whole reason this can exist for Gmail, WhatsApp
+ * and Slack — whose answers are deliberately never kept, and which are therefore exactly the tools
+ * that had no saved answer for Codex to write a reading recipe from. The first version of the recipe
+ * work missed that completely: it helped the tools the app already read well, and could not help the
+ * one that started the whole conversation.
+ */
+export type LearnedShape = {
+  /** Dotted path to the list of things. Empty when the answer IS one thing. */
+  listPath: string;
+  /** Every field one item carries, as a path and a rough type. */
+  fields: { path: string; kind: string }[];
+  /** How many things that one answer held — so a recipe can be checked against it later. */
+  items: number;
 };
 
 export type LessonInput = {
@@ -119,6 +139,86 @@ function defaultOf(prop: any): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/** A path segment that is really a VALUE — an id, an e-mail, a phone number — is never written down. */
+const VALUEY_SEGMENT = /@|^\+?\d[\d\s().-]{6,}$|^[0-9a-f]{16,}$|^\d{6,}$/i;
+
+/** How deep into an item a path may go. Deeper than this is a payload, not a shape. */
+const SHAPE_DEPTH = 4;
+/** How many field paths are worth writing down for one action. */
+const SHAPE_FIELDS = 60;
+
+function kindOf(v: any): string {
+  if (v === null || v === undefined) return 'empty';
+  if (Array.isArray(v)) return 'list';
+  switch (typeof v) {
+    case 'number': return 'number';
+    case 'boolean': return 'bool';
+    case 'string': return /^https?:\/\//i.test(v) ? 'url' : 'text';
+    default: return 'object';
+  }
+}
+
+/**
+ * Walk ONE item and write down every path it carries. Paths and types only.
+ *
+ * A list of `{name, value}` pairs — headers, custom fields, properties, the shape half the world's
+ * APIs use — is written down by the NAMES it holds (`payload.headers.Subject`), because that is how
+ * a recipe has to ask for it, and because the alternative (`payload.headers.0.value`) is exactly the
+ * useless column the general reader already produces.
+ */
+export function fieldsOfItem(item: any, prefix = '', depth = 0, out: { path: string; kind: string }[] = []): { path: string; kind: string }[] {
+  if (depth > SHAPE_DEPTH || out.length >= SHAPE_FIELDS || !item || typeof item !== 'object') return out;
+  if (Array.isArray(item)) {
+    // A name/value list: record the names, which is how a recipe reaches into it.
+    const named = item.filter((x) => x && typeof x === 'object' && ('name' in x || 'key' in x));
+    if (named.length) {
+      for (const n of named.slice(0, 20)) {
+        const name = String((n as any).name ?? (n as any).key ?? '');
+        if (!name || VALUEY_SEGMENT.test(name)) continue;
+        out.push({ path: `${prefix}${prefix ? '.' : ''}${name}`, kind: kindOf((n as any).value ?? (n as any).text ?? (n as any).content) });
+        if (out.length >= SHAPE_FIELDS) return out;
+      }
+      return out;
+    }
+    // An ordinary list inside an item: one level, through its first entry.
+    if (item.length && item[0] && typeof item[0] === 'object') fieldsOfItem(item[0], `${prefix}${prefix ? '.' : ''}0`, depth + 1, out);
+    return out;
+  }
+  for (const [k, v] of Object.entries(item)) {
+    if (out.length >= SHAPE_FIELDS) break;
+    // A key that is itself a value (an object keyed by e-mail or id) is a payload, not a shape.
+    if (VALUEY_SEGMENT.test(k)) continue;
+    const path = `${prefix}${prefix ? '.' : ''}${k}`;
+    if (v && typeof v === 'object') {
+      out.push({ path, kind: kindOf(v) });
+      fieldsOfItem(v, path, depth + 1, out);
+    } else {
+      out.push({ path, kind: kindOf(v) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The shape of a whole answer: where the things are, and what one of them carries.
+ *
+ * Every field seen across the first few items is kept, not just the first item's — a subject line
+ * missing from item 1 and present on item 2 is ordinary, and a recipe written from item 1 alone
+ * would leave the column out.
+ */
+export function shapeOf(data: any): LearnedShape | null {
+  const list = listIn(data);
+  const items = list ? list.items : data && typeof data === 'object' ? [data] : [];
+  if (!items.length) return null;
+  const seen = new Map<string, string>();
+  for (const it of items.slice(0, 5)) {
+    for (const f of fieldsOfItem(it)) if (!seen.has(f.path)) seen.set(f.path, f.kind);
+    if (seen.size >= SHAPE_FIELDS) break;
+  }
+  if (!seen.size) return null;
+  return { listPath: list ? list.key : '', fields: [...seen].map(([path, kind]) => ({ path, kind })), items: items.length };
+}
+
 /**
  * Everything this one call taught us. Pure, cheap, and it runs on every successful call — including
  * the ones whose answers we are not allowed to keep.
@@ -191,6 +291,19 @@ export function lessonsFrom(input: LessonInput): Lesson[] {
         text: `\`${name}\` is not something this action takes, so it was dropped and the call ran without it. Check the spelling against its own list.`,
       });
     }
+  }
+
+  // ---- 6. the SHAPE: where the things are and what they carry ---------------------------------------
+  // Paths and types only, so this works for Gmail and WhatsApp, whose answers are never kept — and
+  // which are therefore exactly the tools with nothing for Codex to write a reading recipe from.
+  const shape = shapeOf(input.data);
+  if (shape) {
+    out.push({
+      key: 'shape',
+      kind: 'shape',
+      shape,
+      text: `Its answer holds ${shape.items} thing${shape.items === 1 ? '' : 's'}${shape.listPath ? ` at \`${shape.listPath}\`` : ' as one record'}, each carrying ${shape.fields.slice(0, 8).map((f) => `\`${f.path}\``).join(', ')}${shape.fields.length > 8 ? ` and ${shape.fields.length - 8} more` : ''}.`,
+    });
   }
 
   // ---- 5. one object where a list was expected — the BEA-1377 shape --------------------------------

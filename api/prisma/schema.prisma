@@ -1976,6 +1976,13 @@ model ToolLesson {
   text     String
   /// The parameter it is about, when it is about one.
   param    String?
+  /// For a `shape` lesson: JSON { listPath, fields:[{path,kind}] } — WHERE the things are and WHAT
+  /// each one carries. Paths and types only, never a value out of anybody's data (BEA-1415).
+  ///
+  /// This is what lets Codex write a reading recipe for Gmail, WhatsApp and Slack, whose answers are
+  /// deliberately never kept — and which are therefore exactly the tools with no saved answer to
+  /// write a recipe from. The first attempt at recipes missed that entirely.
+  shape    String?
   /// The `ToolCall` row that proves it. Always present — every real call writes one.
   callId   String?
   /// The whole saved answer, when this service is one we may keep. Often absent, on purpose.

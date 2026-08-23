@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Lesson, LessonInput, lessonsFrom } from './tool-lesson';
+import { LearnedShape, Lesson, LessonInput, lessonsFrom } from './tool-lesson';
 
 /**
  * How old a lesson may get without being seen again before its confidence drops. A tool used weekly
@@ -18,6 +18,8 @@ export type LearnedFact = {
   lastConfirmedAt: string;
   callId?: string | null;
   sampleId?: string | null;
+  /** Only on a `shape` fact: where the things are and what one carries. Paths and types, no values. */
+  shape?: LearnedShape | null;
 };
 
 /**
@@ -54,6 +56,7 @@ export class ToolLessonService {
               kind: l.kind,
               text: l.text,
               param: l.param || null,
+              shape: l.shape ? JSON.stringify(l.shape) : null,
               callId: input.callId || null,
               sampleId: input.sampleId || null,
             },
@@ -61,6 +64,9 @@ export class ToolLessonService {
               // The words are refreshed too: a vendor that raised its page cap should not be
               // described by a sentence written before it changed.
               text: l.text,
+              // A shape is refreshed on every call: a vendor that added a field should be described
+              // by what it sends today, not by what it sent the first time anybody looked.
+              ...(l.shape ? { shape: JSON.stringify(l.shape) } : {}),
               lastConfirmedAt: now,
               timesSeen: { increment: 1 },
               ...(input.callId ? { callId: input.callId } : {}),
@@ -110,6 +116,7 @@ export class ToolLessonService {
       lastConfirmedAt: new Date(seen).toISOString(),
       callId: r.callId || null,
       sampleId: r.sampleId || null,
+      ...(r.shape ? { shape: safeShape(r.shape) } : {}),
     };
   }
 
@@ -119,9 +126,34 @@ export class ToolLessonService {
   }
 }
 
+function safeShape(raw: any): LearnedShape | null {
+  try {
+    const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return v && Array.isArray(v.fields) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The learned half of a fact card, in the words the owner and Codex both read. */
 export function learnedText(facts: LearnedFact[]): string {
   if (!facts?.length) return '';
   const line = (f: LearnedFact) => `- ${f.text} _(learned by using it — ${f.confidence}${f.timesSeen > 1 ? `, seen ${f.timesSeen} times` : ''})_`;
   return `What using it has taught us:\n${facts.map(line).join('\n')}`;
+}
+
+/**
+ * The learned shape of one action's answer, for the build brief (BEA-1415).
+ *
+ * This is what a reading recipe is written FROM when there is no saved answer — which is the case
+ * for every service whose answers we deliberately never keep, and those are the services whose
+ * shapes the app's general reader is worst at.
+ */
+export function shapeInWords(actionId: string, shape: LearnedShape): string {
+  const lines = [`### ${actionId}`, ''];
+  lines.push(shape.listPath ? `The things are at \`${shape.listPath}\` — ${shape.items} of them in the answer we looked at.` : `The answer IS one record (${shape.items}).`);
+  lines.push('', 'Each one carries:', '');
+  for (const f of shape.fields.slice(0, 60)) lines.push(`- \`${f.path}\` (${f.kind})`);
+  lines.push('', 'These paths were seen in a REAL answer. Nothing else is known to exist — a path not on this list will be refused.');
+  return lines.join('\n');
 }
