@@ -342,3 +342,112 @@ describe('the actions it writes with, from the model to the job', () => {
     expect(BRIEF_TEXT).toContain('An action you do not list here, the agent cannot call');
   });
 });
+
+/**
+ * A brief may not promise what an agent cannot do (BEA-1454).
+ *
+ * His first real brief named `search_brain` and `remember`. A worker can call neither. So it
+ * promised *"recall the saved Master Page id, or save it"*, he read that, approved it, and the
+ * machine could never have done it — a new Notion master page every night, for ever.
+ *
+ * The build did refuse it, four steps later, saying *"this job runs on the engine"* — which is not
+ * even true of a brief-built agent. It belongs here, before he reads it.
+ */
+describe('the brief cannot promise the impossible', () => {
+  const withTools = (tools: string[]) => readProposedBrief({
+    name: 'n',
+    sections: { want: [{ text: 'do it', origin: 'owner' }], success: [{ text: '5 emails', origin: 'owner' }] },
+    sources: [{ actionId: 'svc:gmail.fetch_emails' }],
+    tools,
+    delivery: { whatsapp: true, messageText: 'hi <n>' },
+  })!;
+  const LOOKED = new Set(['svc:gmail.fetch_emails']);
+
+  it('refuses the two his own brief named, and names them back', () => {
+    const wrong = checkProposedBrief(withTools(['search_brain', 'remember']), LOOKED)!;
+    expect(wrong.kind).toBe('cannot-do');
+    expect(wrong.say).toContain('"search_brain"');
+    expect(wrong.say).toContain('"remember"');
+  });
+
+  it('says what an agent CAN do, so it has somewhere to go', () => {
+    const wrong = checkProposedBrief(withTools(['remember']), LOOKED)!;
+    expect(wrong.say).toContain('cannot remember anything between runs');
+    expect(wrong.say).toContain('look the thing up each time by its name');
+  });
+
+  it('allows every outside-service action, including the ones it writes with', () => {
+    expect(checkProposedBrief(withTools(['svc:notion.create_notion_page', 'svc:whatsapp.send_text']), LOOKED)).toBeNull();
+  });
+
+  it('allows a brief with no tools at all — reading is the common case', () => {
+    expect(checkProposedBrief(withTools([]), LOOKED)).toBeNull();
+  });
+
+  it('tells HIM what happened in his own terms, not in tool ids', () => {
+    const said = briefHeldNote({ kind: 'cannot-do', say: '' });
+    expect(said).toContain('cannot remember things between runs');
+    expect(said).not.toContain('svc:');
+    expect(said).toContain('another way round it');
+  });
+
+  it('the builder is told the limit up front, not only when it breaks one', () => {
+    expect(BRIEF_TEXT).toContain('WHAT AN AGENT CAN ACTUALLY DO');
+    expect(BRIEF_TEXT).toContain('CANNOT remember anything between runs');
+    expect(BRIEF_TEXT).toContain('every id in "tools" must start with "svc:"');
+  });
+});
+
+/**
+ * When it runs has to leave the brief (BEA-1454, hole 2).
+ *
+ * He wrote **10PM** in his brief. It was in the brief, he would have approved it, and the code that
+ * turns a brief into an agent did not carry a schedule at all — so it would have been created with
+ * none, and a nightly digest would simply never have fired. The same silent drop as a message with
+ * nowhere to live.
+ */
+describe('the schedule reaches the agent', () => {
+  const brief = (schedule: any, when: string[] = ['10PM']) => ({
+    name: 'n',
+    sections: {
+      want: [{ id: '1', text: 'do it', origin: 'owner' }],
+      when: when.map((t, i) => ({ id: `w${i}`, text: t, origin: 'owner' })),
+      filter: [], output: [], sources: [], success: [], trouble: [], killed: [],
+    },
+    sources: [{ id: 's', actionId: 'svc:gmail.fetch_emails', args: {} }],
+    tools: [],
+    schedule,
+    delivery: { whatsapp: false, telegram: false, messageText: '' },
+  }) as any;
+
+  it('carries a nightly time onto the job, with his own words beside it', () => {
+    const input = briefToAgentInput(brief({ every: 'day', at: '22:00' }));
+    expect(input.schedule).toEqual({ every: 'day', at: '22:00' });
+    expect(input.scheduleText).toBe('10PM');
+  });
+
+  it('carries the other three shapes the scheduler really fires', () => {
+    expect(briefToAgentInput(brief({ every: 'weekday', at: '09:30' })).schedule).toEqual({ every: 'weekday', at: '09:30' });
+    expect(briefToAgentInput(brief({ every: 'week', dow: 1, at: '08:00' })).schedule).toEqual({ every: 'week', dow: 1, at: '08:00' });
+    expect(briefToAgentInput(brief({ every: 'hour', minute: 15 })).schedule).toEqual({ every: 'hour', minute: 15 });
+  });
+
+  it('drops a half-understood time rather than guessing at it', () => {
+    // A schedule the scheduler cannot fire is worse than none: it looks set and never runs.
+    for (const bad of [{ every: 'day', at: '10PM' }, { every: 'day' }, { every: 'week', at: '08:00' }, { every: 'fortnight', at: '08:00' }, null]) {
+      expect(briefToAgentInput(brief(bad)).schedule).toBeUndefined();
+    }
+  });
+
+  it('a job with no schedule is still made — it just waits for him to press Run', () => {
+    const input = briefToAgentInput(brief(null, []));
+    expect(input.schedule).toBeUndefined();
+    expect(input.enabled).toBe(false);
+  });
+
+  it('the builder is told the exact shapes, because a wrong one never fires', () => {
+    expect(BRIEF_TEXT).toContain('"schedule"');
+    expect(BRIEF_TEXT).toContain('{"every":"week","dow":0-6,"at":"HH:MM"}');
+    expect(BRIEF_TEXT).toContain('or it never fires');
+  });
+});

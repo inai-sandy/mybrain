@@ -621,6 +621,7 @@ export class AgentAreasService {
       // What it WRITES with (BEA-1453). Written on one side and not the other is how a field gets
       // saved and silently dropped — three times in one night, so: named here too.
       tools: proposed.tools || [],
+      schedule: proposed.schedule || null,
       delivery: proposed.delivery,
       // The WHOLE conversation goes with it — his decision, 2026-08-22: Codex reads all of it, and
       // the brief sitting on top is what makes that safe.
