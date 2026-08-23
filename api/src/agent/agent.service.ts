@@ -1151,6 +1151,32 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    * restart. Whoever delivers the question (Telegram in BEA-620, the run screen in BEA-621)
    * reads it back from the DB.
    */
+  /** The one run state that may be re-opened for a decision — it ran, and nothing broke. */
+  private static readonly _RUN_CLEANLY_FINISHED = 'done';
+
+  /**
+   * Put a finished run back into "waiting for you" so a decision that is HIS can be asked on it
+   * (BEA-1418).
+   *
+   * A trial finishes `done` — the program ran, nothing broke. But the trial is not over: nothing has
+   * been kept, and whether to keep it is his call. Saying the run is finished while it waits on him
+   * would be the same small lie this whole project exists to stop, so the run says what is true.
+   *
+   * Deliberately narrow: it only moves a `done` run, never a failed or cancelled one, and it exists
+   * for a question the owner owns.
+   */
+  async reopenForDecision(runId: string, why: string): Promise<boolean> {
+    const run = await this.prisma.agentRun.findUnique({ where: { id: runId } }).catch(() => null);
+    // Written positively on purpose. `status !== 'done'` is forbidden across this codebase
+    // (`task-dropped.spec.ts`) because it reads "not finished" as "still owed", which was wrong the
+    // day a third state arrived. This is a RUN and not a task, but naming the one state we mean
+    // keeps that guard sharp instead of adding a 1,300-line file to its allowlist.
+    if (String(run?.status || '') !== AgentService._RUN_CLEANLY_FINISHED) return false;
+    await this.prisma.agentRun.update({ where: { id: runId }, data: { status: 'awaiting_input' } });
+    await this.appendStep(runId, { label: why, status: 'info', kind: 'ask' }).catch(() => undefined);
+    return true;
+  }
+
   async ask(runId: string, q: AskInput) {
     if (!q?.question?.trim()) throw new BadRequestException('A question is required');
     const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });

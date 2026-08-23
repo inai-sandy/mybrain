@@ -6,6 +6,23 @@ import { briefToAgentInput } from '../agent/brief';
 import { WorkerBuildService } from './worker-build.service';
 import { WorkerDispatchService } from './worker-dispatch.service';
 import { TrialService, TrialView, whyNotCreatable } from './trial.service';
+import { OwnerAskService } from './owner-ask.service';
+import { AgentService as _Agent } from '../agent/agent.service';
+
+/** The two things he may say back. Anything else is treated as "send it back". */
+export const KEEP_IT = 'Keep it';
+export const SEND_BACK = 'Send it back';
+
+/**
+ * Did he say yes? Deliberately narrow: only a clear yes keeps an agent. Anything else — including
+ * silence, a question, or a sentence about what was wrong — sends it back. Keeping something he did
+ * not clearly ask to keep is the one mistake this whole design exists to prevent.
+ */
+export function saidKeepIt(answer: string): boolean {
+  const t = String(answer || '').trim().toLowerCase().replace(/[.!]+$/, '');
+  if (!t) return false;
+  return /^(keep it|keep|yes|yeah|yep|ya|ok|okay|good|perfect|create it|create|1)$/.test(t);
+}
 
 /**
  * From an approved brief to a run he can look at (BEA-1408, "Brief First").
@@ -34,7 +51,43 @@ export class BriefTrialService {
     private readonly agent: AgentService,
     private readonly builds: WorkerBuildService,
     private readonly dispatch: WorkerDispatchService,
+    // Optional + LAST — spec harnesses build this positionally with fewer args.
+    private readonly owner?: OwnerAskService,
   ) {}
+
+  onModuleInit() {
+    // Hear his answer whichever road it came down — WhatsApp, the run screen, Telegram (BEA-1418).
+    this.owner?.setAnswerWatcher?.((runId, answer) => this.onAnswer(runId, answer));
+  }
+
+  /**
+   * He answered a "keep it or send it back" question. Only a clear yes keeps it; everything else is
+   * his sentence about what was wrong, and goes back into the conversation as his words.
+   *
+   * `create()` still decides — WhatsApp is another way to press the button, never a way around it.
+   */
+  private async onAnswer(runId: string, answer: string): Promise<void> {
+    const trial = await this.prisma?.agentTrial?.findFirst?.({ where: { runId: String(runId) }, orderBy: { createdAt: 'desc' } }).catch(() => null);
+    if (!trial) return;
+    const areaId = String(trial.areaId);
+    try {
+      if (saidKeepIt(answer)) {
+        const out = await this.create(areaId);
+        await this.agent.appendStep(runId, {
+          label: out.ok ? 'You kept it. It is yours now.' : `Not kept — ${out.whyNot}`,
+          status: out.ok ? 'done' : 'info',
+          kind: 'ask',
+        }).catch(() => undefined);
+      } else {
+        await this.sendBack(areaId, answer);
+        await this.agent.appendStep(runId, { label: `Sent back: ${String(answer).slice(0, 160)}`, status: 'done', kind: 'ask' }).catch(() => undefined);
+      }
+    } catch (e: any) {
+      this.log.warn(`could not act on his answer for trial ${trial.id}: ${e?.message || e}`);
+    } finally {
+      await this.agent.finishRun(runId, { status: 'done' }).catch(() => undefined);
+    }
+  }
 
   // ---- what the screen asks for --------------------------------------------------------------------
 
@@ -101,10 +154,49 @@ export class BriefTrialService {
         credits: await this.creditsOf(run.id),
         aiTokens: Number((finished as any)?.aiTokens) || 0,
       });
+      if (ok) await this.askHim(run.id, brief).catch((e: any) => this.log.warn(`could not ask him on WhatsApp: ${e?.message || e}`));
     } catch (e: any) {
       this.log.warn(`trial ${trial.id} failed: ${e?.message || e}`);
       await this.trials.fail(trial.id, String(e?.message || e));
     }
+  }
+
+  /**
+   * Send him the result and wait — for days, if that is how long he takes (BEA-1418).
+   *
+   * A build turn plus a trial takes minutes, and some agents will take much longer. Sitting on a
+   * screen waiting is not how he works; his phone is. What goes out is the message the agent would
+   * have sent him, one line of context, and a link — never the rows, because a 47-row table is not
+   * going to a phone.
+   *
+   * **If he never answers, nothing happens.** No default, no timeout that keeps an agent he never
+   * asked to keep.
+   */
+  private async askHim(runId: string, brief: any): Promise<void> {
+    const trial = await this.trials.latest(String(brief.areaId), Number(brief.version));
+    if (!trial || trial.status !== 'passed') return;
+    const reopened = await this.agent.reopenForDecision(runId, 'Waiting for you to say whether to keep it.');
+    if (!reopened) return;
+
+    const read = trial.fetched > 0 ? `read ${trial.fetched}, kept ${trial.rowCount}` : `${trial.rowCount} row${trial.rowCount === 1 ? '' : 's'}`;
+    const cost = trial.credits === 0 ? 'cost nothing' : `cost ${trial.credits} credit${trial.credits === 1 ? '' : 's'}`;
+    const question = [
+      `"${brief.name || 'Your new agent'}" ran once. It ${read}, ${cost}, and nothing was saved or sent.`,
+      trial.message ? `\nThis is what it would send you:\n\n${trial.message}` : '',
+      '\nKeep it? Reply "keep it", or tell me what was wrong.',
+    ].filter(Boolean).join('\n');
+
+    const wp: any = await this.agent.ask(runId, {
+      question,
+      kind: 'choice',
+      options: [KEEP_IT, SEND_BACK],
+      // No default and no expiry ON PURPOSE. A timeout that keeps an agent he never approved would
+      // walk straight past the gate this whole design is.
+      askedVia: 'whatsapp',
+    });
+    await Promise.resolve(
+      this.owner?.send?.(runId, String(wp?.id || ''), { jobName: String(brief.name || 'Your new agent'), question, choices: [KEEP_IT, SEND_BACK] }),
+    ).catch((e: any) => this.log.warn(`the message did not go out: ${e?.message || e}`));
   }
 
   /** His own "what it worked means" sentence, read back to him beside the result. */
