@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, ChevronRight, Eye, Loader2, Pencil, Plus, RotateCcw, Sparkles, User, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Eye, Loader2, Pencil, Plus, RotateCcw, Sparkles, User, X } from 'lucide-react';
 
 /**
  * The brief, on one screen (BEA-1406, "Brief First").
@@ -167,6 +167,41 @@ function Line({ line, onEdit, onStrike, onProof, busy }: {
 
 // ---- one section ---------------------------------------------------------------------------------
 
+/**
+ * His own lines, folded away by default (BEA-1416).
+ *
+ * He wrote them. Re-reading them is how a brief becomes a wall of text he scrolls past, and a brief
+ * he scrolls past is a rubber stamp. What has to be in front of him is the short list of things the
+ * AI decided on its own.
+ */
+function MineFold({ lines, onEdit, onStrike, onProof, busy }: {
+  lines: BriefLine[];
+  onEdit: (id: string, text: string) => void;
+  onStrike: (id: string, struck: boolean) => void;
+  onProof?: (callId: string) => void;
+  busy?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!lines.length) return null;
+  if (open) {
+    return (
+      <ul className="mt-1 space-y-0.5">
+        {lines.map((l) => <Line key={l.id} line={l} onEdit={onEdit} onStrike={onStrike} onProof={onProof} busy={busy} />)}
+        <li>
+          <button data-testid="mine-hide" onClick={() => setOpen(false)} className="mt-0.5 min-h-[32px] px-1 text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">Hide what you said</button>
+        </li>
+      </ul>
+    );
+  }
+  return (
+    <button data-testid="mine-show" onClick={() => setOpen(true)}
+      className="mt-1 inline-flex min-h-[32px] items-center gap-1 rounded-md px-1 text-xs text-zinc-500 hover:text-violet-700 dark:hover:text-violet-300">
+      <ChevronDown className="h-3.5 w-3.5" />
+      {lines.length === 1 ? 'Your own line' : `Your own ${lines.length} lines`}
+    </button>
+  );
+}
+
 function Section({ k, lines, refusals, onEdit, onStrike, onAdd, onProof, busy, children }: {
   k: SectionKey;
   lines: BriefLine[];
@@ -180,15 +215,18 @@ function Section({ k, lines, refusals, onEdit, onStrike, onAdd, onProof, busy, c
 }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
-  const mine = refusals.filter((r) => r.section === k || (k === 'sources' && r.section === 'sources') || (k === 'output' && r.section === 'output'));
+  const mineRefusals = refusals.filter((r) => r.section === k || (k === 'sources' && r.section === 'sources') || (k === 'output' && r.section === 'output'));
   const shown = lines || [];
+  // The AI's guesses and what a tool really showed stay in front; his own words fold away.
+  const toCheck = shown.filter((l) => l.origin !== 'owner');
+  const mine = shown.filter((l) => l.origin === 'owner');
 
   return (
     <section data-testid={`brief-section-${k}`} className="border-t border-zinc-200 pt-4 first:border-t-0 first:pt-0 dark:border-zinc-800">
       <h2 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{SECTION_LABELS[k]}</h2>
 
       {/* The reason sits BESIDE the thing that is missing — not in a toast that disappears. */}
-      {mine.map((r, i) => (
+      {mineRefusals.map((r, i) => (
         <p key={i} data-testid={`refusal-${k}`} className="mt-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-900 ring-1 ring-inset ring-amber-500/30 dark:bg-amber-400/10 dark:text-amber-200 dark:ring-amber-400/30">
           {r.why}
         </p>
@@ -197,9 +235,13 @@ function Section({ k, lines, refusals, onEdit, onStrike, onAdd, onProof, busy, c
       {shown.length === 0 && !children ? (
         <p className="mt-1.5 text-sm text-zinc-400 dark:text-zinc-500">{SECTION_EMPTY[k]}</p>
       ) : (
-        <ul className="mt-1 space-y-0.5">
-          {shown.map((l) => <Line key={l.id} line={l} onEdit={onEdit} onStrike={onStrike} onProof={onProof} busy={busy} />)}
-        </ul>
+        <>
+          {/* What the AI decided on its own comes first — it is the only part that needs checking. */}
+          <ul className="mt-1 space-y-0.5">
+            {toCheck.map((l) => <Line key={l.id} line={l} onEdit={onEdit} onStrike={onStrike} onProof={onProof} busy={busy} />)}
+          </ul>
+          <MineFold lines={mine} onEdit={onEdit} onStrike={onStrike} onProof={onProof} busy={busy} />
+        </>
       )}
 
       {children}
