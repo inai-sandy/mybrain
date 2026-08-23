@@ -39,6 +39,8 @@ export type ProposedBrief = {
   name: string;
   sections: BriefSections;
   sources: BriefSource[];
+  /** What it DOES with the information — writing, messaging. Empty for a job that only reads. */
+  tools: string[];
   delivery: BriefDelivery;
 };
 
@@ -76,6 +78,7 @@ export function readProposedBrief(raw: any): ProposedBrief | null {
     name: String(raw.name || '').trim().slice(0, 120),
     sections,
     sources: readSources(raw.sources),
+    tools: readToolIds(raw.tools),
     delivery: readDelivery(raw.delivery),
   };
 }
@@ -114,6 +117,17 @@ function readSources(raw: any): BriefSource[] {
       ...(s.pages === 'all' ? { pages: 'all' as const } : Number(s.pages) > 1 ? { pages: Number(s.pages) } : {}),
       ...(s.saw ? { saw: String(s.saw).slice(0, 400) } : {}),
     });
+  }
+  return out;
+}
+
+/** The actions it may use beyond its sources. Ids only; anything unreadable is dropped. */
+function readToolIds(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const t of raw) {
+    const id = String(typeof t === 'string' ? t : t?.actionId || t?.id || '').trim();
+    if (id && !out.includes(id)) out.push(id);
   }
   return out;
 }
@@ -215,6 +229,7 @@ approves, and it is the only thing that gets built.
     "trouble": [{"text": "WhatsApp me and wait for my answer.", "origin": "owner"}]
   },
   "sources":  [{"actionId": "svc:gmail.fetch_emails", "args": {"query": "newer_than:1d"}, "pages": "all"}],
+  "tools":    ["svc:notion.create_notion_page", "svc:notion.add_multiple_page_content"],
   "delivery": {"whatsapp": true, "telegram": false, "messageText": "Last night — <how many> important emails\\n\\nWORK\\n• <sender> — <one line>"}
 }}
 
@@ -232,7 +247,11 @@ THE RULES, which are checked in code and not left to you:
      the real data goes. There is nowhere else for those words to live.
   4. SAY WHAT A GOOD RUN LOOKS LIKE, in his words. "At least 20 emails read." Without it, a run that
      reads one email calls itself a success — which is exactly what happened to him for weeks.
-  5. "pages": "all" means keep asking until the source runs out. Use it when he says "all" or
+  5. "tools" IS NOT OPTIONAL when it does anything but read. A source is where information comes
+     FROM; "tools" is what it does with it — the page it creates, the row it writes, the message it
+     sends. **An action you do not list here, the agent cannot call.** List every one, by its exact
+     id, fetched with "lookup" first.
+  6. "pages": "all" means keep asking until the source runs out. Use it when he says "all" or
      "every"; a number is a guess about how much of his life fits on a page.
 
 Nothing is built when you send a brief. He reads it, runs it once for real, and only then keeps it.`;
