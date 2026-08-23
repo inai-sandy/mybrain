@@ -183,15 +183,18 @@ describe('builder (BEA-1104)', () => {
     expect(st.log.at(-1).text).toMatch(/AI budget is used up/); // persisted, so a reload still says it
   });
 
-  it('create requires a proposal, then clears it and keeps the log', async () => {
+  it('refuses to create anything from the OLD road, and says what to do instead (BEA-1453)', async () => {
+    // This test used to assert that a `spec` created a live agent. That road is gone. It made an
+    // agent switched ON with no brief to read and no run to watch, and a third model drew its flow
+    // half a minute later — which is exactly how his first real agent was built, and why he asked
+    // for the old road to go.
     const { svc } = build(JSON.stringify({ reply: 'ok', spec: { area: { name: 'X', icon: '🤖' }, jobs: [{ name: 'j', task: 't' }] } }));
-    await expect(svc.builderCreate()).rejects.toThrow(/no proposal/);
+    await expect(svc.builderCreate()).rejects.toThrow(/no brief to open yet/i);
     await svc.builderChat('make X');
-    const res = await svc.builderCreate();
-    expect(res.ok).toBe(true);
+    // A conversation still holding an old spec is told plainly, and nothing is created.
+    await expect(svc.builderCreate()).rejects.toThrow(/older way of building agents/i);
     const st = await svc.builderState();
-    expect(st.spec).toBeNull();
-    expect(st.log.at(-1).text).toContain('Created ✓');
+    expect(st.log.at(-1).text).not.toContain('Created ✓');
   });
 });
 

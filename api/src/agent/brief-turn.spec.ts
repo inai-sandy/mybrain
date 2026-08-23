@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { AI_LINES_MAX } from './brief';
+import { AI_LINES_MAX, briefToAgentInput } from './brief';
 import { BRIEF_TEXT, briefCardOf, briefHeldNote, briefRequestOf, checkProposedBrief, readProposedBrief } from './brief-turn';
 
 /**
@@ -243,5 +243,59 @@ describe('what the conversation looked at reaches the brief', () => {
       { kind: 'sample', ok: true, actionId: 'svc:a.b', callId: 'second' },
     ]);
     expect(proof.get('svc:a.b')).toBe('second');
+  });
+});
+
+/**
+ * ONE ROAD (BEA-1453) — his instruction: *"remove the old road, make everything go through the
+ * brief."*
+ *
+ * He built his first real agent and it never touched any of this: 0 briefs, 0 trials, 0 Codex
+ * builds. The conversation said *"this needs real thinking, so I'll build it as an agent with a job,
+ * not a fixed data pull"* — and that one sentence routed him past the brief, the trial and the gate,
+ * created the agent switched ON, and let a third model draw its flow half a minute later.
+ */
+describe('a brief can describe an agent that WRITES, not only one that reads', () => {
+  const brief = (over: any = {}) => ({
+    name: 'Email digest',
+    sections: {
+      want: [{ id: '1', text: 'Summarise my important emails into a Notion page each night.', origin: 'owner' }],
+      filter: [], output: [], sources: [], when: [], success: [], trouble: [], killed: [],
+    },
+    sources: [{ id: 'svc:gmail.fetch_emails', actionId: 'svc:gmail.fetch_emails', args: {} }],
+    tools: ['svc:notion.create_notion_page', 'svc:notion.add_multiple_page_content'],
+    delivery: { whatsapp: true, telegram: false, messageText: 'Tonight — <n> emails\n<link>' },
+    ...over,
+  }) as any;
+
+  it('carries what it WRITES with, not only where it reads from', () => {
+    // Without this a brief could only ever describe reading — which is exactly why his Notion job
+    // had to take the old road.
+    const input = briefToAgentInput(brief());
+    expect(input.tools).toContain('svc:notion.create_notion_page');
+    expect(input.tools).toContain('svc:notion.add_multiple_page_content');
+    expect(input.tools).toContain('svc:gmail.fetch_emails');
+  });
+
+  it('lists every action exactly once, however it was named', () => {
+    const input = briefToAgentInput(brief({ tools: ['svc:gmail.fetch_emails', 'svc:gmail.fetch_emails'] }));
+    expect(input.tools.filter((t) => t === 'svc:gmail.fetch_emails').length).toBe(1);
+  });
+
+  it('is still created switched OFF and on the worker road', () => {
+    const input = briefToAgentInput(brief());
+    expect(input.enabled).toBe(false);
+    expect(input.useWorker).toBe(true);
+    expect(input.origin).toBe('brief');
+  });
+
+  it('a brief with no tools of its own still works — reading is the common case', () => {
+    expect(briefToAgentInput(brief({ tools: [] })).tools).toEqual(['svc:gmail.fetch_emails']);
+    expect(briefToAgentInput(brief({ tools: undefined })).tools).toEqual(['svc:gmail.fetch_emails']);
+  });
+
+  it('drops junk rather than putting it on the job', () => {
+    expect(briefToAgentInput(brief({ tools: ['', '  ', null, 'svc:notion.create_notion_page'] })).tools)
+      .toEqual(['svc:notion.create_notion_page', 'svc:gmail.fetch_emails']);
   });
 });

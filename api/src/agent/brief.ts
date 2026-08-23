@@ -116,6 +116,15 @@ export type TranscriptTurn = {
 export type Brief = {
   id: string;
   areaId: string;
+  /**
+   * Actions the agent may use BEYOND its sources (BEA-1453) — the ones it writes with, or messages
+   * with. A source is where information comes from; these are what it does with it.
+   *
+   * Without this a brief could only ever describe reading. His first real agent needed to create
+   * Notion pages and send a message, and the only road that could express that was the old one —
+   * which is how he ended up with an agent nobody had watched run.
+   */
+  tools?: string[];
   version: number;
   status: 'draft' | 'approved';
   name: string;
@@ -198,6 +207,17 @@ export function readSources(raw: any): BriefSource[] {
       ...(s.evidence && s.evidence.callId ? { evidence: { callId: String(s.evidence.callId), ...(s.evidence.sampleId ? { sampleId: String(s.evidence.sampleId) } : {}), ...(s.evidence.actionId ? { actionId: String(s.evidence.actionId) } : {}) } } : {}),
       ...(s.saw ? { saw: String(s.saw) } : {}),
     }));
+}
+
+/** The actions a brief says its agent may use. Ids only, deduped, junk dropped. */
+export function readTools(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const t of raw) {
+    const id = String(t || '').trim();
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 export function readTranscript(raw: any): TranscriptTurn[] {
@@ -315,7 +335,7 @@ export function sourceName(s: BriefSource): string {
  */
 export function forCodexPayload(brief: Brief): {
   decides: string;
-  brief: { name: string; version: number; approvedAt?: string | null; sections: { key: string; label: string; lines: BriefLine[] }[]; sources: BriefSource[]; delivery: BriefDelivery };
+  brief: { name: string; version: number; approvedAt?: string | null; sections: { key: string; label: string; lines: BriefLine[] }[]; sources: BriefSource[]; tools: string[]; delivery: BriefDelivery };
   transcript: TranscriptTurn[];
 } {
   return {
@@ -330,6 +350,7 @@ export function forCodexPayload(brief: Brief): {
       approvedAt: brief.approvedAt || null,
       sections: SECTION_KEYS.map((k) => ({ key: k, label: SECTION_LABELS[k], lines: brief.sections[k] || [] })),
       sources: brief.sources,
+      tools: brief.tools || [],
       delivery: brief.delivery,
     },
     transcript: brief.transcript,
@@ -362,6 +383,12 @@ export function briefToAgentInput(brief: Brief): {
 } {
   const tools: string[] = [];
   const toolArgs: Record<string, any> = {};
+  // What it DOES with the information, not only where it comes from (BEA-1453). The worker route
+  // already refuses any action that is not on this job, so this list is also the boundary.
+  for (const t of brief.tools || []) {
+    const id = String(t || '').trim();
+    if (id && !tools.includes(id)) tools.push(id);
+  }
   for (const s of brief.sources || []) {
     if (!tools.includes(s.actionId)) tools.push(s.actionId);
     // `_pages` is how the runner is told to keep going; `plainArgs` strips it before the vendor

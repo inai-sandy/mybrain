@@ -23,7 +23,12 @@ import { WorkerTokenService } from './worker-token.service';
  * model or its own prompt budget, and a helper key that is not registered would fall through to the
  * app's general model (the trap `completeHelper` exists to close).
  */
-export const WORKER_HELPERS = ['social-shape', 'social-alert'];
+/**
+ * The named models a worker may use. `worker-think` is its own judgement step (BEA-1453) -- the thing
+ * a worker could not do before, and the reason "this needs real thinking" routed a whole agent
+ * around the brief, the trial and the gate.
+ */
+export const WORKER_HELPERS = ['social-shape', 'social-alert', 'worker-think'];
 
 /** The most tokens one generic worker AI call may ask for. The shaping mode has its own ceiling. */
 const AI_MAX_TOKENS = SHAPE_MAX_TOKENS;

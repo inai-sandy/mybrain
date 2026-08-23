@@ -113,6 +113,14 @@ export class AgentFlowSyncService implements OnModuleInit, AgentFlowSync {
    * the background. A hand-drawn locked flow (AI News Daily, BEA-1259) is never re-planned.
    */
   async planNormal(agent: any): Promise<void> {
+    // A brief-built agent is NEVER planned (BEA-1453).
+    //
+    // The owner's first real agent got a 16-node graph from a model he had never spoken to, thirty
+    // seconds after he pressed Create, and it put the Notion write in a branch racing the Gmail
+    // fetch. No screen shows him that before it runs. A brief-built agent runs a PROGRAM Codex
+    // wrote and tested, so there is nothing here to guess at — and a picture drawn by guessing is
+    // worse than no picture, because it looks like an explanation.
+    if (String(agent?.origin || '') === 'brief') return;
     const prompt = String(agent.prompt || '').trim();
     if (!prompt) return; // nothing to plan from yet
     let flow: any = (await this.flows.list(agent.id))[0] || null;

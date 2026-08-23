@@ -1903,6 +1903,10 @@ model AgentBrief {
   /// JSON [{ id, actionId, args, evidence:{callId,sampleId?}, saw }] — the machine half of "where it
   /// comes from"; `evidence` is what makes "look before you plan" checkable instead of promised.
   sources  String @default("[]")
+  /// JSON string[] — actions the agent may USE beyond its sources: what it writes with, what it
+  /// messages with (BEA-1453). A brief that could only describe reading is why his first real agent
+  /// had to take the old road.
+  tools    String @default("[]")
   /// JSON { whatsapp, telegram, messageText } — the exact words that will arrive on his phone.
   delivery String @default("{}")
   /// JSON [{ id, who, text, at, kind?, struck? }] — the whole talk.

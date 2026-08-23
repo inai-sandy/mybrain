@@ -1188,16 +1188,7 @@ Reply with ONLY JSON, no prose:
  "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
  "lookup": null, or {"what":"services"} / {"what":"actions","service":"<slug>","words":"<what you need>"} / {"what":"action","actionId":"<exact id>"} — ask what tools exist instead of guessing (then send nothing else),
  "brief": null, or THE BRIEF — see "WRITING THE BRIEF" below. **This is how a DIRECT agent is described now.** It is what he reads and approves, and the only thing that gets built. Nothing is built when you send one: he reads it, watches it run once for real, and only then keeps it.,
- "job": null, or (ORDINARY jobs only) the COMPLETE job:
- {
-  "name": "<short name>", "icon": "<emoji>",
-  "task": "<numbered plain-English steps it runs each time>",
-  "outcome": "<what a good result looks like, in one or two sentences>",
-  "checks": ["<short testable statement>", "..."],
-  "tools": [{"id":"<exact id from the list>","why":"<one line>"}],
-  "schedule": null or {"every":"day","at":"HH:MM"}/{"every":"weekday","at":"HH:MM"}/{"every":"week","dow":0-6,"at":"HH:MM"}/{"every":"hour","minute":0},
-  "scheduleText": "<plain sentence or null>", "depth": "quick|standard|deep", "notifyWhatsApp": true|false
- }
+ "job": null. There is no "job" any more — every job is a brief. It is what he reads, and it is the only thing that gets built.
 }`,
 });
 
@@ -1234,11 +1225,7 @@ Reply with ONLY JSON, no prose:
  "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
  "lookup": null, or {"what":"services"} / {"what":"actions","service":"<slug>","words":"<what you need>"} / {"what":"action","actionId":"<exact id>"} — ask what tools exist instead of guessing (then send nothing else),
  "brief": null, or THE BRIEF — see "WRITING THE BRIEF" below. **This is how a DIRECT agent is described now.** It is what he reads and approves, and the only thing that gets built. Nothing is built when you send one: he reads it, watches it run once for real, and only then keeps it.,
- "spec": null, or (ORDINARY agents only) the COMPLETE spec:
- {
-  "area": {"name":"...","icon":"<emoji>","color":"<hex>","description":"<one line>","tools":[{"kind":"skill|api|mcp|cli","name":"...","note":"why"}]},
-  "jobs": [{"name":"...","icon":"<emoji>","task":"<numbered plain steps>","outcome":"<optional>","schedule":null or {"every":"day","at":"HH:MM"}/{"every":"weekday","at":"HH:MM"}/{"every":"week","dow":0-6,"at":"HH:MM"}/{"every":"hour","minute":0}/{"event":"bookmark.added|journal.added|whatsapp.reply"},"scheduleText":"<plain sentence or null>","autonomy":"cautious|balanced|autopilot","notifyWhatsApp":true|false,"keepDays":30|90|365|null,"evals":["1-2 test inputs"]}]
- }
+ "spec": null. There is no "spec" any more — every agent is a brief. It is what he reads, and it is the only thing that gets built.
 }`,
 });
 

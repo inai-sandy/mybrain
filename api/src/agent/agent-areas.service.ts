@@ -182,40 +182,24 @@ export class AgentAreasService {
       return { ok: true as const, jobId: created.id, url: `/agent/a/${created.id}`, name: created.name };
     }
 
+    // ONE ROAD (BEA-1453). The old `job` road made a job switched ON, with no brief to read and no
+    // run to watch, and a third model drew its flow afterwards. New jobs go through the brief.
+    if (st.brief) {
+      const area = await this.get(areaId).catch(() => null);
+      const saved = await this.persistBrief(areaId, st.brief, st.log || []);
+      st.log.push({ who: 'ai', text: 'The brief is ready to read — nothing is built yet.', at: new Date().toISOString() });
+      st.brief = null; st.job = null; st.plan = null; st.cost = null;
+      await this.jobSave(areaId, st);
+      return { ok: true as const, briefId: saved.id, url: `/agent/ar/${areaId}/brief`, name: String((area as any)?.name || saved.name || 'this agent') };
+    }
+
     const j = st.job;
-    if (!j?.name || !j?.task) throw new BadRequestException('There is no job to create yet — keep chatting.');
-
-    const proposedTools: string[] = Array.isArray(j.tools) ? j.tools.map((t: any) => (typeof t === 'string' ? t : t?.id)).filter(Boolean) : [];
-    const tools = Array.isArray(overrides?.tools) ? overrides!.tools! : proposedTools;
-    let checks: string[] = Array.isArray(overrides?.checks) ? overrides!.checks! : (Array.isArray(j.checks) ? j.checks : []);
-    checks = checks.map((c: any) => String(c).trim()).filter(Boolean);
-    // A job with nothing to check against can never be graded (BEA-1172/1173). If the conversation
-    // produced an Outcome but no checks, use the Outcome itself as the one check — derived from what
-    // they actually said, not invented.
-    if (!checks.length && j.outcome) checks = [String(j.outcome).trim().slice(0, 300)];
-
-    // Tools + WhatsApp go in WITH the create (BEA-1366): the flow is planned on save, inside the
-    // job's toolbox — a patch straight after would have planned it against no toolbox at all.
-    const created: any = await this.agentSvc.createAgent({
-      areaId,
-      name: String(j.name).trim().slice(0, 120),
-      icon: j.icon || undefined,
-      // The goal on the ordinary job too (BEA-1378) — "For: <goal>" onto its description.
-      description: withGoal(j.description, st.goal),
-      prompt: String(j.task).trim(),
-      rubric: j.outcome ? String(j.outcome).slice(0, 2000) : undefined,
-      defaultDepth: ['quick', 'standard', 'deep'].includes(j.depth) ? j.depth : undefined,
-      schedule: j.schedule && typeof j.schedule === 'object' ? j.schedule : undefined,
-      scheduleText: j.scheduleText || undefined,
-      evals: checks.slice(0, 12).map((input: any) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input: String(input).slice(0, 300) })),
-      ...(tools.length ? { tools: tools.slice(0, 60) } : {}),
-      ...(j.notifyWhatsApp != null ? { notifyWhatsApp: !!j.notifyWhatsApp } : {}),
-    } as any);
-
-    st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
-    st.job = null; st.plan = null; st.cost = null; st.goal = null;
-    await this.jobSave(areaId, st);
-    return { ok: true as const, jobId: created.id, url: `/agent/a/${created.id}`, name: created.name };
+    if (j?.name && j?.task) {
+      throw new BadRequestException(
+        'This conversation is from the older way of building jobs, which made them without showing you anything first. Start a new one and I will write you a brief you can read, and run it once before you keep it.',
+      );
+    }
+    throw new BadRequestException('There is no brief to open yet — keep chatting, and I will write one when I understand the job.');
   }
 
   // ---- The thinking builder's turn (BEA-1371) — shared by both chat builders ---------------------
@@ -674,12 +658,15 @@ export class AgentAreasService {
       await this.builderSave(st);
       return { ok: true as const, areaId: created.areaId, agentId: created.id, url: `/agent/a/${created.id}`, jobs: [{ id: created.id, name: created.name }] };
     }
-    if (!st.spec) throw new BadRequestException('There is no proposal to create yet — keep chatting.');
-    const res = await this.createFromSpec(st.spec, st.goal, folderId);
-    st.log.push({ who: 'ai', text: `Created ✓ — "${st.spec.area.name}" with ${res.jobs.length} job(s).`, at: new Date().toISOString() });
-    st.spec = null; st.plan = null; st.cost = null; st.seed = null; st.goal = null;
-    await this.builderSave(st);
-    return res;
+    // ONE ROAD (BEA-1453). A spec created an agent switched ON, with no brief to read and no run to
+    // watch — and a third model drew its flow half a minute later. That is how his first real agent
+    // was made, and it is why he asked for the old road to go.
+    if (st.spec) {
+      throw new BadRequestException(
+        'This conversation is from the older way of building agents, which made them without showing you anything first. Start a new one and I will write you a brief you can read, and run it once before you keep it.',
+      );
+    }
+    throw new BadRequestException('There is no brief to open yet — keep chatting, and I will write one when I understand the job.');
   }
 
   /**
