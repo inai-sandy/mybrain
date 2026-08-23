@@ -552,13 +552,20 @@ describe('the pieces (BEA-1371)', () => {
     expect(parseBuilderJson('{"reply":"Here is the plan.\\nIt fetches a lot","plan":{"name":"x","sources":[{"kind":"sou')).toEqual({ reply: 'Here is the plan.\nIt fetches a lot', cutOff: true });
   });
 
-  it('both prompt defaults carry the facts, blocks, sample, budget and rules slots, the plan shape and the goal field (BEA-1378)', async () => {
+  it('both prompt defaults carry the slots, the BRIEF shape and the goal field (BEA-1424)', async () => {
     const prisma: any = { setting: { findUnique: async () => null } };
     for (const key of ['agent.builder', 'agent.jobBuilder'] as const) {
       const tpl = await new PromptsService(prisma).get(key);
       for (const slot of ['{{conversation}}', '{{facts}}', '{{tools}}', '{{blocks}}', '{{sample}}', '{{budget}}', '{{rules}}']) expect(tpl).toContain(slot);
-      expect(tpl).toContain('"plan": null while something important is still open');
-      expect(tpl).toContain('"kind":"creators"');
+      // The plan shape is GONE from the builder's contract (BEA-1424). A plan was eight fixed boxes,
+      // and anything he asked for that did not fit one was silently dropped — which is how he spent
+      // weeks receiving "finished · 5 rows" instead of the summary he asked for. A direct agent is
+      // described by a brief now, and offering the model both roads simply made it take the old one.
+      expect(tpl).not.toContain('"plan": null while something important is still open');
+      expect(tpl).toContain('"brief": null, or THE BRIEF');
+      expect(tpl).toContain('There is no "plan" any more');
+      // It may ask what tools exist rather than working from a shortlist somebody chose for it.
+      expect(tpl).toContain('"lookup": null');
       // The goal field (BEA-1378): the model repeats the owner's goal in every answer once known.
       expect(tpl).toContain('"goal": null until the owner has said what the result is FOR');
     }
@@ -794,7 +801,10 @@ describe('when it runs and where it goes are settled before the plan; the cost i
     const { svc, prompts } = harness({ answer: () => ({ reply: 'ok', plan: null }) });
     await svc.builderChat('Get me all the Instagram posts related to Smart Home in India from the last 30 days into a Google Sheet.');
     expect(prompts[0]).toMatch(/Cost numbers are the SERVER's/);
-    expect(prompts[0]).toMatch(/the server writes the ≈ cost line under it/); // the prompt default no longer asks for ≈ figures in prose
+    // The reply line no longer describes a plan in prose at all (BEA-1424): with a brief it says one
+    // short sentence, and he reads the brief on its own screen. Describing it in the chat is how it
+    // became the wall of text he scrolled past.
+    expect(prompts[0]).toMatch(/he reads the brief itself, on its own screen/);
     expect(prompts[0]).not.toMatch(/the plan in words with ≈ credits and ≈ AI tokens/);
   });
 
