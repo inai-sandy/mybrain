@@ -57,7 +57,13 @@ export class OwnerAskService implements OnModuleInit {
     // WhatsApp, the run screen, Telegram, or the 12-hour timeout taking the question's own default.
     // Settling it only on the WhatsApp road would leave a timed-out gate `pending` for ever, and the
     // resumed worker would park and message him again every twelve hours.
-    this.agent.setAnswerHook?.((runId: string, answer: string) => this.gates?.settlePending?.(runId, answer));
+    this.agent.setAnswerHook?.(async (runId: string, answer: string) => {
+      await Promise.resolve(this.gates?.settlePending?.(runId, answer)).catch(() => undefined);
+      // A second listener, for decisions that are not gates (BEA-1418: keep it / send it back).
+      // The hook itself is single-slot, and it belongs to this service — so anyone else who needs to
+      // hear an answer registers here rather than fighting over it.
+      await Promise.resolve(this.watcher?.(runId, answer)).catch(() => undefined);
+    });
   }
 
   /** Is this inbound number the owner's own? A missing setting means "no" — never "everyone". */
@@ -97,6 +103,12 @@ export class OwnerAskService implements OnModuleInit {
    * `answered: false` means nothing here was his to answer, and the caller carries on down its
    * normal road as if this method did not exist. That is the whole safety rule of this piece.
    */
+  /** Also tell me when a run's question is answered — whichever road answered it (BEA-1418). */
+  private watcher?: (runId: string, answer: string) => Promise<void> | void;
+  setAnswerWatcher(fn: (runId: string, answer: string) => Promise<void> | void) {
+    this.watcher = fn;
+  }
+
   async onOwnerReply(text: string, meta?: { wamid?: string | null }): Promise<{ answered: boolean; waitpointId?: string }> {
     // Postbox retries a callback it thinks was not taken. Answering the same question twice is
     // harmless (the answer is atomic), but answering the NEXT open question with the same words
