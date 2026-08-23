@@ -19,6 +19,8 @@ import {
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
 import { LOOKUP_TEXT, ToolLookupService, lookupRequestOf, lookupText } from '../tools/tool-lookup.service';
+import { BRIEF_TEXT, BriefProblem, ProposedBrief, briefCardOf, briefHeldNote, briefRequestOf, checkProposedBrief, readProposedBrief } from './brief-turn';
+import { BriefService } from './brief.service';
 
 /**
  * How many times the builder may look something up per message he sends (BEA-1417).
@@ -38,7 +40,7 @@ export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; gro
  * proposal (`spec` for the top-level builder, `job` for a job builder), the direct-fetch `plan` with
  * its `cost`, the sample counter and the design-budget counter. A reset drops all of it.
  */
-export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter; seed?: BuilderSeed | null; goal?: string | null };
+export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter; seed?: BuilderSeed | null; goal?: string | null; brief?: ProposedBrief | null };
 
 function packState(st: BuilderState): string {
   return JSON.stringify({
@@ -53,6 +55,9 @@ function packState(st: BuilderState): string {
     // What the result is FOR, in the owner's words (BEA-1378) — set by the model's `goal` field,
     // read by the stakes gate, shown on the plan card, carried onto the created agent.
     ...(st.goal ? { goal: st.goal } : {}),
+    // What he will actually read and approve (BEA-1424). It lives here until he opens it, exactly
+    // as `plan` does — a brief with no home yet belongs to the conversation that wrote it.
+    brief: st.brief || null,
   });
 }
 
@@ -76,6 +81,7 @@ export class AgentAreasService {
     private readonly sampler?: BuilderSampleService, // "look for yourself" (BEA-1370) — LAST, optional
     private readonly knowledge?: ToolKnowledgeService, // the know-how cards the builder reads (BEA-1368/1371)
     private readonly lookup?: ToolLookupService,
+    private readonly briefs?: BriefService, // where a brief the conversation wrote goes to live (BEA-1424)
   ) {}
 
   onModuleInit() {
@@ -265,7 +271,7 @@ export class AgentAreasService {
         ...o.vars,
         facts: { label: 'WHAT THE TOOLS CAN REALLY DO (know-how cards)', text: factsSection(cards, convo()) + (index ? `\n\nOTHER OUTSIDE-SERVICE ACTIONS you were not shown a card for (id — name). They exist; sample one before you plan on it:\n${index}` : '') },
         tools: { label: 'Other tools (exact ids)', text: plainTools },
-        blocks: { label: 'Planning blocks', text: BLOCKS_TEXT },
+        blocks: { label: 'Planning blocks', text: `${BLOCKS_TEXT}\n\n${BRIEF_TEXT}` },
         sample: { label: 'Look for yourself', text: `${SAMPLE_TEXT}\n\n${LOOKUP_TEXT}` },
         budget: { label: 'Design budget', text: budgetLine(design) },
         rules: { label: 'Rules', text: RULES_TEXT },
@@ -304,7 +310,11 @@ export class AgentAreasService {
       let refused: AgentPlan | null = null;
       // An expensive plan held back because no goal is established (BEA-1378) — its cost writes the note.
       let heldForGoal: PlanCost | null = null;
-      const nudged = { invalid: false, health: false, finder: false, goal: false, shape: false };
+      const nudged = { invalid: false, health: false, finder: false, goal: false, shape: false, brief: false };
+      let brief: ProposedBrief | null = null;
+      // A brief that is still wrong after its one send-back: NOT shown, and he is told what is
+      // missing in his own terms rather than being handed something half-written.
+      let refusedBrief: BriefProblem | null = null;
       const canSample = () => !!this.sampler && !overBudget(design) && readSampleCounter(st).used < SAMPLE_CAPS.calls;
       // An answer we could read nothing out of — cut off at the output ceiling, or simply not the
       // shape asked for. ONE re-ask, shorter and in shape, before the owner is told (BEA-1402). A
@@ -361,6 +371,29 @@ export class AgentAreasService {
             continue;
           }
         }
+        // A BRIEF (BEA-1424) — what he reads and approves, and the only thing that gets built. Checked
+        // here rather than trusted: the prompt asks for these things, and this builder has talked its
+        // way past a prompt four times over. One send-back per reason, never a loop.
+        const rawBrief = briefRequestOf(g);
+        if (rawBrief) {
+          const proposed = readProposedBrief(rawBrief);
+          if (!proposed) {
+            if (nudged.brief) break;
+            nudged.brief = true;
+            extra += '\n\nYour "brief" could not be read. Send it again in the shape shown above — sections with lines, each line carrying its own origin.';
+            continue;
+          }
+          const wrong = checkProposedBrief(proposed, sampledActionIds(st));
+          if (wrong) {
+            if (nudged.brief) { refusedBrief = wrong; break; }
+            nudged.brief = true;
+            extra += `\n\n${wrong.say}`;
+            continue;
+          }
+          brief = proposed;
+          break;
+        }
+
         if (!g?.plan || typeof g.plan !== 'object') break;
         const check = validatePlan(g.plan, allowedIds);
         if (!check.plan) {
@@ -413,6 +446,9 @@ export class AgentAreasService {
       // Budget spent and still no plan: keep the best plan so far rather than asking on.
       if (!plan && !refused && !heldForGoal && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || this.costWithHealth(plan, cardsById); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
       if (!reply) reply = this.troubleReply(turn.trouble, turn.prose, `${o.label}: ${where()}`);
+      // A brief held back after its one send-back: he reads WHY, in plain words, instead of being
+      // shown something that is missing the part that matters (BEA-1424).
+      if (refusedBrief) reply = `${reply}\n\nI have not written the brief yet — ${briefHeldNote(refusedBrief)}`;
       // Honesty: a plan that leans on a failing source says so, even when the model forgot; a refused plan
       // (no healthy source) says why no card came.
       const note = healthNote(plan || refused, cardsById, reply);
@@ -430,8 +466,9 @@ export class AgentAreasService {
       // One proposal at a time: a plan (direct agent) replaces an ordinary proposal and the other way
       // round, so Create never has to guess which one the owner is looking at.
       const proposal = o.keepProposal(g?.[o.proposalKey]);
-      if (plan) { st.plan = plan; st.cost = cost; (st as any)[o.proposalKey] = null; }
-      else if (proposal) { (st as any)[o.proposalKey] = proposal; st.plan = null; st.cost = null; }
+      if (brief) { st.brief = brief; st.plan = null; st.cost = null; (st as any)[o.proposalKey] = null; }
+      else if (plan) { st.plan = plan; st.cost = cost; st.brief = null; (st as any)[o.proposalKey] = null; }
+      else if (proposal) { (st as any)[o.proposalKey] = proposal; st.plan = null; st.cost = null; st.brief = null; }
       st.goal = goal; // remembered for every later turn, the gate, the card and Create (BEA-1378)
       st.design = { turns: design.turns + 1, tokens: design.tokens + spentTokens };
       st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
@@ -503,8 +540,11 @@ export class AgentAreasService {
     await this.prisma.setting.upsert({ where: { key: this.builderKey() }, create: { key: this.builderKey(), value: packState(st) }, update: { value: packState(st) } });
   }
 
-  async builderState() { return this.builderLoad(); }
-  async builderReset() { await this.builderSave({ log: [], spec: null, plan: null, cost: null }); return { ok: true }; }
+  async builderState() {
+    const st = await this.builderLoad();
+    return { ...st, brief: st.brief ? briefCardOf(st.brief) : null };
+  }
+  async builderReset() { await this.builderSave({ log: [], spec: null, plan: null, cost: null, brief: null }); return { ok: true }; }
 
   /**
    * "Make it an agent" on a Social result (BEA-1372): a FRESH conversation whose first line is the builder's
@@ -548,7 +588,7 @@ export class AgentAreasService {
   }
 
   /** One builder turn: owner's message → the thinking builder's reply (+ the evolving spec or plan). */
-  async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null }> {
+  async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null; brief: ReturnType<typeof briefCardOf> | null }> {
     const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');
     const st = await this.think({
@@ -562,13 +602,52 @@ export class AgentAreasService {
       keepProposal: (g) => (g && typeof g === 'object' && g.area?.name ? g : null),
       label: 'agent-builder',
     });
-    return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null };
+    // Only the CARD goes over the wire (BEA-1424) — the brief itself has its own screen, and putting
+    // the whole thing in a chat bubble is how it becomes the wall of text he scrolls past.
+    return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null, brief: st.state.brief ? briefCardOf(st.state.brief) : null };
   }
 
   /** Create the agent from the current proposal (the owner pressed Create). `folderId` = the folder the owner was inside (BEA-1380). */
+  /**
+   * Give a brief the conversation wrote a real home (BEA-1424).
+   *
+   * Line ids come from the store, not from the model — a model-invented id would collide the first
+   * time it repeated itself, and every edit and strike-out on the screen is keyed by it.
+   */
+  private async persistBrief(areaId: string, proposed: ProposedBrief, log: any[]) {
+    if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
+    const draft = await this.briefs.draft(areaId, proposed.name);
+    return this.briefs.update(draft.id, {
+      name: proposed.name,
+      sections: proposed.sections,
+      sources: proposed.sources,
+      delivery: proposed.delivery,
+      // The WHOLE conversation goes with it — his decision, 2026-08-22: Codex reads all of it, and
+      // the brief sitting on top is what makes that safe.
+      transcript: (log || []).map((m: any) => ({
+        id: '',
+        who: m?.who === 'you' ? 'you' : 'ai',
+        text: String(m?.text || ''),
+        at: String(m?.at || ''),
+        ...(m?.kind ? { kind: String(m.kind) } : {}),
+      })),
+    });
+  }
+
   async builderCreate(opts: { folderId?: string | null } = {}) {
     const st = await this.builderLoad();
     const folderId = await this.folderIdOrNull(opts.folderId);
+    // A BRIEF (BEA-1424) — the road he actually goes down now. Nothing is built here: the brief gets
+    // a home so he can open it, read it, and watch it run once. Keeping it is a later tap, on the
+    // trial's own result, which is the whole point of the second gate.
+    if (st.brief) {
+      const area: any = await this.create({ name: st.brief.name || 'New agent', ...(folderId ? { folderId } : {}) });
+      const saved = await this.persistBrief(String(area.id), st.brief, st.log || []);
+      st.log.push({ who: 'ai', text: `The brief is ready to read — nothing is built yet.`, at: new Date().toISOString() });
+      st.brief = null; st.plan = null; st.cost = null; st.seed = null;
+      await this.builderSave(st);
+      return { ok: true as const, areaId: String(area.id), briefId: saved.id, url: `/agent/ar/${area.id}/brief`, jobs: [] };
+    }
     // A DIRECT agent (BEA-1371): one job from the plan, its own area, the flow picture drawn from the
     // same fields — `createAgent` without an area gives the job an area of the same name.
     if (st.plan) {

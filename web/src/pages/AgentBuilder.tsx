@@ -3,6 +3,7 @@ import { Loader2, Sparkles, X, CalendarClock, Wrench, Check, Repeat } from 'luci
 import { useToast } from '../ui/Toast';
 import { ChatInput } from '../ui/ChatInput';
 import { PlanCard, PlanCost } from '../ui/PlanCard';
+import { BriefProposalCard } from '../ui/BriefProposalCard';
 import { BuilderLine, BuilderMessage } from '../ui/BuilderMessage';
 
 /** What a Social result hands the builder (BEA-1372): the call just made + a compact view of its answer. */
@@ -29,6 +30,8 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, fo
   const [spec, setSpec] = useState<any>(null);
   // The direct-fetch plan with its cost (BEA-1371) — shown instead of the spec when the builder planned one.
   const [plan, setPlan] = useState<any>(null);
+  // The brief the conversation wrote (BEA-1424) — a short card here; the brief has its own screen.
+  const [brief, setBrief] = useState<any>(null);
   const [cost, setCost] = useState<PlanCost | null>(null);
   const [goal, setGoal] = useState<string | null>(null); // what the result is FOR (BEA-1378) — first line of the plan card
   const [planHidden, setPlanHidden] = useState(false); // "Not now" — the plan stays on the server; the next reply shows it again
@@ -38,7 +41,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, fo
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLDivElement>(null);
 
-  function adopt(d: any) { setLog(d.log || []); setSpec(d.spec || null); setPlan(d.plan || null); setCost(d.cost || null); setGoal(d.goal || null); setPlanHidden(false); }
+  function adopt(d: any) { setLog(d.log || []); setSpec(d.spec || null); setPlan(d.plan || null); setBrief(d.brief || null); setCost(d.cost || null); setGoal(d.goal || null); setPlanHidden(false); }
   const seededRef = useRef(false); // one seed POST per mount — StrictMode runs the effect twice in dev
   useEffect(() => {
     if (seed?.tool) {
@@ -71,6 +74,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, fo
       if (fresh?.log?.length) setLog(fresh.log); else setLog((p) => [...p, { who: 'ai', text: d.reply }]);
       setSpec(d.spec || null);
       setPlan(d.plan || null);
+      setBrief(d.brief || null);
       setCost(d.cost || null);
       setGoal(d.goal || null);
       setPlanHidden(false);
@@ -84,22 +88,23 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, fo
   }
 
   async function create() {
-    if ((!spec && !plan) || creating) return;
+    if ((!spec && !plan && !brief) || creating) return;
     setCreating(true);
     try {
       // Created from inside a folder → the new agent lands in that folder (BEA-1380).
       const r = await fetch('/api/agent/builder/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(folderId ? { folderId } : {}) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not create');
-      toast('success', 'Agent created 🎉');
-      onCreated(withCreatedFlag(d.url));
+      // A brief builds nothing — it gets a home and opens. Only the old plan road creates an agent.
+      toast('success', brief ? 'Ready to read' : 'Agent created 🎉');
+      onCreated(brief ? d.url : withCreatedFlag(d.url));
     } catch (e: any) { toast('error', e?.message || 'Could not create'); }
     setCreating(false);
   }
 
   async function reset() {
     await fetch('/api/agent/builder', { method: 'DELETE' }).catch(() => undefined);
-    setLog([]); setSpec(null); setPlan(null); setCost(null); setGoal(null); setPlanHidden(false);
+    setLog([]); setSpec(null); setPlan(null); setBrief(null); setCost(null); setGoal(null); setPlanHidden(false);
   }
 
   return (
@@ -125,7 +130,9 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, fo
           {busy && <div className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />thinking…</div>}
 
           {/* the plan-with-cost of a direct agent (BEA-1371/1372) */}
-          {plan && !spec && !planHidden && <PlanCard plan={plan} cost={cost} goal={goal} creating={creating} onCreate={create} onChange={changeSomething} onDismiss={() => setPlanHidden(true)} />}
+          {/* A brief supersedes a plan — the same one-proposal-at-a-time rule the server keeps. */}
+          {brief && <BriefProposalCard card={brief} opening={creating} onOpen={create} />}
+          {plan && !brief && !spec && !planHidden && <PlanCard plan={plan} cost={cost} goal={goal} creating={creating} onCreate={create} onChange={changeSomething} onDismiss={() => setPlanHidden(true)} />}
           {plan && !spec && planHidden && (
             <button onClick={() => setPlanHidden(false)} className="text-xs text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300" data-testid="plan-show-again">Show the plan again</button>
           )}
