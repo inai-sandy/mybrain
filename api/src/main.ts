@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import { json, urlencoded } from 'express';
+import { BODY_LIMIT } from './common/body-limit';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import * as express from 'express';
@@ -15,6 +17,18 @@ import { RadarFeedService } from './news/radar-feed.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // How big a request body may be.
+  //
+  // Express defaults to 100 KB, which was never noticed because everything that had crossed this
+  // line until now was small — Instagram posts, a table of rows, a plan. The first agent that
+  // summarises EMAIL died on it: nine real messages with their bodies is comfortably past 100 KB,
+  // and the run failed with "request entity too large" after a clean fetch, having written nothing.
+  //
+  // This is a single-user app and the worker road's traffic never leaves the machine (the host
+  // runner talks to this container over the Docker gateway), so the limit is here to stop something
+  // running away, not to police a stranger. `BODY_LIMIT` is the one place it is written.
+  app.use(json({ limit: BODY_LIMIT }));
+  app.use(urlencoded({ limit: BODY_LIMIT, extended: true }));
   app.use(cookieParser());
   app.setGlobalPrefix('api');
 
