@@ -87,7 +87,7 @@ export class WorkerController {
   }
 
   private async fetch(req: any, body: any) {
-    const { runId, agentId } = who(req);
+    const { runId, agentId, trial } = who(req);
     const seq = seqOf(body);
     const job = await this.job(agentId);
     const step = this.stepper(runId);
@@ -107,6 +107,7 @@ export class WorkerController {
       // journalled and a resume re-fetches from page 1. `runDetailed()` answers rather than throws
       // on every vendor road, which is what keeps that narrow; it is the reason it must stay so.
       const hit = await this.journal.once(runId, seq, 'fetchSource', args, async () => {
+        // A trial remembers what it READ, so the screen can say "read 15, kept 5" (BEA-1416).
         const out = await this.sources.fetchBlock(src, this.guard(runId, job, seq), this.ctx(runId, job, seq), step, { hint: sourceHint(src, plan.sources), progress });
         const label = sourceLabel(src, plan.sources);
         return {
@@ -126,6 +127,7 @@ export class WorkerController {
           ...this.readWith(out.r ? out.r.data : undefined, body?.recipe, step),
         };
       });
+      if (trial && !hit.replayed) await this.trials?.holdFetched?.(runId, Number((hit.value as any)?.table?.rows?.length) || 0);
       return { ...(hit.value as any), replayed: hit.replayed };
     }
 

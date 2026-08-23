@@ -16,6 +16,8 @@ export type TrialView = {
   columns: string[];
   rows: any[][];
   rowCount: number;
+  /** How many things came back from the sources, before any filtering. */
+  fetched: number;
   message: string;
   credits: number;
   aiTokens: number;
@@ -67,6 +69,7 @@ export class TrialService {
       columns: json(row.columns, []),
       rows: json(row.rows, []),
       rowCount: Number(row.rowCount) || 0,
+      fetched: Number(row.fetched) || 0,
       message: String(row.message || ''),
       credits: Number(row.credits) || 0,
       aiTokens: Number(row.aiTokens) || 0,
@@ -140,6 +143,19 @@ export class TrialService {
         rowCount: all.length,
       },
     }).catch((e: any) => this.log.warn(`could not hold the trial rows: ${e?.message || e}`));
+  }
+
+  /**
+   * How many things a fetch really brought back, before anything filtered them (BEA-1416).
+   *
+   * "It read 15 emails and kept 5" is the sentence he needs. "It got 1 thing" — the output row count
+   * of a document — means nothing to him, and it is the same read-versus-kept confusion that failed
+   * a perfectly good run on 2026-08-22.
+   */
+  async holdFetched(runId: string, n: number): Promise<void> {
+    const id = await this.idFor(runId);
+    if (!id || !(n > 0)) return;
+    await this.prisma?.agentTrial?.update?.({ where: { id }, data: { fetched: { increment: Math.round(n) } } }).catch(() => undefined);
   }
 
   /** The message exactly as it would arrive. It is not sent. */

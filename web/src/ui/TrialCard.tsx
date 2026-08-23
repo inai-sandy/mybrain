@@ -15,6 +15,7 @@ export type Trial = {
   columns: string[];
   rows: any[][];
   rowCount: number;
+  fetched: number;
   message: string;
   credits: number;
   aiTokens: number;
@@ -96,9 +97,21 @@ export function TrialCard({ state, busy, onRun, onCreate, onSendBack, onSendToMe
     <section data-testid="trial-result" className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
       <div>
         <p className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"><Check className="h-4 w-4" />It ran. Nothing was saved and nothing was sent.</p>
+        {/*
+          What it READ, then what it KEPT. "It got 1 thing" was the output row count of a document
+          and told him nothing — the same read-versus-kept confusion that failed a good run on
+          2026-08-22, showing up again in the words on the screen.
+        */}
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-          It got <strong>{t.rowCount.toLocaleString('en-US')}</strong> {t.rowCount === 1 ? 'thing' : 'things'}
-          {t.rowCount > t.rows.length ? ` (the first ${t.rows.length} are below)` : ''}, and it cost {t.credits === 0 ? 'nothing' : `${t.credits} credit${t.credits === 1 ? '' : 's'}`}.
+          {t.fetched > 0 ? (
+            <>
+              It read <strong>{t.fetched.toLocaleString('en-US')}</strong> {t.fetched === 1 ? 'thing' : 'things'} and kept{' '}
+              <strong>{t.rowCount.toLocaleString('en-US')}</strong>
+            </>
+          ) : (
+            <>It got <strong>{t.rowCount.toLocaleString('en-US')}</strong> {t.rowCount === 1 ? 'thing' : 'things'}</>
+          )}
+          {t.rowCount > t.rows.length ? ` (the first ${t.rows.length} are below)` : ''}. It cost {t.credits === 0 ? 'nothing' : `${t.credits} credit${t.credits === 1 ? '' : 's'}`}.
         </p>
         {t.verdict && <p data-testid="trial-verdict" className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{t.verdict}</p>}
       </div>
