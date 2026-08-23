@@ -1907,6 +1907,9 @@ model AgentBrief {
   /// messages with (BEA-1453). A brief that could only describe reading is why his first real agent
   /// had to take the old road.
   tools    String @default("[]")
+  /// JSON { every, at, dow?, minute?, text? } — when it runs, in a shape the scheduler really fires
+  /// (BEA-1454). He wrote "10PM", approved it, and the agent was created with no schedule at all.
+  schedule String?
   /// JSON { whatsapp, telegram, messageText } — the exact words that will arrive on his phone.
   delivery String @default("{}")
   /// JSON [{ id, who, text, at, kind?, struck? }] — the whole talk.

@@ -256,7 +256,7 @@ describe('the build turn — nothing goes live without green tests', () => {
 
   it('a job with no plan of sources is refused in plain words, never compiled into nothing', async () => {
     const w = makeWorld({ agent: job({ toolArgs: null, tools: [] }) });
-    await expect(w.service.build('job-1')).rejects.toThrow(/runs on the engine/i);
+    await expect(w.service.build('job-1')).rejects.toThrow(/nothing to fetch from yet/i);
     const state = await w.service.state('job-1');
     expect(state.compilable).toBe(false);
     expect(state.reason).toContain('nothing to compile');
@@ -285,3 +285,51 @@ function makeWorldOnTop(w: any, over: { build?: any; promote?: any }): WorkerBui
   const knowledge: any = { lookup: async () => [] };
   return new WorkerBuildService(w.prisma, agent, runner, knowledge, w.samples);
 }
+
+/**
+ * A brief may not promise what an agent cannot do (BEA-1454).
+ *
+ * The owner ran a real trial and it failed with *"this job runs on the engine, not on a plan of
+ * sources"* — a good refusal, in words that were not true (a brief-built agent has no engine road),
+ * four steps after the point where the real problem should have been raised.
+ *
+ * The real problem: his brief named `search_brain` and `remember`, and **a worker cannot call
+ * either**. Left alone it would have created a new Notion master page every night.
+ */
+describe('what a job must have before it can be compiled (BEA-1454)', () => {
+  const check = (job: any) => (WorkerBuildService as any).whyNotCompilableFor(job);
+  const gmail = { 'svc:gmail.fetch_emails': { actionId: 'svc:gmail.fetch_emails', args: {} } };
+
+  it('accepts a job that WRITES — the tools do not all have to be sources', () => {
+    // This is the case that was rejected. Notion actions are not sources; they are what it does
+    // with what it fetched.
+    expect(check({
+      tools: ['svc:gmail.fetch_emails', 'svc:notion.create_notion_page', 'svc:notion.add_multiple_page_content'],
+      toolArgs: gmail,
+    })).toBe('');
+  });
+
+  it('refuses a tool no agent can call, and names it', () => {
+    const why = check({ tools: ['svc:gmail.fetch_emails', 'search_brain', 'remember'], toolArgs: gmail });
+    expect(why).toContain('search_brain');
+    expect(why).toContain('remember');
+    expect(why).toContain('are not things an agent can use');
+    // And it says what to do, rather than only what is wrong.
+    expect(why).toContain('say what it should do instead');
+  });
+
+  it('gets the grammar right for one', () => {
+    const why = check({ tools: ['svc:gmail.fetch_emails', 'remember'], toolArgs: gmail });
+    expect(why).toContain('is not something an agent can use');
+  });
+
+  it('refuses a job with nothing to fetch, in plain words', () => {
+    expect(check({ tools: ['svc:gmail.fetch_emails'], toolArgs: null })).toContain('nothing to fetch from yet');
+  });
+
+  it('never says "runs on the engine" — a brief-built agent has no engine road', () => {
+    for (const job of [{ tools: [], toolArgs: null }, { tools: ['remember'], toolArgs: gmail }]) {
+      expect(check(job)).not.toMatch(/runs on the engine/i);
+    }
+  });
+});

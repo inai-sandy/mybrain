@@ -11,7 +11,9 @@ import {
   emptyDelivery,
   emptySections,
   isSectionKey,
+  BriefSchedule,
   live,
+  scheduleOf,
   sourceName,
 } from './brief';
 
@@ -41,11 +43,13 @@ export type ProposedBrief = {
   sources: BriefSource[];
   /** What it DOES with the information — writing, messaging. Empty for a job that only reads. */
   tools: string[];
+  /** When it runs, in a shape the scheduler really fires. Null = only when he presses Run. */
+  schedule: BriefSchedule | null;
   delivery: BriefDelivery;
 };
 
 /** What is wrong with it, in the words the model is sent back with. Empty = it may be shown to him. */
-export type BriefProblem = { kind: 'too-long' | 'unlooked' | 'no-message' | 'no-success' | 'no-words' | 'nothing'; say: string };
+export type BriefProblem = { kind: 'too-long' | 'unlooked' | 'no-message' | 'no-success' | 'no-words' | 'nothing' | 'cannot-do'; say: string };
 
 const ORIGINS: LineOrigin[] = ['owner', 'tool', 'ai'];
 
@@ -79,6 +83,7 @@ export function readProposedBrief(raw: any): ProposedBrief | null {
     sections,
     sources: readSources(raw.sources),
     tools: readToolIds(raw.tools),
+    schedule: scheduleOf(raw.schedule) ? { ...raw.schedule } : null,
     delivery: readDelivery(raw.delivery),
   };
 }
@@ -151,6 +156,25 @@ function readDelivery(raw: any): BriefDelivery {
 export function checkProposedBrief(b: ProposedBrief, looked: Set<string>): BriefProblem | null {
   if (!b.sources.length) {
     return { kind: 'nothing', say: 'This brief fetches nothing. Say where the information comes from, and look at it before you promise anything about it.' };
+  }
+
+  // A promise with nowhere to live (BEA-1454). His first real brief named `search_brain` and
+  // `remember`, and a worker can call NEITHER — it fetches, thinks, writes through outside services,
+  // messages and asks. So the brief said "recall the saved Master Page id, or save it", he read it,
+  // approved it, and the machine could never have done it: a new master page every night.
+  //
+  // This is the receipt bug wearing different clothes, and it is refused here rather than four steps
+  // later at the build, where the words were not even true.
+  const cannot = (b.tools || []).filter((t) => !/^svc:[^.]+\..+/.test(String(t || '')));
+  if (cannot.length) {
+    return {
+      kind: 'cannot-do',
+      say:
+        `${cannot.map((t) => `"${t}"`).join(' and ')} ${cannot.length === 1 ? 'is not something' : 'are not things'} an agent can use. ` +
+        'An agent can fetch from a connected service, think about what it fetched, write through a connected service, message him, and ask him a question — nothing else. ' +
+        'It cannot remember anything between runs and it cannot read his brain. ' +
+        'Take that out and solve it another way — look the thing up each time by its name, or ask him for it once and put his answer in the brief — and say so in plain words so he knows what it really does.',
+    };
   }
 
   const unlooked = b.sources.filter((s) => !looked.has(s.actionId));
@@ -230,6 +254,7 @@ approves, and it is the only thing that gets built.
   },
   "sources":  [{"actionId": "svc:gmail.fetch_emails", "args": {"query": "newer_than:1d"}, "pages": "all"}],
   "tools":    ["svc:notion.create_notion_page", "svc:notion.add_multiple_page_content"],
+  "schedule": {"every": "day", "at": "22:00"},
   "delivery": {"whatsapp": true, "telegram": false, "messageText": "Last night — <how many> important emails\\n\\nWORK\\n• <sender> — <one line>"}
 }}
 
@@ -247,11 +272,21 @@ THE RULES, which are checked in code and not left to you:
      the real data goes. There is nowhere else for those words to live.
   4. SAY WHAT A GOOD RUN LOOKS LIKE, in his words. "At least 20 emails read." Without it, a run that
      reads one email calls itself a success — which is exactly what happened to him for weeks.
-  5. "tools" IS NOT OPTIONAL when it does anything but read. A source is where information comes
+  5. WHAT AN AGENT CAN ACTUALLY DO, and nothing else: fetch from a connected service, think about
+     what it fetched, write through a connected service, message him, ask him a question.
+     It CANNOT remember anything between runs. It CANNOT read his brain or his notes.
+     So every id in "tools" must start with "svc:". If the job seems to need memory, solve it another
+     way — look the thing up each time by its name, or ask him for it once and put his answer in the
+     brief — and SAY SO in plain words, so what he reads is what he will get.
+  6. "tools" IS NOT OPTIONAL when it does anything but read. A source is where information comes
      FROM; "tools" is what it does with it — the page it creates, the row it writes, the message it
      sends. **An action you do not list here, the agent cannot call.** List every one, by its exact
      id, fetched with "lookup" first.
-  6. "pages": "all" means keep asking until the source runs out. Use it when he says "all" or
+  7. "schedule" is when it really runs, and it must be one of these exact shapes, or it never fires:
+     {"every":"day","at":"HH:MM"} · {"every":"weekday","at":"HH:MM"} ·
+     {"every":"week","dow":0-6,"at":"HH:MM"} · {"every":"hour","minute":0-59}
+     Put his own words in the "when" section as well, so he can see what you understood.
+  8. "pages": "all" means keep asking until the source runs out. Use it when he says "all" or
      "every"; a number is a guess about how much of his life fits on a page.
 
 Nothing is built when you send a brief. He reads it, runs it once for real, and only then keeps it.`;
@@ -274,6 +309,8 @@ export function briefHeldNote(p: BriefProblem): string {
       return 'nothing says what a good run looks like. Tell me what would make it worth having — a number, or what has to be in it.';
     case 'no-words':
       return 'it is all my guesses and none of your words. Say what you want in one sentence and I will use that.';
+    case 'cannot-do':
+      return 'it was going to promise you something I cannot actually do — I cannot remember things between runs, or read your brain. Tell me and I will find another way round it.';
     default:
       return 'it does not fetch anything yet. Tell me where the information should come from.';
   }

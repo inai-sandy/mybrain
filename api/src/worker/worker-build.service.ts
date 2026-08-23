@@ -8,6 +8,8 @@ import { ToolLessonService, shapeInWords } from '../tools/tool-lesson.service';
 import { ToolKnowledgeService, ToolKnowledge } from '../tools/tool-knowledge.service';
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { AgentPlan, PlanBlock, isDirectFetchAgent, planActionIds, planFromAgent, sourceActionId, sourceLabel } from '../social/plan';
+import { normaliseToolArgs } from '../social/tool-args';
+import { isServiceToolId } from '../tools/service-provider';
 import { tableOf } from '../social/rows';
 import { argsHashOf } from '../tools/tool-sample';
 import { BuildRequest, BuildSample, buildHashOf, buildRequest, planHashOf } from './build-brief';
@@ -122,7 +124,8 @@ export class WorkerBuildService implements OnModuleInit {
   async build(agentId: string, opts: { reason?: string } = {}): Promise<WorkerState & { built: any }> {
     const job = await this.agent.getAgent(agentId).catch(() => null);
     if (!job) throw new BadRequestException('That job no longer exists.');
-    if (!isDirectFetchAgent(job)) throw new BadRequestException('This job runs on the engine, not on a plan of sources — there is nothing to compile into a worker yet.');
+    const why = WorkerBuildService.whyNotCompilableFor(job);
+    if (why) throw new BadRequestException(why);
 
     const before = await this.state(agentId);
     if (before.building) throw new BadRequestException('A build for this job is already going. Wait for it to finish.');
@@ -259,6 +262,30 @@ export class WorkerBuildService implements OnModuleInit {
   }
 
   /** The fact card for every action the plan calls — the know-how, not a one-line name. */
+  /**
+   * Can this job be compiled into a program, and if not, why — in words that are TRUE.
+   *
+   * It used to lean on `isDirectFetchAgent()`, which asks a different question: "can the PLAN RUNNER
+   * do this whole job by itself?" That requires every tool to be a source, which was true when an
+   * agent could only read and false the moment a brief could name what it WRITES with (BEA-1453).
+   * The owner's first brief that created Notion pages was refused by it — with the words "this job
+   * runs on the engine", which is not true of a brief-built agent, and four steps after the point
+   * where the real problem (a tool nothing can call) should have been raised.
+   *
+   * A job is compilable when it has at least one source to fetch from, and every tool it names is an
+   * outside-service action — because those are the only things a worker can call.
+   */
+  private static whyNotCompilableFor(job: any): string {
+    const tools: string[] = Array.isArray(job?.tools) ? job.tools : [];
+    const sources = Object.keys(normaliseToolArgs(job?.toolArgs) || {});
+    if (!sources.length) return 'This job has nothing to fetch from yet, so there is nothing to build. Say where the information comes from.';
+    const cannot = tools.filter((t) => !isServiceToolId(t));
+    if (cannot.length) {
+      return `${cannot.join(' and ')} ${cannot.length === 1 ? 'is not something' : 'are not things'} an agent can use. Take ${cannot.length === 1 ? 'it' : 'them'} out of the brief and say what it should do instead.`;
+    }
+    return '';
+  }
+
   /** The learned shape of every action this plan calls, in the words the build brief prints. */
   private async shapesFor(plan: AgentPlan): Promise<Record<string, string>> {
     const ids = planActionIds(plan);

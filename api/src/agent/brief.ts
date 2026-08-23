@@ -113,9 +113,19 @@ export type TranscriptTurn = {
   struck?: boolean;
 };
 
+/**
+ * When it runs, in a shape the scheduler can actually fire (BEA-1454).
+ *
+ * He wrote "10PM" in his brief, approved it, and the agent was created with **no schedule at all** —
+ * the words were in the brief and the wire that carries them did not exist. A nightly digest that
+ * never fires is the same silent drop as a message with nowhere to live.
+ */
+export type BriefSchedule = { every: 'day' | 'weekday' | 'week' | 'hour'; at?: string; dow?: number; minute?: number; text?: string };
+
 export type Brief = {
   id: string;
   areaId: string;
+  schedule?: BriefSchedule | null;
   /**
    * Actions the agent may use BEYOND its sources (BEA-1453) — the ones it writes with, or messages
    * with. A source is where information comes from; these are what it does with it.
@@ -335,7 +345,7 @@ export function sourceName(s: BriefSource): string {
  */
 export function forCodexPayload(brief: Brief): {
   decides: string;
-  brief: { name: string; version: number; approvedAt?: string | null; sections: { key: string; label: string; lines: BriefLine[] }[]; sources: BriefSource[]; tools: string[]; delivery: BriefDelivery };
+  brief: { name: string; version: number; approvedAt?: string | null; sections: { key: string; label: string; lines: BriefLine[] }[]; sources: BriefSource[]; tools: string[]; schedule?: BriefSchedule | null; delivery: BriefDelivery };
   transcript: TranscriptTurn[];
 } {
   return {
@@ -351,6 +361,7 @@ export function forCodexPayload(brief: Brief): {
       sections: SECTION_KEYS.map((k) => ({ key: k, label: SECTION_LABELS[k], lines: brief.sections[k] || [] })),
       sources: brief.sources,
       tools: brief.tools || [],
+      schedule: brief.schedule || null,
       delivery: brief.delivery,
     },
     transcript: brief.transcript,
@@ -380,6 +391,8 @@ export function briefToAgentInput(brief: Brief): {
   origin: string;
   enabled: boolean;
   useWorker: boolean;
+  schedule?: any;
+  scheduleText?: string;
 } {
   const tools: string[] = [];
   const toolArgs: Record<string, any> = {};
@@ -409,6 +422,10 @@ export function briefToAgentInput(brief: Brief): {
     outputDest: wantsSheet ? 'sheet' : 'document',
     notifyWhatsApp: !!brief.delivery?.whatsapp,
     origin: 'brief',
+    // When it runs, carried onto the job (BEA-1454). Only a shape the scheduler really fires; a
+    // half-read time is dropped rather than guessed at, and the plain sentence stays either way so
+    // he can see what was understood.
+    ...(scheduleOf(brief.schedule) ? { schedule: scheduleOf(brief.schedule), scheduleText: scheduleTextOf(brief) } : {}),
     // Created switched OFF and on the worker road: nothing runs on a schedule until he taps Create,
     // and a job made from a brief has never been meant for the plan runner.
     enabled: false,
@@ -418,3 +435,20 @@ export function briefToAgentInput(brief: Brief): {
 
 /** Mirrors `KEEP_AS_FETCHED` in `social/plan.ts` without importing it — this file stays pure. */
 const KEEP_AS_FETCHED_TEXT = 'Keep every result as fetched.';
+
+
+/** The four shapes the scheduler fires. Anything else is stored nowhere rather than half-understood. */
+export function scheduleOf(s?: BriefSchedule | null): any | null {
+  if (!s || typeof s !== 'object') return null;
+  const hhmm = (v: any) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+  if ((s.every === 'day' || s.every === 'weekday') && hhmm(s.at)) return { every: s.every, at: s.at };
+  if (s.every === 'week' && hhmm(s.at) && Number.isInteger(s.dow) && (s.dow as number) >= 0 && (s.dow as number) <= 6) return { every: 'week', dow: s.dow, at: s.at };
+  if (s.every === 'hour') { const m = s.minute === undefined ? 0 : Number(s.minute); return Number.isInteger(m) && m >= 0 && m <= 59 ? { every: 'hour', minute: m } : null; }
+  return null;
+}
+
+/** The sentence he reads about when it runs — his own "when it runs" line if he wrote one. */
+export function scheduleTextOf(brief: Brief): string {
+  const said = live(brief.sections?.when).map((l) => l.text).join(' ').trim();
+  return said || String(brief.schedule?.text || '').trim();
+}
