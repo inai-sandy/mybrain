@@ -53,6 +53,16 @@ export type BuildInputs = {
    * message it sends comes from the brief's own words. Absent = the old road, plan only.
    */
   brief?: BriefPayload | null;
+  /**
+   * The learned SHAPE of each action's answer (BEA-1415) — where the things are and what one
+   * carries, in paths and types.
+   *
+   * This is what a reading recipe is written from when there is **no saved answer**, which is the
+   * case for Gmail, WhatsApp, Slack and every other service whose answers are deliberately never
+   * kept. The first version of the recipe work missed that entirely: it helped the tools the app
+   * already read well and could not help the one that started the whole conversation.
+   */
+  shapes?: Record<string, string>;
 };
 
 /** What `BriefService.forCodex()` hands over. Kept structural so this file needs no Nest import. */
@@ -352,7 +362,16 @@ fixed and may be written out literally.
 are **no dependencies to install**: Node ${'22'} built-ins and \`./kit/kit.js\`, nothing else. Never call a
 vendor, never read a key, never write outside this folder.
 
-## What each action really does
+${Object.keys(inp.shapes || {}).length ? `## What each answer really looks like
+
+These shapes were read off REAL answers from his account. Where a source has no saved answer in
+\`samples/\` — Gmail, WhatsApp and anything else whose contents we never keep — **this is what you
+write \`recipe.json\` from.** Every path below was really there; anything not on the list will be
+refused when the recipe is checked.
+
+${Object.values(inp.shapes || {}).join('\n\n')}
+
+` : ''}## What each action really does
 
 ${cards || '(no fact cards were available for this plan — go by the plan and the saved answers)'}
 

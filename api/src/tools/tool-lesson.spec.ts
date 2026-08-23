@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from '@jest/globals';
-import { NO_LESSON_SERVICES, cursorIn, cursorParamFor, lessonsFrom, listIn } from './tool-lesson';
-import { LESSON_STALE_DAYS, ToolLessonService, learnedText } from './tool-lesson.service';
+import { NO_LESSON_SERVICES, cursorIn, cursorParamFor, lessonsFrom, listIn, shapeOf } from './tool-lesson';
+import { LESSON_STALE_DAYS, ToolLessonService, learnedText, shapeInWords } from './tool-lesson.service';
 
 /**
  * The app learns each tool by trying it (BEA-1409).
@@ -234,5 +234,89 @@ describe('the cursor we learned is the cursor we send back', () => {
     // pages correctly on its first run and wrongly on its second.
     const { pagingOf } = await import('../social/plan');
     expect(pagingOf(null, {}, { nextPageToken: 'x' })!.param).toBe(cursorParamFor('nextPageToken'));
+  });
+});
+
+/**
+ * The learned SHAPE — what fills the hole the first recipe attempt left (BEA-1415).
+ *
+ * A reading recipe is written from a saved answer. Gmail, WhatsApp and Slack answers are
+ * **deliberately never saved**, because they carry people's messages — and those are precisely the
+ * services whose shapes the app's general reader is worst at. So the first version of the recipe
+ * work helped the tools that did not need it and could not help the one that started all of this.
+ *
+ * A shape is paths and types. No values. That is why it can exist for Gmail.
+ */
+describe('the shape of an answer, learned without keeping the answer', () => {
+  const GMAIL = {
+    messages: [
+      { id: 'm1', internalDate: '1755900000000', payload: { headers: [{ name: 'Subject', value: 'A quote for you' }, { name: 'From', value: 'ravi@x.com' }] } },
+      { id: 'm2', internalDate: '1755900100000', payload: { headers: [{ name: 'To', value: 'sandy@kiot.io' }] } },
+    ],
+    nextPageToken: 'abc',
+  };
+
+  it('writes down where the things are and what they carry', () => {
+    const shape = shapeOf(GMAIL)!;
+    expect(shape.listPath).toBe('messages');
+    expect(shape.items).toBe(2);
+    const paths = shape.fields.map((f) => f.path);
+    expect(paths).toContain('id');
+    expect(paths).toContain('internalDate');
+  });
+
+  it('reaches a header BY NAME — the shape half the world uses, and the one the app reads worst', () => {
+    const paths = shapeOf(GMAIL)!.fields.map((f) => f.path);
+    expect(paths).toContain('payload.headers.Subject');
+    expect(paths).toContain('payload.headers.From');
+    // `payload.headers.0.value` is exactly the useless column the general reader already produces.
+    expect(paths).not.toContain('payload.headers.0.value');
+  });
+
+  it('looks at several items, so a field missing from the first is not lost', () => {
+    // `To` is only on the second message. A shape written from item 1 alone would drop the column.
+    expect(shapeOf(GMAIL)!.fields.map((f) => f.path)).toContain('payload.headers.To');
+  });
+
+  it('carries NO values — not a subject, not an address, nothing', () => {
+    const json = JSON.stringify(shapeOf(GMAIL));
+    expect(json).not.toContain('A quote for you');
+    expect(json).not.toContain('ravi@x.com');
+    expect(json).not.toContain('sandy@kiot.io');
+    expect(json).not.toContain('abc');
+  });
+
+  it('drops a path segment that is itself a value', () => {
+    const keyedByPerson = { items: [{ 'ravi@x.com': { seen: true }, '918888888888': 1, ok: 2 }] };
+    const paths = shapeOf(keyedByPerson)!.fields.map((f) => f.path);
+    expect(paths).toContain('ok');
+    expect(paths.join(' ')).not.toContain('ravi@x.com');
+    expect(paths.join(' ')).not.toContain('918888888888');
+  });
+
+  it('handles a single-record answer', () => {
+    const shape = shapeOf({ username: 'kiot', followers: 900 })!;
+    expect(shape.listPath).toBe('');
+    expect(shape.items).toBe(1);
+    expect(shape.fields.map((f) => f.path)).toEqual(['username', 'followers']);
+  });
+
+  it('rides along as a lesson, so it is learned from every real call', () => {
+    const out = lessonsFrom({ actionId: 'svc:gmail.fetch_emails', service: 'gmail', args: {}, schema: {}, data: GMAIL });
+    const shape = out.find((l) => l.kind === 'shape')!;
+    expect(shape.shape!.listPath).toBe('messages');
+    expect(shape.text).toContain('messages');
+    expect(shape.text).not.toContain('ravi@x.com');
+  });
+
+  it('still learns nothing at all from a vault', () => {
+    expect(lessonsFrom({ actionId: 'svc:vault.read', service: 'vault', args: {}, schema: {}, data: GMAIL })).toEqual([]);
+  });
+
+  it('is written for Codex as paths he can check, and says so', () => {
+    const words = shapeInWords('svc:gmail.fetch_emails', shapeOf(GMAIL)!);
+    expect(words).toContain('svc:gmail.fetch_emails');
+    expect(words).toContain('`payload.headers.Subject`');
+    expect(words).toContain('a path not on this list will be refused');
   });
 });

@@ -4,6 +4,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
 import { BriefService } from '../agent/brief.service';
+import { ToolLessonService, shapeInWords } from '../tools/tool-lesson.service';
 import { ToolKnowledgeService, ToolKnowledge } from '../tools/tool-knowledge.service';
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { AgentPlan, PlanBlock, isDirectFetchAgent, planActionIds, planFromAgent, sourceActionId, sourceLabel } from '../social/plan';
@@ -71,6 +72,7 @@ export class WorkerBuildService implements OnModuleInit {
     private readonly knowledge?: ToolKnowledgeService,
     private readonly samples?: ToolSampleService,
     private readonly briefs?: BriefService,
+    private readonly lessons?: ToolLessonService, // the learned shapes a recipe is written from (BEA-1415)
   ) {}
 
   onModuleInit() {
@@ -216,6 +218,9 @@ export class WorkerBuildService implements OnModuleInit {
     // compiled from the plan exactly as before — the old road is not closed, it is just no longer
     // the only one.
     const brief = job.areaId ? await this.briefs?.forCodex?.(job.areaId).catch(() => null) : null;
+    // What each answer really looks like, learned from real calls (BEA-1415). The only thing Codex
+    // can write a reading recipe from when a service's answers are never kept.
+    const shapes = await this.shapesFor(plan);
     const req = buildRequest({
       job: { id: job.id, name: job.name },
       plan,
@@ -223,6 +228,7 @@ export class WorkerBuildService implements OnModuleInit {
       samples,
       kit,
       brief: brief || null,
+      shapes,
       version: opts.version,
       previousVersion: opts.previousVersion ?? null,
       origin: opts.origin || 'build',
@@ -253,6 +259,19 @@ export class WorkerBuildService implements OnModuleInit {
   }
 
   /** The fact card for every action the plan calls — the know-how, not a one-line name. */
+  /** The learned shape of every action this plan calls, in the words the build brief prints. */
+  private async shapesFor(plan: AgentPlan): Promise<Record<string, string>> {
+    const ids = planActionIds(plan);
+    if (!ids.length || !this.lessons) return {};
+    const facts: any = await this.lessons.forActions(ids).catch(() => ({}));
+    const out: Record<string, string> = {};
+    for (const id of ids) {
+      const shape = (facts[id] || []).find((f: any) => f.kind === 'shape' && f.shape)?.shape;
+      if (shape) out[id] = shapeInWords(id, shape);
+    }
+    return out;
+  }
+
   private async cards(plan: AgentPlan): Promise<ToolKnowledge[]> {
     const ids = planActionIds(plan);
     if (!ids.length || !this.knowledge?.lookup) return [];
