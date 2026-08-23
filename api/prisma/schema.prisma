@@ -1938,6 +1938,10 @@ model AgentTrial {
   rows         String  @default("[]")
   columns      String  @default("[]")
   rowCount     Int     @default(0)
+  /// How many things came back from the sources, BEFORE any filtering (BEA-1416). "It read 15 and
+  /// kept 5" is the sentence he needs; "it got 1 thing" is the output row count and means nothing
+  /// to him. The same read-versus-kept confusion that failed a good run on 2026-08-22.
+  fetched      Int     @default(0)
   /// The message exactly as it would arrive. NOT sent — drawn on screen.
   message      String  @default("")
   credits      Int     @default(0)

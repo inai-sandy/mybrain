@@ -17,7 +17,8 @@ function trial(over: Partial<Trial> = {}): Trial {
     status: 'passed',
     columns: ['subject', 'from'],
     rows: [['A quote for you', 'ravi@x.com'], ['Dinner?', 'amma@x.com']],
-    rowCount: 47,
+    rowCount: 5,
+    fetched: 47,
     message: MESSAGE,
     credits: 3,
     aiTokens: 1200,
@@ -63,11 +64,16 @@ describe('while it is going', () => {
 });
 
 describe('when it worked', () => {
-  it('shows the REAL count, not the number of rows it happens to display', () => {
+  it('says what it READ and what it KEPT — they are different numbers', () => {
     view();
-    // 47 fetched, 2 shown. Showing "2 things" would be its own small lie.
-    expect(screen.getByText(/47/)).toBeTruthy();
-    expect(screen.getByTestId('trial-result')).toHaveTextContent(/the first 2 are below/i);
+    // 47 read, 5 kept, 2 shown. "It got 1 thing" (an output row count) told him nothing, and is the
+    // same read-versus-kept confusion that failed a perfectly good run on 2026-08-22.
+    expect(screen.getByTestId('trial-result')).toHaveTextContent(/read 47 things and kept 5/i);
+  });
+
+  it('falls back to a plain count when nothing recorded what it read', () => {
+    view({ trial: trial({ fetched: 0, rowCount: 3 }) });
+    expect(screen.getByTestId('trial-result')).toHaveTextContent(/It got 3 things/i);
   });
 
   it('says nothing was saved and nothing was sent, at the top', () => {
