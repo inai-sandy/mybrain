@@ -1178,7 +1178,7 @@ Other tools you may name in an ordinary (engine-run) job — use the exact id:
 {{budget}}
 
 {{rules}}
-- Two kinds of job. A DIRECT job (every source is an outside-service action with exact arguments — social digests, watches on a service) is described by the "plan" below and runs with no engine turn. An ORDINARY job (research, writing, anything that needs thinking with web search / deep research / the owner's own material) is described by "job" as before; a research-style job (reports, comparisons, "find out about…") MUST include deep_research in its tools — the flow is planned inside this toolbox later, and a research job without deep_research can only ever do shallow single searches. Never propose a tool that reads the owner's own notes or memory unless he asked for his own material.
+- Two kinds of job. A DIRECT job (every source is an outside-service action with exact arguments — social digests, watches on a service) is described by the "brief" below and runs with no engine turn. There is no "plan" any more: a plan was eight fixed boxes, and anything he asked for that did not fit one was silently dropped. An ORDINARY job (research, writing, anything that needs thinking with web search / deep research / the owner's own material) is described by "job" as before; a research-style job (reports, comparisons, "find out about…") MUST include deep_research in its tools — the flow is planned inside this toolbox later, and a research job without deep_research can only ever do shallow single searches. Never propose a tool that reads the owner's own notes or memory unless he asked for his own material.
 - Turn what they asked for into checks: short, testable statements a good result must satisfy — from THEIR words.
 
 Reply with ONLY JSON, no prose:
@@ -1187,8 +1187,7 @@ Reply with ONLY JSON, no prose:
  "goal": null until the owner has said what the result is FOR, then their goal in their own words (short) — repeat it in every answer once known,
  "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
  "lookup": null, or {"what":"services"} / {"what":"actions","service":"<slug>","words":"<what you need>"} / {"what":"action","actionId":"<exact id>"} — ask what tools exist instead of guessing (then send nothing else),
- "brief": null, or THE BRIEF — see "WRITING THE BRIEF" below. This is what he reads and approves, and the only thing that gets built. Prefer it: send a "brief", not a "plan", whenever the job fetches from outside services. Nothing is built when you send one.,
- ${PLAN_SHAPE_TEXT},
+ "brief": null, or THE BRIEF — see "WRITING THE BRIEF" below. **This is how a DIRECT agent is described now.** It is what he reads and approves, and the only thing that gets built. Nothing is built when you send one: he reads it, watches it run once for real, and only then keeps it.,
  "job": null, or (ORDINARY jobs only) the COMPLETE job:
  {
   "name": "<short name>", "icon": "<emoji>",
@@ -1225,14 +1224,16 @@ Other tools you may name in an ordinary (engine-run) agent — use the exact id:
 {{budget}}
 
 {{rules}}
-- Two kinds of agent. A DIRECT agent (every source is an outside-service action with exact arguments — a social digest, a watch on a service) is described by the "plan" below: ONE job that runs with no engine turn. An ORDINARY agent (research, news, writing — anything that needs thinking) is an AREA holding one or more JOBS, described by "spec" as before; each job has a plain-English numbered task, an optional outcome, its own schedule and settings.
+- Two kinds of agent. A DIRECT agent (every source is an outside-service action with exact arguments — a social digest, a watch on a service) is described by the "brief" below: what he wants in his own words, what you really saw when you looked, and the exact message he gets. An ORDINARY agent (research, news, writing — anything that needs thinking) is an AREA holding one or more JOBS, described by "spec" as before; each job has a plain-English numbered task, an optional outcome, its own schedule and settings.
+- There is no "plan" any more. A plan was eight fixed boxes, and anything the owner asked for that did not fit one of them was silently dropped — which is how he spent weeks receiving "finished · 5 rows" instead of the summary he asked for. A brief is language, so it can hold what he actually said.
 
 Reply with ONLY JSON, no prose:
 {
- "reply": "<what you say next — ONE question with its default, or the plan in words (the server writes the ≈ cost line under it), ending 'press Create when happy'>",
+ "reply": "<what you say next — ONE question with its default, or (with a "brief") one short sentence saying it is ready to read. Never describe the brief in prose: he reads the brief itself, on its own screen.>",
  "goal": null until the owner has said what the result is FOR, then their goal in their own words (short) — repeat it in every answer once known,
  "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
- ${PLAN_SHAPE_TEXT},
+ "lookup": null, or {"what":"services"} / {"what":"actions","service":"<slug>","words":"<what you need>"} / {"what":"action","actionId":"<exact id>"} — ask what tools exist instead of guessing (then send nothing else),
+ "brief": null, or THE BRIEF — see "WRITING THE BRIEF" below. **This is how a DIRECT agent is described now.** It is what he reads and approves, and the only thing that gets built. Nothing is built when you send one: he reads it, watches it run once for real, and only then keeps it.,
  "spec": null, or (ORDINARY agents only) the COMPLETE spec:
  {
   "area": {"name":"...","icon":"<emoji>","color":"<hex>","description":"<one line>","tools":[{"kind":"skill|api|mcp|cli","name":"...","note":"why"}]},
