@@ -1183,9 +1183,11 @@ Other tools you may name in an ordinary (engine-run) job — use the exact id:
 
 Reply with ONLY JSON, no prose:
 {
- "reply": "<what you say next — ONE question with its default, or the plan in words (the server writes the ≈ cost line under it), ending 'press Create when happy'>",
+ "reply": "<what you say next — ONE question with its default, or (with a "brief") one short sentence saying it is ready to read. Never describe the brief in prose: he reads the brief itself, on its own screen.>",
  "goal": null until the owner has said what the result is FOR, then their goal in their own words (short) — repeat it in every answer once known,
  "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
+ "lookup": null, or {"what":"services"} / {"what":"actions","service":"<slug>","words":"<what you need>"} / {"what":"action","actionId":"<exact id>"} — ask what tools exist instead of guessing (then send nothing else),
+ "brief": null, or THE BRIEF — see "WRITING THE BRIEF" below. This is what he reads and approves, and the only thing that gets built. Prefer it: send a "brief", not a "plan", whenever the job fetches from outside services. Nothing is built when you send one.,
  ${PLAN_SHAPE_TEXT},
  "job": null, or (ORDINARY jobs only) the COMPLETE job:
  {
