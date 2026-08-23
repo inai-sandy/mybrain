@@ -11,6 +11,7 @@ import { SocialAgentRunService, SHAPE_MAX_TOKENS, mergeTables } from '../social/
 import { SocialBudgetService, BudgetCheck } from '../social/social-budget.service';
 import { SourceFetchService } from '../social/source-fetch.service';
 import { planActionIds, planFromAgent, sourceHint, sourceLabel, clampPages } from '../social/plan';
+import { ReadRecipe, readAnswer, readNote } from '../social/read-recipe';
 import { tableOf } from '../social/rows';
 import { RunJournalService } from './run-journal.service';
 import { WorkerTokenGuard } from './worker-token.guard';
@@ -122,7 +123,7 @@ export class WorkerController {
           unrecognised: !!out.unrecognised,
           why: out.why || null,
           stop: out.stop || null,
-          table: out.r ? tableOf(out.r.data) : null,
+          ...this.readWith(out.r ? out.r.data : undefined, body?.recipe, step),
         };
       });
       return { ...(hit.value as any), replayed: hit.replayed };
@@ -588,6 +589,25 @@ export class WorkerController {
    * a guard that cannot answer does not let the call through, and a call over the ceiling pauses the
    * job instead of being made.
    */
+  /**
+   * Turn the vendor's answer into rows — with THIS tool's own recipe when the worker sent one, and
+   * with the app's general reader otherwise (BEA-1415).
+   *
+   * The raw answer never leaves the app. The worker sends a recipe IN; the app applies it to data it
+   * already holds. A recipe that names a path the answer does not have, or that would drop rows, is
+   * refused with a plain reason and the general reader takes over — and the refusal is said out loud
+   * on the run, because a silently ignored recipe is a lie about how the rows were read.
+   */
+  private readWith(data: any, raw: any, step: (s: any) => Promise<any> | any): { table: any; readBy: string; readNote: string } {
+    if (data === undefined) return { table: null, readBy: 'app', readNote: '' };
+    const recipe = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as ReadRecipe) : null;
+    const out = readAnswer(data, recipe);
+    const note = readNote(out);
+    // Only worth a step when something actually happened: a recipe was used, or one was refused.
+    if (note) void step({ label: note, status: out.by === 'recipe' ? 'done' : 'info', nodeId: 'read' });
+    return { table: out.table, readBy: out.by, readNote: note };
+  }
+
   private guard(runId: string, job: any, seq?: number) {
     return async (actionId: string): Promise<string | null> => {
       // A gate the owner already refused is settled: the call is not made, and the step says so in

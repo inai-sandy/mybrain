@@ -51,6 +51,44 @@ await kit.ai('social-alert', prompt)         // a plain helper call (allow-liste
 Only shape when the plan says to. A plan whose task is "keep every result as fetched" has **no AI
 step at all** — shaping it would cost tokens and change the rows.
 
+## Reading a tool's answer
+
+```js
+const recipe = JSON.parse(readFileSync(new URL('./recipe.json', import.meta.url), 'utf8'));
+const got = await kit.fetchSource('svc:gmail.fetch_emails', { recipe: recipe['svc:gmail.fetch_emails'] });
+```
+
+The app has ONE general reader for every vendor on earth, and it is often wrong about a shape it has
+not met — `payload.headers.0.value` instead of `subject`, or a single wrapped object read as a table
+of its own parts. `recipe.json` is how THIS tool's answer should be read, written from the real saved
+answer in `samples/`.
+
+```jsonc
+{
+  "svc:gmail.fetch_emails": {
+    "listPath": "data.messages",
+    "columns": {
+      "id":      "id",
+      "subject": "payload.headers.Subject",
+      "from":    "payload.headers.From",
+      "date":    "internalDate"
+    },
+    "idField": "id"
+  }
+}
+```
+
+- A path is dotted. `payload.headers.Subject` on a list of `{name, value}` pairs reads the pair
+  **named** Subject — the shape half the world's APIs use for headers and custom fields.
+- **Every path must exist** in the real answer. The app checks each one, on every run, and refuses
+  the whole recipe with a plain reason if one does not.
+- **Reading is not filtering.** N things in the answer must become N rows. Dropping the ones he does
+  not want is the shaping step's job, further down, where he can see it happen. A recipe that reads
+  fewer rows than there are items is refused.
+- The raw answer stays in the app. You send the recipe in; you never receive the payload.
+- Write one entry per source id. Leave a source out entirely if the general reader already reads it
+  well — an unnecessary recipe is one more thing to keep true.
+
 ## Output
 
 ```js

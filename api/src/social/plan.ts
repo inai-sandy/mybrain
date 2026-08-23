@@ -1,4 +1,5 @@
 import { isServiceToolId } from '../tools/service-provider';
+import { cursorParamFor } from '../tools/tool-lesson';
 import { Threshold, itemKey, stableJson } from './diff';
 import { ToolArgsEntry, ToolArgsMap, actionIdsOf, entryActionId, isCreatorsEntry, legacyValueOf, normaliseToolArgs } from './tool-args';
 
@@ -512,8 +513,9 @@ export function pagingOf(paging: { how?: string; field?: string } | null | undef
   if (paging && paging.field && (paging.how === 'cursor' || paging.how === 'page')) return { param: paging.field, how: paging.how };
   const c = nextCursorOf(firstAnswer);
   if (c) {
-    const param = /max_id/.test(c.key) ? 'next_max_id' : /token/.test(c.key) ? 'page_token' : /page_id/.test(c.key) ? 'next_page_id' : 'cursor';
-    return { param, how: 'cursor' };
+    // One mapping, in one place (BEA-1415): the guessed cursor and the LEARNED one must never
+    // disagree about which argument a cursor goes back in.
+    return { param: cursorParamFor(c.key), how: 'cursor' };
   }
   if (args && Number.isFinite(Number(args.page))) return { param: 'page', how: 'page' };
   return null;

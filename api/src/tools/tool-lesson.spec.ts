@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from '@jest/globals';
-import { NO_LESSON_SERVICES, cursorIn, lessonsFrom, listIn } from './tool-lesson';
+import { NO_LESSON_SERVICES, cursorIn, cursorParamFor, lessonsFrom, listIn } from './tool-lesson';
 import { LESSON_STALE_DAYS, ToolLessonService, learnedText } from './tool-lesson.service';
 
 /**
@@ -202,5 +202,37 @@ describe('what the notebook does with them', () => {
   it('an action nobody has used has nothing to say, and does not pretend otherwise', async () => {
     expect(await svc.forAction('svc:never.used')).toEqual([]);
     expect(learnedText([])).toBe('');
+  });
+});
+
+/**
+ * Paging follows what we LEARNED, not what the app guesses (BEA-1415).
+ *
+ * The second of the two places a brand-new tool could still hurt him. The app infers a cursor's name
+ * from a list of shapes it has met; a tool nobody has used is not on that list. Since BEA-1409 the
+ * first real call writes the cursor's name down, so there is nothing left to guess.
+ */
+describe('the cursor we learned is the cursor we send back', () => {
+  it('records the cursor name where a machine can read it, not only in a sentence', () => {
+    const out = lessonsFrom({ actionId: 'svc:x.list', service: 'x', args: {}, schema: {}, data: { items: [1], nextPageToken: 'abc' } });
+    const more = out.find((l) => l.kind === 'more-pages')!;
+    expect(more.param).toBe('nextPageToken');
+    // The NAME only. Never the value.
+    expect(JSON.stringify(more)).not.toContain('abc');
+  });
+
+  it('maps an answer field to the argument it goes back in — they are rarely the same word', () => {
+    expect(cursorParamFor('nextPageToken')).toBe('page_token');
+    expect(cursorParamFor('next_max_id')).toBe('next_max_id');
+    expect(cursorParamFor('paging.cursor')).toBe('cursor');
+    expect(cursorParamFor('next_page_id')).toBe('next_page_id');
+    expect(cursorParamFor('anything_else')).toBe('cursor');
+  });
+
+  it('is the SAME mapping the app already used for its guess', async () => {
+    // One mapping in one place, or the learned cursor and the guessed one drift apart and a tool
+    // pages correctly on its first run and wrongly on its second.
+    const { pagingOf } = await import('../social/plan');
+    expect(pagingOf(null, {}, { nextPageToken: 'x' })!.param).toBe(cursorParamFor('nextPageToken'));
   });
 });

@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ComposioProvider } from './composio.provider';
 import { KNOWLEDGE_NOTES, KnowledgeNote, notesFor } from './knowledge-notes';
 import { ToolLessonService } from './tool-lesson.service';
+import { cursorParamFor } from './tool-lesson';
 import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { WhatsAppProvider } from './whatsapp.provider';
 import { isServiceToolId, parseServiceToolId, ServiceAction } from './service-provider';
@@ -567,11 +568,17 @@ export class ToolKnowledgeService {
     // ---- paging: spec first, then a note, then what was observed
     const noteWithPaging = notes.find((n) => n.paging);
     const specPaging = pagingOfSchema(action.schema);
+    // …and then what USING it taught us (BEA-1415). The spec and a hand note both speak first,
+    // because they describe the vendor in general; a learned cursor is the answer for a tool nobody
+    // has written anything about, which is the case that used to send the owner back to Claude Code.
+    const learnedCursor = learned.find((l: any) => l.kind === 'more-pages' && l.param)?.param;
     const paging: KnowledgePaging = specPaging.how !== 'none'
       ? { how: specPaging.how, field: specPaging.field, cap: specPaging.cap, source: 'spec' }
       : noteWithPaging?.paging?.how
         ? { how: noteWithPaging.paging.how, source: 'notes' }
-        : { how: 'none', source: 'none' };
+        : learnedCursor
+          ? { how: 'cursor', field: cursorParamFor(String(learnedCursor)), source: 'observed' }
+          : { how: 'none', source: 'none' };
     if (paging.cap === undefined && noteWithPaging?.paging?.cap !== undefined) paging.cap = noteWithPaging.paging.cap;
     // Items per page is only a page size when the action PAGES — a one-shot answer that happens
     // to hold a list of 1 (a new sheet's `sheets`) is not "1 per page".

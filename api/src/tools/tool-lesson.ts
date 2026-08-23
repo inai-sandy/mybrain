@@ -170,6 +170,9 @@ export function lessonsFrom(input: LessonInput): Lesson[] {
     out.push({
       key: `more-pages:${cursor}`,
       kind: 'more-pages',
+      // The cursor's NAME, machine-readable, so the pager can follow what we learned instead of the
+      // app's guess (BEA-1415). The name only — never its value.
+      param: cursor,
       text: `This action pages: the answer carries \`${cursor}\`${n !== null ? `, and one page held ${n}` : ''}. Keep asking until it stops coming back.`,
     });
   }
@@ -200,4 +203,21 @@ export function lessonsFrom(input: LessonInput): Lesson[] {
   }
 
   return out;
+}
+
+
+/**
+ * The name of the ARGUMENT you send a cursor back in, from the name of the field it arrived in
+ * (BEA-1415). Vendors almost never use the same word for both — Gmail answers `nextPageToken` and
+ * expects `page_token`; Instagram answers `next_max_id` and expects `next_max_id`.
+ *
+ * The same mapping `pagingOf()` has always used, lifted out so the learned cursor and the guessed
+ * one can never drift apart.
+ */
+export function cursorParamFor(answerKey: string): string {
+  const k = String(answerKey || '').split('.').pop() || '';
+  if (/max_id/i.test(k)) return 'next_max_id';
+  if (/token/i.test(k)) return 'page_token';
+  if (/page_id/i.test(k)) return 'next_page_id';
+  return 'cursor';
 }

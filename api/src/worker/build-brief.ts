@@ -297,12 +297,17 @@ function briefText(inp: BuildInputs, planHash: string, index: any, contract: Wor
 You are writing a small Node program that runs one agent job of My Brain. You are inside its version
 folder (\`v${inp.version}\`) and everything you write goes here. ${inp.previousVersion ? `The job is on v${inp.previousVersion} today; it keeps running until this one passes its tests.` : 'This job has no worker yet — it runs on the plan runner until this one passes its tests.'}
 ${inp.reason ? `\nWhy this build: ${inp.reason}\n` : ''}
-Write exactly two files:
+Write two files, and a third when a tool's answer needs it:
 
 - **\`worker.mjs\`** — the plan below, in code. It must \`export async function run(kit)\` and, when
   started by the worker runner, build a kit from the environment and run once. \`kit/KIT.md\` in this
   folder has the template and the whole API. Read it FIRST.
 - **\`worker.test.mjs\`** — its tests, run with \`node --test worker.test.mjs\` from this folder.
+- **\`recipe.json\`** — how each tool's answer should be READ, when the general reader gets it wrong.
+  Look at the real answers in \`samples/\` first. If the app already reads a source into sensible
+  columns, leave that source out: an unnecessary recipe is one more thing that has to stay true.
+  \`kit/KIT.md\` has the shape and the three rules — every path must exist, reading may not drop
+  anything, and the raw answer never leaves the app.
 
 Then run \`node --test worker.test.mjs\` yourself and fix what fails. **Green tests are the only way
 this worker goes live.** If they cannot pass, leave them failing and say why in your final message —
