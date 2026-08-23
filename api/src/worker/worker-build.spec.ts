@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { planFromAgent } from '../social/plan';
 import { buildRequest, planHashOf, sampleFileName, stable } from './build-brief';
 import { WorkerBuildService } from './worker-build.service';
@@ -259,7 +261,9 @@ describe('the build turn — nothing goes live without green tests', () => {
     await expect(w.service.build('job-1')).rejects.toThrow(/nothing to fetch from yet/i);
     const state = await w.service.state('job-1');
     expect(state.compilable).toBe(false);
-    expect(state.reason).toContain('nothing to compile');
+    // The reason is now the real one, in true words (BEA-1454) — not a sentence about an engine road
+    // that a brief-built agent does not have.
+    expect(state.reason).toContain('nothing to fetch from yet');
   });
 
   it('only the LIVE worker\'s saved answers are pinned against the eviction sweep', async () => {
@@ -331,5 +335,42 @@ describe('what a job must have before it can be compiled (BEA-1454)', () => {
     for (const job of [{ tools: [], toolArgs: null }, { tools: ['remember'], toolArgs: gmail }]) {
       expect(check(job)).not.toMatch(/runs on the engine/i);
     }
+  });
+});
+
+/**
+ * One rule, in both places (BEA-1454).
+ *
+ * His first real brief built and PROMOTED — Codex wrote the program, seven tests passed, the symlink
+ * moved. And the trial still died, with a generic sentence, because the status check two functions
+ * away was still asking the OLD question ("can the plan runner do this whole job?"). It answered no,
+ * so no hash was computed; an empty hash never equals the one stamped on the worker; a brand-new
+ * build read as STALE and was thrown away.
+ *
+ * I had fixed the rule at the build an hour earlier and left its twin behind. Fifth time in a week
+ * for the same habit, so: one function, and a test that fails if a second one appears.
+ */
+describe('the build and the status ask the SAME question (BEA-1454)', () => {
+  it('a job that writes is compilable, and gets a real hash rather than an empty one', () => {
+    const job = {
+      id: 'j1',
+      tools: ['svc:gmail.fetch_emails', 'svc:notion.create_notion_page'],
+      toolArgs: { 'svc:gmail.fetch_emails': { actionId: 'svc:gmail.fetch_emails', args: {} } },
+      prompt: 'Keep every result as fetched.',
+    };
+    expect((WorkerBuildService as any).whyNotCompilableFor(job)).toBe('');
+  });
+
+  it('nothing in the build service asks the plan runner\'s question any more', () => {
+    // `isDirectFetchAgent` means "can the PLAN RUNNER do this whole job", which is a different thing
+    // from "can this be compiled" the moment a brief can name what it writes with.
+    const src = readFileSync(join(__dirname, 'worker-build.service.ts'), 'utf8');
+    expect(src).not.toContain('isDirectFetchAgent');
+  });
+
+  it('a refusal is the real reason, not a sentence about a road that no longer exists', () => {
+    const why = (WorkerBuildService as any).whyNotCompilableFor({ tools: ['remember'], toolArgs: { 'svc:gmail.fetch_emails': { actionId: 'svc:gmail.fetch_emails', args: {} } } });
+    expect(why).toContain('remember');
+    expect(why).not.toMatch(/runs on the engine/i);
   });
 });
