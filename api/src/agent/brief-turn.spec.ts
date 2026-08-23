@@ -203,3 +203,45 @@ describe('the conversation state survives a round trip', () => {
     for (const l of loaders) expect(l).toContain('brief:');
   });
 });
+
+/**
+ * The proof has to travel with the brief (BEA-1424).
+ *
+ * The turn knew the conversation had looked — the sampler writes a line for every real call. The
+ * model's own brief cannot know the `ToolCall` id, so the sources it proposed carried nothing, and
+ * the stored brief then refused its own approval: *"I have not looked at Instagram myself yet"*,
+ * about a source it had just fetched twelve posts from.
+ *
+ * Found by pressing the button on a real conversation. Both checks were right; they were reading
+ * different things.
+ */
+describe('what the conversation looked at reaches the brief', () => {
+  const proofFrom = (log: any[]) => {
+    const proof = new Map<string, string>();
+    for (const m of log || []) {
+      if (m?.kind === 'sample' && m?.ok && m?.actionId && m?.callId) proof.set(String(m.actionId), String(m.callId));
+    }
+    return proof;
+  };
+
+  it('takes the call id off a successful look', () => {
+    const proof = proofFrom([{ who: 'ai', kind: 'sample', ok: true, actionId: 'svc:instagram.search_hashtag', callId: 'tc9' }]);
+    expect(proof.get('svc:instagram.search_hashtag')).toBe('tc9');
+  });
+
+  it('ignores a look that FAILED — a call that did not work proves nothing', () => {
+    expect(proofFrom([{ kind: 'sample', ok: false, actionId: 'svc:x.y', callId: 'tc1' }]).size).toBe(0);
+  });
+
+  it('ignores an ordinary chat line', () => {
+    expect(proofFrom([{ who: 'you', text: 'do the thing' }, { who: 'ai', text: 'sure' }]).size).toBe(0);
+  });
+
+  it('keeps the NEWEST look at an action, when it was looked at twice', () => {
+    const proof = proofFrom([
+      { kind: 'sample', ok: true, actionId: 'svc:a.b', callId: 'first' },
+      { kind: 'sample', ok: true, actionId: 'svc:a.b', callId: 'second' },
+    ]);
+    expect(proof.get('svc:a.b')).toBe('second');
+  });
+});
