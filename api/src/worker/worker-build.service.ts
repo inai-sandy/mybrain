@@ -7,7 +7,7 @@ import { BriefService } from '../agent/brief.service';
 import { ToolLessonService, shapeInWords } from '../tools/tool-lesson.service';
 import { ToolKnowledgeService, ToolKnowledge } from '../tools/tool-knowledge.service';
 import { ToolSampleService } from '../tools/tool-sample.service';
-import { AgentPlan, PlanBlock, isDirectFetchAgent, planActionIds, planFromAgent, sourceActionId, sourceLabel } from '../social/plan';
+import { AgentPlan, PlanBlock, planActionIds, planFromAgent, sourceActionId, sourceLabel } from '../social/plan';
 import { normaliseToolArgs } from '../social/tool-args';
 import { isServiceToolId } from '../tools/service-provider';
 import { tableOf } from '../social/rows';
@@ -89,7 +89,13 @@ export class WorkerBuildService implements OnModuleInit {
   async state(agentId: string): Promise<WorkerState> {
     const job = await this.agent.getAgent(agentId).catch(() => null);
     if (!job) throw new BadRequestException('That job no longer exists.');
-    const compilable = isDirectFetchAgent(job);
+    // The SAME rule the build uses (BEA-1454). It used to be the plan runner's check here and a
+    // different check at the build, and the gap threw away a program that had just been written,
+    // tested and promoted: `compilable:false` meant no hash was computed, an empty hash never equals
+    // the one stamped on the worker, so a brand-new build read as STALE and the trial died with a
+    // generic sentence. One rule, both places, or they drift the first time either changes.
+    const cannot = WorkerBuildService.whyNotCompilableFor(job);
+    const compilable = !cannot;
     const plan = compilable ? planFromAgent(job) : null;
     // The SAME hash the build turn stamps (BEA-1407): plan + the approved brief's identity. If these
     // two ever drift apart, every worker reads as stale for ever.
@@ -109,7 +115,7 @@ export class WorkerBuildService implements OnModuleInit {
       planHash,
       stale: !!worker && worker.planHash !== planHash,
       compilable,
-      reason: compilable ? undefined : 'This job runs on the engine, not on a plan of sources — there is nothing to compile into a worker yet.',
+      reason: compilable ? undefined : cannot,
       building,
       builds: rows.map((b: any) => this.shape(b, planHash)),
     };
@@ -265,7 +271,7 @@ export class WorkerBuildService implements OnModuleInit {
   /**
    * Can this job be compiled into a program, and if not, why — in words that are TRUE.
    *
-   * It used to lean on `isDirectFetchAgent()`, which asks a different question: "can the PLAN RUNNER
+   * It used to lean on the plan runner's own check, which asks a different question: "can the PLAN RUNNER
    * do this whole job by itself?" That requires every tool to be a source, which was true when an
    * agent could only read and false the moment a brief could name what it WRITES with (BEA-1453).
    * The owner's first brief that created Notion pages was refused by it — with the words "this job
