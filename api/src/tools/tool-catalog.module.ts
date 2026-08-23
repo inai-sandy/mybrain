@@ -9,6 +9,7 @@ import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { WhatsAppProvider } from './whatsapp.provider';
 import { ServiceActionsService } from './service-actions.service';
 import { ToolLessonService } from './tool-lesson.service';
+import { ToolLookupService } from './tool-lookup.service';
 import { ServiceGatesService } from './service-gates.service';
 import { ToolCatalogController } from './tool-catalog.controller';
 import { ServicesController } from './services.controller';
@@ -20,7 +21,7 @@ import { ToolSampleService } from './tool-sample.service';
 @Module({
   imports: [ConnectorModule, SkillsModule], // LlmModule and PrismaModule are @Global
   controllers: [ToolCatalogController, ServicesController, ToolKnowledgeController],
-  providers: [ToolLessonService, ToolCatalogService, ToolSampleService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
-  exports: [ToolLessonService, ToolCatalogService, ToolSampleService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
+  providers: [ToolLessonService, ToolLookupService, ToolCatalogService, ToolSampleService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
+  exports: [ToolLessonService, ToolLookupService, ToolCatalogService, ToolSampleService, WebResearchService, DeepResearchService, ComposioProvider, ScrapeCreatorsProvider, WhatsAppProvider, ServiceGatesService, ServiceActionsService, ToolKnowledgeService],
 })
 export class ToolCatalogModule {}
