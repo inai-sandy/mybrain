@@ -129,7 +129,9 @@ export class AgentAreasService {
   // `cost` and `design` (the design-budget counter) are the thinking builder's (BEA-1371).
   private async jobLoad(areaId: string): Promise<BuilderState> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.jobKey(areaId) } }).catch(() => null);
-    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, goal: v?.goal || null }; } catch { return { log: [], job: null, plan: null, cost: null }; }
+    // Same rule as the top-level builder's loader: a field `packState` writes and this does not read
+    // is saved and silently dropped (BEA-1424).
+    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, goal: v?.goal || null, brief: v?.brief || null }; } catch { return { log: [], job: null, plan: null, cost: null }; }
   }
   private async jobSave(areaId: string, st: BuilderState) {
     await this.prisma.setting.upsert({ where: { key: this.jobKey(areaId) }, create: { key: this.jobKey(areaId), value: packState(st) }, update: { value: packState(st) } });
@@ -533,7 +535,10 @@ export class AgentAreasService {
 
   private async builderLoad(): Promise<BuilderState> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.builderKey() } }).catch(() => null);
-    try { const v = row ? JSON.parse((row as any).value) : null; return { log: v?.log || [], spec: v?.spec || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, seed: v?.seed || null, goal: v?.goal || null }; } catch { return { log: [], spec: null, plan: null, cost: null }; }
+    // Every field is named on BOTH sides. `packState` writing a field that this does not read means
+    // it is saved and then silently dropped — which is exactly what happened to `brief` (BEA-1424):
+    // the conversation wrote one, it went into the row, and Create said "there is no proposal yet".
+    try { const v = row ? JSON.parse((row as any).value) : null; return { log: v?.log || [], spec: v?.spec || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, seed: v?.seed || null, goal: v?.goal || null, brief: v?.brief || null }; } catch { return { log: [], spec: null, plan: null, cost: null }; }
   }
   // `samples` = the sample-call counter (BEA-1370); kept across turns, dropped by `builderReset()`.
   private async builderSave(st: BuilderState) {
