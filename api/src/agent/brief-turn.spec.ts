@@ -1,4 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { AI_LINES_MAX } from './brief';
 import { BRIEF_TEXT, briefCardOf, briefHeldNote, briefRequestOf, checkProposedBrief, readProposedBrief } from './brief-turn';
 
@@ -168,5 +170,36 @@ describe('what the builder is told a brief is', () => {
 
   it('says plainly that sending a brief builds nothing', () => {
     expect(BRIEF_TEXT).toContain('Nothing is built when you send a brief');
+  });
+});
+
+/**
+ * A field written on one side and not read on the other is saved and then silently dropped
+ * (BEA-1424).
+ *
+ * The conversation wrote a brief, it went into the row — and Create answered "there is no proposal
+ * to create yet", because the loader rebuilds the state field by field and `brief` was not on its
+ * list. Found by pressing the button on a real conversation, not by any test I had written.
+ */
+describe('the conversation state survives a round trip', () => {
+  it('every field the writer writes, both readers read', () => {
+    const src = readFileSync(join(__dirname, 'agent-areas.service.ts'), 'utf8');
+    const packed = src.slice(src.indexOf('function packState('), src.indexOf('function packState(') + 1200);
+    const written = new Set(
+      [...packed.matchAll(/st\.(\w+)/g)].map((m) => m[1]).filter((k) => k !== 'log'),
+    );
+    expect(written.has('brief')).toBe(true);
+
+    // Both loaders rebuild the state field by field, so both have to name every field.
+    const loaders = [...src.matchAll(/return \{ log: v\?\.log[^}]*\}/g)].map((m) => m[0]);
+    expect(loaders.length).toBe(2);
+
+    for (const field of written) {
+      const inSome = loaders.some((l) => l.includes(`${field}:`));
+      // A field only one builder has (spec / job / seed) is fine; one NOBODY reads is the bug.
+      expect([field, inSome]).toEqual([field, true]);
+    }
+    // And the one that actually bit: read by both.
+    for (const l of loaders) expect(l).toContain('brief:');
   });
 });
