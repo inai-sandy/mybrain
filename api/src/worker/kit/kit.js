@@ -140,9 +140,16 @@ function makeKit(opts) {
      * source too — it is named by the same source id, and the app runs the finder and the
      * per-creator calls. A worker has no database, so it never decides paging for itself.
      */
+    /**
+     * Fetch one source. `o2.recipe` is THIS tool's own reading recipe (BEA-1415) — the app applies
+     * it to the answer it already holds, so the raw answer never leaves the app. A recipe that names
+     * a path the answer does not have, or that would drop rows, is refused and the general reader
+     * takes over; the run says which happened, either way.
+     */
     async fetchSource(sourceId, o2) {
       const body = { seq: seq++, sourceId: String(sourceId) };
       if (o2 && o2.pages !== undefined) body.pages = o2.pages;
+      if (o2 && o2.recipe) body.recipe = o2.recipe;
       const r = await post('tool', body);
       if (r.stop) throw new WorkerFailed(r.stop);
       remember(String(sourceId), r);
