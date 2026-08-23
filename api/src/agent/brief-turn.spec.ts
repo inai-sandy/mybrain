@@ -299,3 +299,46 @@ describe('a brief can describe an agent that WRITES, not only one that reads', (
       .toEqual(['svc:notion.create_notion_page', 'svc:gmail.fetch_emails']);
   });
 });
+
+/**
+ * The tools a brief names have to survive the whole way (BEA-1453).
+ *
+ * Third time in one night for this shape of bug: a field added on one side and not the other. The
+ * brief could hold `tools`, the store could persist them, `briefToAgentInput` could put them on the
+ * job — and the builder was never told the field existed, so a brief that described creating Notion
+ * pages listed no Notion actions at all, and the worker would have had nothing to call.
+ */
+describe('the actions it writes with, from the model to the job', () => {
+  const withTools = (tools: any) => readProposedBrief({
+    name: 'n',
+    sections: { want: [{ text: 'do it', origin: 'owner' }], success: [{ text: '5 emails', origin: 'owner' }] },
+    sources: [{ actionId: 'svc:gmail.fetch_emails' }],
+    tools,
+    delivery: { whatsapp: true, messageText: 'hi <n>' },
+  });
+
+  it('reads them off the model\'s answer', () => {
+    expect(withTools(['svc:notion.create_notion_page'])!.tools).toEqual(['svc:notion.create_notion_page']);
+  });
+
+  it('takes them however the model writes them', () => {
+    expect(withTools([{ actionId: 'svc:notion.create_notion_page' }, { id: 'svc:whatsapp.send_text' }])!.tools)
+      .toEqual(['svc:notion.create_notion_page', 'svc:whatsapp.send_text']);
+  });
+
+  it('is empty for a job that only reads, and that is fine', () => {
+    expect(withTools(undefined)!.tools).toEqual([]);
+    expect(withTools([])!.tools).toEqual([]);
+  });
+
+  it('drops junk and never repeats one', () => {
+    expect(withTools(['', null, 'svc:a.b', 'svc:a.b'])!.tools).toEqual(['svc:a.b']);
+  });
+
+  it('the builder is TOLD the field exists, and that it is not optional', () => {
+    // The bug was never the reading. It was that nothing asked the model to fill it in.
+    expect(BRIEF_TEXT).toContain('"tools"');
+    expect(BRIEF_TEXT).toContain('IS NOT OPTIONAL when it does anything but read');
+    expect(BRIEF_TEXT).toContain('An action you do not list here, the agent cannot call');
+  });
+});
