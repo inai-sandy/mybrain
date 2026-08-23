@@ -219,6 +219,39 @@ export function readTranscript(raw: any): TranscriptTurn[] {
 export type BriefRefusal = { section: SectionKey | 'sources' | 'output'; why: string };
 
 /**
+ * How many lines the AI may write across the whole brief (BEA-1416).
+ *
+ * The gate only works if he reads it, and a screen and a half at 11pm gets scrolled past. Asked
+ * directly whether he would read one, he did not answer — so the honest assumption is *sometimes*,
+ * and the design has to survive that.
+ *
+ * The limit is on the AI, never on him: he may say as much as he likes. If the builder cannot say
+ * the job in fifteen lines it does not understand the job yet, and the right move is to **ask him
+ * another question**, not to write a sixteenth line he will not read.
+ */
+export const AI_LINES_MAX = 15;
+
+/** How many lines the AI has written into this brief, struck ones not counted. */
+export function aiLineCount(sections: BriefSections): number {
+  let n = 0;
+  for (const k of SECTION_KEYS) n += live(sections[k]).filter((l) => l.origin === 'ai').length;
+  return n;
+}
+
+/**
+ * May the builder write another line, or has it run out of room? The sentence is what the builder is
+ * told, and it names the only way forward: ask him something.
+ */
+export function roomForAnotherLine(sections: BriefSections): { ok: boolean; why?: string } {
+  const n = aiLineCount(sections);
+  if (n < AI_LINES_MAX) return { ok: true };
+  return {
+    ok: false,
+    why: `You have written ${n} lines of your own into this brief, which is the most it may hold — it has to stay short enough for him to read in one go. Ask him a question instead, or replace one of your own lines.`,
+  };
+}
+
+/**
  * The four rules, in code rather than in a prompt — a prompt is a request, and the builder has
  * already shown it will talk its way past one. Each refusal names the missing thing in the words
  * the owner would use, because he reads these beside the section they belong to.

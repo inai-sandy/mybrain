@@ -51,7 +51,8 @@ function view(over: Partial<Brief> = {}, refusals: any[] = [], handlers: any = {
 describe('the brief screen', () => {
   it('marks the AI\'s guess differently from his own words, without reading the text', () => {
     view();
-    // Three different tags, each with its own word — colour is never the only signal.
+    // His own words fold away by default (BEA-1416) — open one to compare the three tags.
+    fireEvent.click(within(screen.getByTestId('brief-section-want')).getByTestId('mine-show'));
     expect(screen.getByTestId('tag-owner')).toHaveTextContent(/your words/i);
     expect(screen.getByTestId('tag-tool')).toHaveTextContent(/looked/i);
     expect(screen.getByTestId('tag-ai')).toHaveTextContent(/my guess/i);
@@ -88,6 +89,7 @@ describe('the brief screen', () => {
 
   it('editing a line tells him it becomes his words, and sends the change', () => {
     const p = view();
+    fireEvent.click(within(screen.getByTestId('brief-section-want')).getByTestId('mine-show'));
     fireEvent.click(within(screen.getAllByTestId('brief-line')[0]).getByTestId('line-edit'));
     expect(screen.getByText(/becomes your words/i)).toBeTruthy();
     const box = screen.getByLabelText('Edit this line') as HTMLTextAreaElement;
@@ -98,6 +100,7 @@ describe('the brief screen', () => {
 
   it('an unchanged line is not saved for nothing', () => {
     const p = view();
+    fireEvent.click(within(screen.getByTestId('brief-section-want')).getByTestId('mine-show'));
     fireEvent.click(within(screen.getAllByTestId('brief-line')[0]).getByTestId('line-edit'));
     fireEvent.click(screen.getByTestId('line-save'));
     expect(p.onEdit).not.toHaveBeenCalled();
@@ -107,6 +110,7 @@ describe('the brief screen', () => {
 
   it('crossing out a line asks the server to strike it, not delete it', () => {
     const p = view();
+    fireEvent.click(within(screen.getByTestId('brief-section-want')).getByTestId('mine-show'));
     fireEvent.click(within(screen.getAllByTestId('brief-line')[0]).getByTestId('line-strike'));
     expect(p.onStrike).toHaveBeenCalledWith('l1', true);
   });
@@ -200,5 +204,64 @@ describe('the tag on its own', () => {
   it('carries an icon as well as a colour, so it still reads without colour', () => {
     const { container } = render(<><OriginTag origin="ai" /><OriginTag origin="owner" /><OriginTag origin="tool" /></>);
     expect(container.querySelectorAll('svg').length).toBe(3);
+  });
+});
+
+/**
+ * A brief he will actually read (BEA-1416).
+ *
+ * His own words are the part he does NOT need to re-read — he wrote them. What has to be in front of
+ * him is the short list of things the AI decided on its own, because that is the only part that can
+ * be wrong in a way he has not already seen.
+ */
+describe('what he sees first', () => {
+  it('puts the AI\'s guesses above his own words', () => {
+    view({
+      sections: {
+        ...brief().sections,
+        filter: [
+          { id: 'own', text: 'Keep anything from a person.', origin: 'owner' },
+          { id: 'guess', text: 'Skip newsletters.', origin: 'ai' },
+        ],
+      },
+    });
+    const section = screen.getByTestId('brief-section-filter');
+    // The guess is drawn; his own line is folded behind a control.
+    expect(within(section).getByText('Skip newsletters.')).toBeTruthy();
+    expect(within(section).queryByText('Keep anything from a person.')).toBeNull();
+    expect(within(section).getByTestId('mine-show')).toHaveTextContent('Your own line');
+  });
+
+  it('opens his own words when he asks, and folds them again', () => {
+    view();
+    const section = screen.getByTestId('brief-section-want');
+    fireEvent.click(within(section).getByTestId('mine-show'));
+    expect(within(section).getByText(/Read all my important emails/)).toBeTruthy();
+    fireEvent.click(within(section).getByTestId('mine-hide'));
+    expect(within(section).queryByText(/Read all my important emails/)).toBeNull();
+  });
+
+  it('counts them properly in the fold', () => {
+    view({
+      sections: {
+        ...brief().sections,
+        filter: [
+          { id: 'o1', text: 'one', origin: 'owner' },
+          { id: 'o2', text: 'two', origin: 'owner' },
+        ],
+      },
+    });
+    expect(within(screen.getByTestId('brief-section-filter')).getByTestId('mine-show')).toHaveTextContent('Your own 2 lines');
+  });
+
+  it('what a tool really showed stays in front — it is not his word and not a guess', () => {
+    view();
+    // The `looked` line in "where it comes from" is visible without opening anything.
+    expect(within(screen.getByTestId('brief-section-sources')).getByText(/I looked at Gmail/)).toBeTruthy();
+  });
+
+  it('shows no fold at all when he has written nothing there', () => {
+    view({ sections: { ...brief().sections, filter: [{ id: 'g', text: 'Skip newsletters.', origin: 'ai' }] } });
+    expect(within(screen.getByTestId('brief-section-filter')).queryByTestId('mine-show')).toBeNull();
   });
 });

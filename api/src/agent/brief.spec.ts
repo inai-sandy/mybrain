@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from '@jest/globals';
 import { BriefService, sawText } from './brief.service';
-import { SECTION_KEYS, emptyDelivery, emptySections, forCodexPayload, line, readSections, whyNotApprovable } from './brief';
+import { AI_LINES_MAX, SECTION_KEYS, aiLineCount, emptyDelivery, emptySections, forCodexPayload, line, readSections, roomForAnotherLine, whyNotApprovable } from './brief';
 
 /**
  * The four rules, and the two things the owner lost nine hours to (BEA-1405).
@@ -364,5 +364,60 @@ describe('deleting an agent takes its briefs with it', () => {
     const { AgentAreasService } = await import('./agent-areas.service');
     const svc: any = new (AgentAreasService as any)(prisma);
     await expect(svc.remove('area-1')).resolves.toEqual({ ok: true, jobsDeleted: 0 });
+  });
+});
+
+/**
+ * A brief short enough to actually read (BEA-1416).
+ *
+ * The gate only works if he reads it, and a screen and a half at 11pm gets scrolled past. Asked
+ * directly whether he would read one, he did not answer — so this is designed for *sometimes*.
+ *
+ * The limit is on the AI and never on him. If the builder cannot say the job in fifteen lines it
+ * does not understand the job yet, and the way out is to ask him something, not to write more.
+ */
+describe('the AI runs out of room; he never does', () => {
+  let s2: ReturnType<typeof store>;
+  let svc2: BriefService;
+  beforeEach(() => { s2 = store(); svc2 = new BriefService(s2.prisma); });
+
+  async function fill(id: string, n: number, origin: 'ai' | 'owner') {
+    for (let i = 0; i < n; i++) await svc2.addLine(id, 'filter', `${origin} line ${i}`, origin);
+  }
+
+  it('stops the AI at the limit, and tells it to ask a question instead', async () => {
+    const b = await svc2.draft('a1');
+    await fill(b.id, AI_LINES_MAX, 'ai');
+    await expect(svc2.addLine(b.id, 'filter', 'one more', 'ai')).rejects.toThrow(/Ask him a question instead/);
+  });
+
+  it('never stops HIM — he may say as much as he likes', async () => {
+    const b = await svc2.draft('a2');
+    await fill(b.id, AI_LINES_MAX + 10, 'owner');
+    const after = await svc2.addLine(b.id, 'filter', 'and another thing', 'owner');
+    expect(after.sections.filter.length).toBe(AI_LINES_MAX + 11);
+  });
+
+  it('a line the AI wrote and he struck out gives the room back', async () => {
+    const b = await svc2.draft('a3');
+    await fill(b.id, AI_LINES_MAX, 'ai');
+    const full = await svc2.get(b.id);
+    await svc2.strike(full!.id, full!.sections.filter[0].id);
+    await expect(svc2.addLine(b.id, 'filter', 'one more', 'ai')).resolves.toBeTruthy();
+  });
+
+  it('a tool\'s own finding is not the AI talking, and does not count', async () => {
+    const b = await svc2.draft('a4');
+    await fill(b.id, AI_LINES_MAX, 'ai');
+    await expect(svc2.addLine(b.id, 'sources', 'I looked at Gmail and got 47.', 'tool')).resolves.toBeTruthy();
+  });
+
+  it('counts what the AI wrote across the whole brief, not per section', async () => {
+    const b = await svc2.draft('a5');
+    for (let i = 0; i < 8; i++) await svc2.addLine(b.id, 'filter', `f${i}`, 'ai');
+    for (let i = 0; i < 7; i++) await svc2.addLine(b.id, 'output', `o${i}`, 'ai');
+    const full = await svc2.get(b.id);
+    expect(aiLineCount(full!.sections)).toBe(AI_LINES_MAX);
+    expect(roomForAnotherLine(full!.sections).ok).toBe(false);
   });
 });

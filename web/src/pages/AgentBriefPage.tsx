@@ -172,11 +172,18 @@ export default function AgentBriefPage() {
           )}
         </div>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Read this before anything is built. Anything marked <span className="font-semibold text-amber-700 dark:text-amber-300">my guess</span> is the AI's own idea, not yours — change it or cross it out.
+          {trial?.trial?.status === 'passed'
+            ? 'Look at what it actually did, below. Nothing has been kept yet.'
+            : <>Read this before anything is built. Anything marked <span className="font-semibold text-amber-700 dark:text-amber-300">my guess</span> is the AI's own idea, not yours — change it or cross it out.</>}
         </p>
       </header>
 
-      {/* The second gate — shown only once the brief is approved: there is nothing to run before that. */}
+      {/*
+        The result leads (BEA-1416). A brief is a document and documents get skimmed at 11pm; a
+        result gets looked at, because a wrong message is obvious in a way that line eleven of a
+        document never is. So when there is something real to judge, it goes above everything else
+        and the brief moves below it — still there, still editable.
+      */}
       {brief.status === 'approved' && trial && (
         <TrialCard
           state={trial}
@@ -185,6 +192,10 @@ export default function AgentBriefPage() {
           onCreate={createIt}
           onSendBack={sendBack}
         />
+      )}
+
+      {trial?.trial?.status === 'passed' && (
+        <p className="text-[11px] text-zinc-400">The brief it was built from is below, if you want to change something.</p>
       )}
 
       <BriefView

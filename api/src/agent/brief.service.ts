@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BuilderSampleService, SampleView } from './builder-sample.service';
 import {
+  AI_LINES_MAX,
   Brief,
   BriefDelivery,
   BriefLine,
@@ -21,9 +22,21 @@ import {
   readSections,
   readSources,
   readTranscript,
+  roomForAnotherLine,
   sourceName,
   whyNotApprovable,
 } from './brief';
+
+/**
+ * The builder has filled the brief and must ask him something instead (BEA-1416). Its own error
+ * type, so the turn engine can hand the sentence back to the model rather than showing him a crash.
+ */
+export class BriefFullError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BriefFullError';
+  }
+}
 
 /**
  * The brief's store, and the four rules that decide whether one may be approved (BEA-1405).
@@ -155,11 +168,21 @@ export class BriefService {
     return this.save(target.id, data);
   }
 
-  /** Add one line to a section, tagged with where it came from. */
+  /**
+   * Add one line to a section, tagged with where it came from.
+   *
+   * The AI runs out of room at `AI_LINES_MAX` (BEA-1416); he never does. A brief he will not read is
+   * a rubber stamp, and the builder's way out of a full brief is to ask him a question — not to write
+   * one more line into a document he is already scrolling past.
+   */
   async addLine(id: string, section: SectionKey, text: string, origin: LineOrigin, evidence?: BriefLine['evidence']): Promise<Brief> {
     const b = await this.get(id);
     if (!b) throw new Error('That brief is gone.');
     if (!isSectionKey(section)) throw new Error('There is no such part of a brief.');
+    if (origin === 'ai') {
+      const room = roomForAnotherLine(b.sections);
+      if (!room.ok) throw new BriefFullError(room.why!);
+    }
     const target = b.status === 'approved' ? await this.draft(b.areaId, b.name) : b;
     const sections = target.sections;
     sections[section] = [...(sections[section] || []), line(text, origin, evidence ? { evidence } : {})];
