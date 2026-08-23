@@ -143,7 +143,10 @@ describe('the callback routes', () => {
     const { kit } = await spawnKit(world, 'r', 'ag1');
     await expect(kit.ai('agent-builder', 'design me something')).rejects.toThrow(/not a helper a worker may use/i);
     expect(world.shaped).toHaveLength(0);
-    expect(WORKER_HELPERS).toEqual(['social-shape', 'social-alert']);
+    // `worker-think` joined them (BEA-1453): a worker can now judge — "which of these emails
+    // actually matter" — which is the thing it could not do, and the reason a whole agent was
+    // routed around the brief, the trial and the gate. The allow-list is still exactly three.
+    expect(WORKER_HELPERS).toEqual(['social-shape', 'social-alert', 'worker-think']);
   });
 
   it('a worker may only call its OWN job\'s actions (BEA-1401)', async () => {

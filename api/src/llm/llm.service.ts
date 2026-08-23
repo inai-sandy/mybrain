@@ -259,6 +259,11 @@ export class LlmService {
     // relevance is ours (BEA-1357). It reads real captions and decides what to keep, so a Sonnet-
     // class model on the API; never the engine (a CLI turn's ~25,000-token tax on every batch).
     'social-shape': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
+    // A worker's own thinking step (BEA-1453). Judgement -- "which of these emails actually matter" --
+    // is what sent his first real agent down the old road, because a worker had no way to think.
+    // It does not need a different architecture; it needs one more named model. Sonnet, like the
+    // shaping step beside it: never a cheaper model to save cost (his standing rule).
+    'worker-think': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
     // An Alert job's plain-English condition, judged ONCE over the diff (BEA-1358): "a new post
     // mentions a price", "followers dropped". Reads real captions, answers yes/no — Sonnet-class,
     // and never the engine (a CLI turn for a yes/no is the ~25,000-token tax again).

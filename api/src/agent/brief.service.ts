@@ -21,6 +21,7 @@ import {
   readDelivery,
   readSections,
   readSources,
+  readTools,
   readTranscript,
   roomForAnotherLine,
   sourceName,
@@ -80,6 +81,7 @@ export class BriefService {
       name: String(row.name || ''),
       sections: readSections(this.json(row.sections)),
       sources: readSources(this.json(row.sources)),
+      tools: readTools(this.json(row.tools)),
       delivery: readDelivery(this.json(row.delivery)),
       transcript: readTranscript(this.json(row.transcript)),
       approvedAt: row.approvedAt ? new Date(row.approvedAt).toISOString() : null,
@@ -138,6 +140,7 @@ export class BriefService {
         // A new version starts from the last approved one — he edits, he does not retype.
         sections: JSON.stringify(last?.sections || emptySections()),
         sources: JSON.stringify(last?.sources || []),
+        tools: JSON.stringify(last?.tools || []),
         delivery: JSON.stringify(last?.delivery || emptyDelivery()),
         transcript: JSON.stringify(last?.transcript || []),
       },
@@ -155,7 +158,7 @@ export class BriefService {
    * place — editing one starts the next version, so a worker built from version 2 can always say
    * what version 2 said.
    */
-  async update(id: string, patch: { name?: string; sections?: any; sources?: any; delivery?: any; transcript?: any }): Promise<Brief> {
+  async update(id: string, patch: { name?: string; sections?: any; sources?: any; tools?: any; delivery?: any; transcript?: any }): Promise<Brief> {
     const current = await this.get(id);
     if (!current) throw new Error('That brief is gone.');
     const target = current.status === 'approved' ? await this.draft(current.areaId, current.name) : current;
@@ -163,6 +166,7 @@ export class BriefService {
     if (patch.name !== undefined) data.name = String(patch.name || '');
     if (patch.sections !== undefined) data.sections = JSON.stringify(readSections(patch.sections));
     if (patch.sources !== undefined) data.sources = JSON.stringify(readSources(patch.sources));
+    if (patch.tools !== undefined) data.tools = JSON.stringify(readTools(patch.tools));
     if (patch.delivery !== undefined) data.delivery = JSON.stringify(readDelivery(patch.delivery));
     if (patch.transcript !== undefined) data.transcript = JSON.stringify(readTranscript(patch.transcript));
     return this.save(target.id, data);

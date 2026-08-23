@@ -51,38 +51,24 @@ describe('the new-job chat (BEA-1170)', () => {
     expect(saved.job.name).toBe('EV brief');
   });
 
-  it('builds the job with the task, outcome, tools and checks from the conversation', async () => {
-    const { svc, created, patched } = build({
-      job: {
-        name: 'EV brief', icon: '🔋', task: '1. search\n2. write', outcome: 'one page, with sources',
-        checks: ['must name its sources', 'must cover the last 12 months'],
-        tools: [{ id: 'web_search', why: 'to find the rules' }],
-        depth: 'deep', scheduleText: 'every Monday 8am', notifyWhatsApp: true,
-      },
+  it('refuses to build a job from the OLD road, and says what to do instead (BEA-1453)', async () => {
+    // These three tests used to assert that a `job` proposal created a live job with tools, checks
+    // and a schedule. That road is gone. It made a job switched ON with no brief to read and no run
+    // to watch, and a third model drew its flow afterwards — which is how his first real agent was
+    // built, and why he asked for the old road to go.
+    const { svc, created } = build({
+      job: { name: 'EV brief', icon: '🔋', task: '1. search\n2. write', outcome: 'one page', checks: ['names its sources'], tools: [{ id: 'web_search' }] },
     });
-    const r = await svc.jobBuilderCreate('ar1');
-    expect(r.jobId).toBe('job1');
-    expect(created[0].areaId).toBe('ar1');
-    expect(created[0].prompt).toContain('1. search');
-    expect(created[0].rubric).toBe('one page, with sources');
-    expect(created[0].defaultDepth).toBe('deep');
-    expect(created[0].evals.map((e: any) => e.input)).toEqual(['must name its sources', 'must cover the last 12 months']);
-    // Tools + WhatsApp ride on the CREATE (BEA-1366): the flow is planned on save, inside the toolbox.
-    expect(created[0].tools).toEqual(['web_search']);
-    expect(created[0].notifyWhatsApp).toBe(true);
-    expect(patched).toHaveLength(0);
+    await svc.jobBuilderChat('ar1', 'weekly please');
+    await expect(svc.jobBuilderCreate('ar1')).rejects.toThrow(/older way of building jobs/i);
+    expect(created.length).toBe(0); // nothing was made
   });
 
-  it("uses the owner's ticked tools over the ones it proposed", async () => {
-    const { svc, created } = build({ job: { name: 'x', task: 'y', tools: [{ id: 'web_search' }] } });
-    await svc.jobBuilderCreate('ar1', { tools: ['search_brain', 'save_document'] });
-    expect(created[0].tools).toEqual(['search_brain', 'save_document']);
-  });
-
-  it('clears the proposal after building so the next chat starts fresh', async () => {
-    const { svc, settings } = build({ job: { name: 'x', task: 'y' } });
-    await svc.jobBuilderCreate('ar1');
-    expect(JSON.parse(settings.get('agent.jobBuilder.ar1')!).job).toBeNull();
+  it('refuses plainly when there is nothing to open at all', async () => {
+    const { svc, created } = build({ reply: { reply: 'Which cities?' } });
+    await svc.jobBuilderChat('ar1', 'research EV rules');
+    await expect(svc.jobBuilderCreate('ar1')).rejects.toThrow(/no brief to open yet/i);
+    expect(created.length).toBe(0);
   });
 
   it('keeps each agent\'s half-finished chat separate', async () => {
@@ -94,51 +80,25 @@ describe('the new-job chat (BEA-1170)', () => {
 });
 
 describe('the checks the chat writes (BEA-1172)', () => {
-  function svcWith(job: any) {
-    const settings = new Map<string, string>([['agent.jobBuilder.ar1', JSON.stringify({ log: [], job })]]);
-    const created: any[] = [];
-    const prisma: any = {
-      setting: {
-        findUnique: async ({ where }: any) => (settings.has(where.key) ? { key: where.key, value: settings.get(where.key) } : null),
-        upsert: async ({ where, create, update }: any) => { settings.set(where.key, update?.value ?? create?.value); return {}; },
-      },
-      agentArea: { findUnique: async () => ({ id: 'ar1', name: 'A', tools: '[]' }) },
-    };
-    const agentSvc: any = { createAgent: async (i: any) => { created.push(i); return { id: 'j1', name: i.name }; }, updateAgent: async () => ({}) };
-    return { svc: new AgentAreasService(prisma, agentSvc, {} as any, {} as any, {} as any), created };
-  }
-
-  it('carries the checks straight through to the job', async () => {
-    const { svc, created } = svcWith({ name: 'x', task: 'y', checks: ['names its sources', 'fits on one page'] });
-    await svc.jobBuilderCreate('ar1');
-    expect(created[0].evals.map((e: any) => e.input)).toEqual(['names its sources', 'fits on one page']);
-  });
-
-  it('lets you edit the checks before it builds', async () => {
-    const { svc, created } = svcWith({ name: 'x', task: 'y', checks: ['original'] });
-    await svc.jobBuilderCreate('ar1', { checks: ['mine instead', 'and this'] });
-    expect(created[0].evals.map((e: any) => e.input)).toEqual(['mine instead', 'and this']);
-  });
-
-  it('falls back to the Outcome so a job is never left ungradeable', async () => {
-    const { svc, created } = svcWith({ name: 'x', task: 'y', outcome: 'a one-page brief with sources', checks: [] });
-    await svc.jobBuilderCreate('ar1');
-    expect(created[0].evals.length).toBe(1);
-    expect(created[0].evals[0].input).toBe('a one-page brief with sources');
-  });
-
-  it('drops blank checks rather than saving empty ones', async () => {
-    const { svc, created } = svcWith({ name: 'x', task: 'y', checks: ['  ', 'real one', ''] });
-    await svc.jobBuilderCreate('ar1');
-    expect(created[0].evals.map((e: any) => e.input)).toEqual(['real one']);
+  /**
+   * These tests used to assert that the chat's checks were carried onto a job it created. The job
+   * road is gone (BEA-1453) — what a good run looks like now lives in the brief's own "what it
+   * worked means" section, in HIS words, and becomes a real contract the run is failed against.
+   * `contractFromBrief` and `brief.spec.ts` cover it there.
+   *
+   * Kept as one test so the old promise is not silently forgotten: nothing may create a job with
+   * checks any more, because nothing may create a job at all without a brief and a watched run.
+   */
+  it('no longer builds a job from checks — that promise moved into the brief (BEA-1453)', async () => {
+    const { svc, created } = build({
+      job: { name: 'EV brief', task: '1. search', outcome: 'one page, with sources', checks: ['must name its sources'] },
+    });
+    await svc.jobBuilderChat('ar1', 'weekly please');
+    await expect(svc.jobBuilderCreate('ar1', { checks: ['edited check'] })).rejects.toThrow(/older way of building jobs/i);
+    expect(created.length).toBe(0);
   });
 });
 
-/**
- * BEA-1191 — deleting an agent used to leave its half-finished new-job conversation behind. Nothing
- * reads an orphaned one, but each holds up to 40 messages and they accumulate forever. Same shape as
- * the task bugs: cleanup happens in one place and not in the parallel one.
- */
 describe('deleting an agent takes its new-job chat with it (BEA-1191)', () => {
   function build() {
     const settings = new Map<string, string>([['agent.jobBuilder.ar1', JSON.stringify({ log: [{ who: 'you', text: 'hi' }], job: null })]]);
