@@ -622,10 +622,18 @@ export class AgentAreasService {
   private async persistBrief(areaId: string, proposed: ProposedBrief, log: any[]) {
     if (!this.briefs) throw new BadRequestException('Briefs are not available on this server.');
     const draft = await this.briefs.draft(areaId, proposed.name);
+    // Attach the PROOF (BEA-1424). The conversation really did look — the sampler wrote a line with
+    // the `ToolCall` id on it — but the model's own brief cannot know that id, so the sources it
+    // proposed carried nothing. The stored brief then refused its own approval: "I have not looked
+    // at Instagram myself yet", about a source it had just fetched twelve posts from.
+    const proof = new Map<string, string>();
+    for (const m of log || []) {
+      if (m?.kind === 'sample' && m?.ok && m?.actionId && m?.callId) proof.set(String(m.actionId), String(m.callId));
+    }
     return this.briefs.update(draft.id, {
       name: proposed.name,
       sections: proposed.sections,
-      sources: proposed.sources,
+      sources: proposed.sources.map((s) => (proof.has(s.actionId) ? { ...s, evidence: { callId: proof.get(s.actionId)!, actionId: s.actionId } } : s)),
       delivery: proposed.delivery,
       // The WHOLE conversation goes with it — his decision, 2026-08-22: Codex reads all of it, and
       // the brief sitting on top is what makes that safe.

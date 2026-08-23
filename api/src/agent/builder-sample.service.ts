@@ -196,7 +196,10 @@ export class BuilderSampleService {
     const spent: SampleCounter = { used: Math.max(now.used, reserved.used), credits: now.credits + credits };
     view.budget = this.budgetView(spent);
     // `actionId` on the line: the builder reads which finders this conversation has already looked at (BEA-1375).
-    const line = { who: 'ai', kind: 'sample', actionId: id, ok: !!view.ok, text: sampleLine(view), at: new Date().toISOString() };
+    // `callId` on the line too (BEA-1424): a brief written from this conversation has to be able to
+    // point at the call that proves it. Without it the brief the model wrote could not be approved —
+    // the turn knew the conversation had looked, and the stored brief had no way to show it.
+    const line = { who: 'ai', kind: 'sample', actionId: id, ok: !!view.ok, ...(view.callId ? { callId: view.callId } : {}), text: sampleLine(view), at: new Date().toISOString() };
     await this.save(key, { ...after, log: [...(Array.isArray(after.log) ? after.log : []), line], samples: spent });
     return view;
   }
