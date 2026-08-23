@@ -11,13 +11,23 @@ import { AgentPlan, PlanCost, costLineText, estimatePlanCost, planHasHealthySour
 import { SAMPLE_CAPS, TOP_BUILDER_SESSION, builderSettingKey, readSampleCounter } from './builder-session';
 import { BuilderSampleService } from './builder-sample.service';
 import {
-  BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
+  BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, cardText, estimateTokens, factsSection,
   fillTemplate, healthNote, indexSection, overBudget, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
   BuilderSeed, MAX_ASKS_PER_MESSAGE, costReplyLine, goalMissingNote, goalOf, isExpensivePlan, noGoalText, noHealthySourceText, sampleFinderText, sampledActionIds,
   seedLine, seedText, unsampledFinderNote, unsampledFinders, withGoal,
   AMBIGUOUS_TEXT, PROSE_REPLY_MIN, SHAPE_RETRY_TEXT, THINKING_FAILED_TEXT, TROUBLE_TEXT, TurnRead, TurnTrouble, proseFallbackReply, readTurn,
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
+import { LOOKUP_TEXT, ToolLookupService, lookupRequestOf, lookupText } from '../tools/tool-lookup.service';
+
+/**
+ * How many times the builder may look something up per message he sends (BEA-1417).
+ *
+ * A lookup costs nothing at a vendor — it reads the catalog we already hold — but it costs a model
+ * call each, and a builder browsing forty actions is one that has not understood the job. Enough to
+ * find what it needs, not enough to wander.
+ */
+const LOOKUPS_PER_MESSAGE = 6;
 
 // `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
 // on the older hand-typed entries. It is what makes a toolbox mean something at run time.
@@ -65,7 +75,15 @@ export class AgentAreasService {
     private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167)
     private readonly sampler?: BuilderSampleService, // "look for yourself" (BEA-1370) — LAST, optional
     private readonly knowledge?: ToolKnowledgeService, // the know-how cards the builder reads (BEA-1368/1371)
+    private readonly lookup?: ToolLookupService,
   ) {}
+
+  onModuleInit() {
+    // How a fact card is written out for a model lives here, with the prompt words (BEA-1417).
+    // `ToolCatalogModule` may not import this module, so it is registered rather than injected —
+    // the same `setFlowSync` / `setBudget` seam the rest of the app already uses.
+    this.lookup?.setCardWriter?.((card) => cardText(card));
+  }
 
   /**
    * The one permanent Research Agent (BEA-1110) — the collector for one-time research jobs from
@@ -248,7 +266,7 @@ export class AgentAreasService {
         facts: { label: 'WHAT THE TOOLS CAN REALLY DO (know-how cards)', text: factsSection(cards, convo()) + (index ? `\n\nOTHER OUTSIDE-SERVICE ACTIONS you were not shown a card for (id — name). They exist; sample one before you plan on it:\n${index}` : '') },
         tools: { label: 'Other tools (exact ids)', text: plainTools },
         blocks: { label: 'Planning blocks', text: BLOCKS_TEXT },
-        sample: { label: 'Look for yourself', text: SAMPLE_TEXT },
+        sample: { label: 'Look for yourself', text: `${SAMPLE_TEXT}\n\n${LOOKUP_TEXT}` },
         budget: { label: 'Design budget', text: budgetLine(design) },
         rules: { label: 'Rules', text: RULES_TEXT },
         // The Social hand-off (BEA-1372): the call the owner just made by hand — an empty text is not appended.
@@ -281,6 +299,7 @@ export class AgentAreasService {
       let g: any = null;
       let asks = 0;
       let samplesRun = 0;
+      let lookups = 0;
       let plan: AgentPlan | null = null;
       let refused: AgentPlan | null = null;
       // An expensive plan held back because no goal is established (BEA-1378) — its cost writes the note.
@@ -302,6 +321,27 @@ export class AgentAreasService {
         // The goal may arrive on ANY answer this turn — a plan beside it counts as goal-established.
         const said = goalOf(g);
         if (said) goal = said;
+        // "What tools do I actually have?" (BEA-1417) — the builder asks instead of being handed my
+        // shortlist of fifty. A search narrows; only an exact fetch may be planned on, which is why
+        // `fetched` is what widens `allowedIds` and a search result never does.
+        const ask2 = lookupRequestOf(g);
+        if (ask2 && this.lookup) {
+          if (lookups >= LOOKUPS_PER_MESSAGE) {
+            extra += `\n\nNo more lookups for this message — plan with what you have now.`;
+          } else {
+            lookups++;
+            const answer = ask2.what === 'services'
+              ? { services: await this.lookup.services().catch(() => []) }
+              : ask2.what === 'actions'
+                ? { actions: await this.lookup.findActions(ask2.service || '', ask2.words || '').catch(() => []) }
+                : { action: await this.lookup.getAction(ask2.actionId || '').catch(() => null) };
+            // Only an EXACT fetch may be planned on. A name from a search proves nothing.
+            if (ask2.what === 'action' && (answer as any).action?.id) allowedIds.add(String((answer as any).action.id));
+            extra += `\n\n${lookupText(ask2, answer as any)}\nNow continue.`;
+            continue;
+          }
+        }
+
         const want = sampleRequestOf(g);
         if (want) {
           if (samplesRun >= SAMPLE_LOOPS_PER_MESSAGE || !canSample()) {
