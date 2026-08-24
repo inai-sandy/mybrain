@@ -366,6 +366,19 @@ describe('the build and the status ask the SAME question (BEA-1454)', () => {
     // from "can this be compiled" the moment a brief can name what it writes with.
     const src = readFileSync(join(__dirname, 'worker-build.service.ts'), 'utf8');
     expect(src).not.toContain('isDirectFetchAgent');
+
+    // …and the SAME guard on the DISPATCHER, because that is where it came back (BEA-1462).
+    // The rule was fixed at the build and at `state()` and left alone here, so a job with a green,
+    // promoted worker was sent down the engine road on every run and the owner's screen and his run
+    // disagreed about the same job. Three places asking one question is how this keeps happening.
+    // Matched on the CALL, not the word — the file explains in comments why both are gone, and a
+    // guard that trips on its own explanation teaches people to delete the explanation.
+    const dispatch = readFileSync(join(__dirname, 'worker-dispatch.service.ts'), 'utf8');
+    expect(dispatch).not.toMatch(/isDirectFetchAgent\s*\(/);
+    // The hash too: bare `planHashOf` here could never equal the `buildHashOf(plan, brief)` the
+    // build stamps, so any job with an approved brief was told to rebuild for ever.
+    expect(dispatch).not.toMatch(/planHashOf\s*\(/);
+    expect(dispatch).toContain('buildHashFor');
   });
 
   it('a refusal is the real reason, not a sentence about a road that no longer exists', () => {

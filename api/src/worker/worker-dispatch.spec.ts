@@ -1,3 +1,4 @@
+import { WorkerBuildService } from './worker-build.service';
 import { WorkerDispatchService } from './worker-dispatch.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { planHashOf } from './build-brief';
@@ -46,7 +47,13 @@ function world(opts: { job?: any; worker?: any; runner?: any; journal?: { seq: n
     setRunKind: async (runId: string, kind: string) => { kinds.push({ runId, kind }); },
     setWorkerCleanup: (fn: any) => { (agent as any).cleanup = fn; },
   };
-  const builds: any = { livePromoted: async () => opts.worker ?? null };
+  // The REAL hash function, not a stub that always agrees (BEA-1462). The bug this replaced was
+  // precisely two different hashes believing they were the same one, so a fake that cannot disagree
+  // would test nothing. `WorkerBuildService.buildHashFor` needs no database for a job with no brief.
+  const builds: any = {
+    livePromoted: async () => opts.worker ?? null,
+    buildHashFor: (job: any) => WorkerBuildService.prototype.buildHashFor.call({ briefs: undefined }, job),
+  };
   const tokens: any = {
     mint: async (runId: string, agentId: string) => ({ token: `t-${runId}`, seed: { now: 1, random: 2 }, runId, agentId }),
     revokeRun: () => 0,
@@ -105,11 +112,54 @@ describe('The dispatch switch — which road a run takes (BEA-1394)', () => {
     expect(d.say).toMatch(/v3/);
   });
 
-  it('an engine job is never dispatched to a worker, even with the switch on', async () => {
+  it('a job with nothing to compile is never dispatched to a worker, even with the switch on', async () => {
     const { svc } = world({ job: { id: 'job-1', name: 'Research', prompt: 'go', useWorker: true, tools: [], toolArgs: null }, worker: promoted() });
     const d = await svc.decide('job-1');
     expect(d.use).toBe(false);
-    expect(d.say).toMatch(/engine/i);
+    // The reason is now the BUILD's own words, because it is the build's own rule (BEA-1462) — one
+    // question asked in one place. It used to be `isDirectFetchAgent`, which asks something else
+    // entirely ("can the plan runner do this whole job") and answered no for any brief-built job
+    // that writes somewhere — so a job with a green promoted worker went down the engine road for
+    // ever while its own Settings screen said the worker was fine.
+    expect(d.say).toMatch(/nothing to fetch from yet|nothing to build/i);
+  });
+
+  /**
+   * THE OWNER'S OWN AGENT (BEA-1462).
+   *
+   * "Nightly email summary": built from an approved brief, reads Gmail, writes a document, messages
+   * him. It had a green, promoted worker and `useWorker: true`, and it went down the ENGINE road on
+   * every single run — because `decideFor` asked `isDirectFetchAgent` ("can the plan runner do this
+   * whole job?"), which answers no for exactly this shape. Its own Settings screen said
+   * `compilable: true` at the same moment. Two answers to one question, on one job.
+   */
+  it('a brief-built job that reads and writes reaches its worker', async () => {
+    const brieflike = {
+      id: 'job-1',
+      name: 'Nightly email summary',
+      prompt: 'Summarise what mattered.',
+      origin: 'brief',
+      useWorker: true,
+      tools: ['svc:gmail.fetch_emails'],
+      toolArgs: { 'svc:gmail.fetch_emails': { actionId: 'svc:gmail.fetch_emails', args: { max_results: 25 } } },
+      outputDest: 'document',
+      notifyWhatsApp: true,
+    };
+    const hash = await WorkerBuildService.prototype.buildHashFor.call({ briefs: undefined }, brieflike);
+    const { svc } = world({ job: brieflike, worker: promoted({ planHash: hash }) });
+
+    const d = await svc.decide('job-1');
+    expect(d.use).toBe(true);
+    expect(d.say).toBeUndefined(); // nothing to explain — it just runs on its worker
+  });
+
+  it('and the dispatcher agrees with the SCREEN about whether it can be compiled', async () => {
+    // One rule, asked in one place. If these two ever answer differently again, the owner reads
+    // "worker v1, current" on a job that has never once used it.
+    const brieflike = { id: 'job-1', name: 'N', prompt: 'p', origin: 'brief', useWorker: true, tools: ['svc:gmail.fetch_emails'], toolArgs: { 'svc:gmail.fetch_emails': { actionId: 'svc:gmail.fetch_emails', args: {} } }, outputDest: 'document' };
+    expect(WorkerBuildService.whyNotCompilableFor(brieflike)).toBeFalsy();
+    const { svc } = world({ job: brieflike, worker: promoted({ planHash: await WorkerBuildService.prototype.buildHashFor.call({ briefs: undefined }, brieflike) }) });
+    expect((await svc.decide('job-1')).use).toBe(true);
   });
 
   it('a worker that RAN and finished owns the run — no fallback', async () => {

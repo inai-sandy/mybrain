@@ -115,11 +115,7 @@ export class WorkerBuildService implements OnModuleInit {
     // generic sentence. One rule, both places, or they drift the first time either changes.
     const cannot = WorkerBuildService.whyNotCompilableFor(job);
     const compilable = !cannot;
-    const plan = compilable ? planFromAgent(job) : null;
-    // The SAME hash the build turn stamps (BEA-1407): plan + the approved brief's identity. If these
-    // two ever drift apart, every worker reads as stale for ever.
-    const brief = plan && job.areaId ? await this.briefs?.forCodex?.(job.areaId).catch(() => null) : null;
-    const planHash = plan ? buildHashOf(plan, brief || null) : '';
+    const planHash = await this.buildHashFor(job);
     const rows = await this.rows(agentId, 10);
     const worker = rows.find((b: any) => b.status === 'promoted') || null;
     const building = rows.some((b: any) => b.status === 'building' && Date.now() - new Date(b.startedAt).getTime() < BUILD_STUCK_MS);
@@ -139,6 +135,25 @@ export class WorkerBuildService implements OnModuleInit {
       building,
       builds: rows.map((b: any) => this.shape(b, planHash)),
     };
+  }
+
+  /**
+   * The hash of what this job's worker would be built from, today (BEA-1462).
+   *
+   * **Every place that asks "is this worker still right?" must call THIS** — `state()` for the
+   * screen, `WorkerDispatchService.decideFor()` for the run. The build stamps the same value through
+   * `buildRequest`, which computes it from the same plan and the same brief.
+   *
+   * It is a method rather than three call sites because three call sites is exactly how this went
+   * wrong: the dispatcher used bare `planHashOf(plan)` while the build stamped `buildHashOf(plan,
+   * brief)`, so for any job with an approved brief the two could never be equal and every run said
+   * "the plan changed, rebuild it" — including a run seconds after a fresh, green, promoted build.
+   */
+  async buildHashFor(job: any): Promise<string> {
+    if (WorkerBuildService.whyNotCompilableFor(job)) return '';
+    const plan = planFromAgent(job);
+    const brief = job?.areaId ? await this.briefs?.forCodex?.(job.areaId).catch(() => null) : null;
+    return buildHashOf(plan, brief || null);
   }
 
   // ---- the build turn ---------------------------------------------------------------------------
@@ -308,7 +323,7 @@ export class WorkerBuildService implements OnModuleInit {
    * A job is compilable when it has at least one source to fetch from, and every tool it names is an
    * outside-service action — because those are the only things a worker can call.
    */
-  private static whyNotCompilableFor(job: any): string {
+  static whyNotCompilableFor(job: any): string {
     const tools: string[] = Array.isArray(job?.tools) ? job.tools : [];
     const sources = Object.keys(normaliseToolArgs(job?.toolArgs) || {});
     if (!sources.length) return 'This job has nothing to fetch from yet, so there is nothing to build. Say where the information comes from.';

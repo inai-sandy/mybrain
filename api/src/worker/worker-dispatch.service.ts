@@ -3,8 +3,7 @@ import { AgentService } from '../agent/agent.service';
 import { isJobBusy } from '../agent/run-lock.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
-import { isDirectFetchAgent, planFromAgent } from '../social/plan';
-import { planHashOf } from './build-brief';
+
 import { RunJournalService } from './run-journal.service';
 import { WorkerBuildService } from './worker-build.service';
 import { WorkerRunnerClient } from './worker-runner.client';
@@ -85,14 +84,20 @@ export class WorkerDispatchService implements OnModuleInit {
     // OFF is the default and the quiet case: no step, no lookup, nothing said. The owner's existing
     // jobs are all `useWorker:false`, so they behave exactly as they did before this piece.
     if (!job?.id || !job.useWorker) return { use: false };
-    if (!isDirectFetchAgent(job)) {
-      return { use: false, say: 'Ran it the old way — this job runs on the engine, so there is nothing for a worker to run.' };
-    }
+    // The SAME rule the build and the screen use (BEA-1454, and again here in BEA-1462).
+    // `isDirectFetchAgent` used to stand here, and it is a DIFFERENT question — "can the plan runner
+    // do this whole job" — which answers no for a brief-built job that writes anywhere. That made a
+    // job with a green, promoted worker fall back to the engine on every single run.
+    const cannot = WorkerBuildService.whyNotCompilableFor(job);
+    if (cannot) return { use: false, say: `Ran it the old way — ${cannot}` };
     const worker = await this.builds.livePromoted(job.id).catch(() => null);
     if (!worker) {
       return { use: false, say: 'Ran it the old way — no worker is built for this job yet. Build one in Settings → Worker.' };
     }
-    const planHash = planHashOf(planFromAgent(job));
+    // …and the SAME hash, from the one function that computes it. Bare `planHashOf` stood here while
+    // the build stamped `buildHashOf(plan, brief)`, so a job with an approved brief could never match
+    // and was told to rebuild for ever — even seconds after a fresh build.
+    const planHash = await this.builds.buildHashFor(job);
     if (planHash && worker.planHash !== planHash) {
       return {
         use: false,
