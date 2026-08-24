@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { BriefPayload, briefInWords, buildHashOf, buildRequest, transcriptInWords } from './build-brief';
-import { contractFromBrief, contractFromPlan, contractInWords } from './contract';
+import { ALLOW_EMPTY_NOTHING_MATCHED, contractFromBrief, contractFromPlan, contractInWords } from './contract';
 import { ALL_PAGES, AgentPlan, MAX_PAGES, MAX_PAGES_ALL, clampPages, estimatePlanCost, pageCeiling, pagesText } from '../social/plan';
 
 /**
@@ -292,5 +292,53 @@ describe('the shape and the rules about it are different things', () => {
     const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
     expect(req.brief).toContain('never a row count');
     expect(req.brief).toContain('filled in with the real data');
+  });
+});
+
+/**
+ * "Nothing mattered today" is not "we could not read it" (BEA-1456).
+ *
+ * His nightly email agent ran on a Sunday. Gmail gave 8 real emails. The recipe read all 8. The
+ * thinking step judged none of them important — a newsletter, some updates — and the run told him:
+ *
+ *   "Nothing usable came back: 1 source answered but recognised 0 rows."
+ *
+ * That sentence means *we* could not read what the vendor sent. It was a lie: we read all eight.
+ * Reading nothing is our bug; keeping nothing is an answer about his day. They must never wear the
+ * same words.
+ *
+ * And his brief contained the contradiction that made it worse: *"at least 5 emails summarised"* in
+ * one line, *"if there are fewer, still post what there is and say so"* in the next. Reading only
+ * the first turned the second into a promise the run broke.
+ */
+describe('a quiet day', () => {
+  it('is a good day when he said so anywhere in the brief', () => {
+    const c = contractFromBrief(PLAN, ['At least 5 emails summarised.'], ['If there are fewer than 5, still post what there is and say so.']);
+    expect(c.minRows).toBe(0);
+    expect(c.allowEmptyWhen).toBe(ALLOW_EMPTY_NOTHING_MATCHED);
+  });
+
+  it('takes the kinder reading when two of his lines disagree', () => {
+    // "At least 5" alone would fail a quiet day and write nothing — breaking the very next line.
+    expect(contractFromBrief(PLAN, ['At least 5 emails summarised.']).minRows).toBe(5);
+    expect(contractFromBrief(PLAN, ['At least 5 emails summarised.'], ['Still send it even if there are none.']).minRows).toBe(0);
+  });
+
+  it('reads the other ways he might say it', () => {
+    for (const said of ['Even if there are no important emails, still create the page.', 'A quiet day is fine.', 'Post it even if only one.', 'If nothing is important, say so.']) {
+      expect(contractFromBrief(PLAN, [said]).minRows).toBe(0);
+    }
+  });
+
+  it('leaves a strict brief strict — he has to actually say it', () => {
+    const c = contractFromBrief(PLAN, ['At least 20 rows.'], ['Tell me on WhatsApp if it breaks.']);
+    expect(c.minRows).toBe(20);
+    expect(c.allowEmptyWhen).not.toBe(ALLOW_EMPTY_NOTHING_MATCHED);
+  });
+
+  it('still keeps the columns he named', () => {
+    const c = contractFromBrief(PLAN, ['Columns: sender, subject, link. A quiet day is fine.']);
+    expect(c.minRows).toBe(0);
+    expect(c.columns).toEqual(expect.arrayContaining(['sender', 'subject', 'link']));
   });
 });
