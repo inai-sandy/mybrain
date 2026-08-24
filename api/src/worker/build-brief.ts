@@ -157,7 +157,10 @@ export function buildRequest(inp: BuildInputs): BuildRequest {
   const successLines = (inp.brief?.brief.sections || [])
     .filter((sec) => sec.key === 'success')
     .flatMap((sec) => (sec.lines || []).filter((l) => !l.struck).map((l) => l.text));
-  const contract = inp.brief ? contractFromBrief(inp.plan, successLines) : contractFromPlan(inp.plan);
+  const troubleLines = (inp.brief?.brief.sections || [])
+    .filter((sec) => sec.key === 'trouble')
+    .flatMap((sec) => (sec.lines || []).filter((l) => !l.struck).map((l) => l.text));
+  const contract = inp.brief ? contractFromBrief(inp.plan, successLines, troubleLines) : contractFromPlan(inp.plan);
   const files: Record<string, string> = {
     'kit/kit.js': inp.kit.js,
     'kit/KIT.md': inp.kit.doc,

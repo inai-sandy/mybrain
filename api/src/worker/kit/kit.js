@@ -70,6 +70,9 @@ class WorkerFailed extends Error {
  * answer looks like (BEA-1391, §E). It carries a sentence the owner can read — "fetched 90 answers,
  * recognised 0 rows" — because the run screen is where this lands.
  */
+/** `allowEmptyWhen` when a day where nothing matched is a fine day (BEA-1456). */
+const ALLOW_EMPTY_NOTHING_MATCHED = 'nothing matched what he asked to keep';
+
 class ContractError extends Error {
   constructor(reason, facts) {
     super(reason);
@@ -492,6 +495,24 @@ function checkContract(table, contract, sources, now) {
       const why = broken.map((s) => `${s.why || 'the answer carried data but no rows were recognised'}${list.length > 1 ? ` (${s.label})` : ''}`).join('; ');
       return no(`${cap(why)}. Nothing was written: this is not an empty day at the vendor, it is a bug here.`, rows.length);
     }
+    // Did the sources actually give us rows, which a later step then judged away? (BEA-1456)
+    //
+    // This used to be reported as "N sources answered but recognised 0 rows" — which is a statement
+    // that WE could not read what the vendor sent, and it was a lie. His nightly email agent fetched
+    // 8 real emails on a Sunday, read all 8 with the tool's own recipe, and the thinking step kept
+    // none of them because none were important. The run then told him the answer was unreadable.
+    //
+    // Reading nothing is our bug. Keeping nothing is an answer about his day. They must never wear
+    // the same sentence.
+    const fetched = list.reduce((n, s) => n + (Number(s.rows) || 0), 0);
+    if (fetched > 0) {
+      const allowed = String(contract.allowEmptyWhen || '').toLowerCase();
+      const quietIsFine = contract.minRows === 0 || allowed === ALLOW_EMPTY_NOTHING_MATCHED;
+      const said = `${fetched} thing${fetched === 1 ? '' : 's'} came back and none of them matched what you asked to keep.`;
+      if (quietIsFine) return { ok: true, rows: 0, empty: true, why: said };
+      return no(`${said} Nothing was written. If a quiet day is all right, say so in what a good run means.`, rows.length);
+    }
+
     const answered = list.filter((s) => !s.empty);
     if (answered.length) {
       const who = answered.map((s) => s.label).join(', ');

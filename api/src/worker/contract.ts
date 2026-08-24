@@ -56,6 +56,22 @@ export const ALLOW_EMPTY_NO_CHANGE = 'nothing changed since last time';
 /** The only value that forbids an empty run outright. */
 export const ALLOW_EMPTY_NEVER = 'never';
 
+/**
+ * A day where the sources answered and nothing survived his own rules (BEA-1456).
+ *
+ * Different from "the vendor had nothing" and different again from "we could not read the answer".
+ * His nightly email agent fetched 8 real emails on a Sunday, read all 8, judged none of them
+ * important, and was told the answer was unreadable.
+ */
+export const ALLOW_EMPTY_NOTHING_MATCHED = 'nothing matched what he asked to keep';
+
+/**
+ * Ways he says "a quiet day is still a good day". Read from BOTH what a good run means and what to
+ * do when something goes wrong — his brief said "at least 5 emails" in one line and "if there are
+ * fewer, still post what there is" in the next, and reading only the first made the second a lie.
+ */
+const QUIET_IS_FINE = /\b(even if (there (are|is) )?(no|none|nothing|fewer|only)|still (post|send|write|create|make)|quiet day|slow day|nothing to report is fine|say so)\b/i;
+
 /** A sheet write bigger than this from a plan of a few pages means something ran away. */
 export const MAX_CONTRACT_ROWS = 5000;
 
@@ -81,9 +97,18 @@ const IDENTITY_COLUMNS = ['link', 'url', 'permalink'];
  * left out rather than guessed — a check that fails a good run teaches him to ignore the alarm,
  * which is worse than no check at all.
  */
-export function contractFromBrief(plan: AgentPlan, successLines: string[]): WorkerContract {
+export function contractFromBrief(plan: AgentPlan, successLines: string[], troubleLines: string[] = []): WorkerContract {
   const base = contractFromPlan(plan);
   const said = (successLines || []).map((l) => String(l || '')).filter(Boolean);
+  const trouble = (troubleLines || []).map((l) => String(l || '')).filter(Boolean);
+
+  // "A quiet day is still fine" wins over any minimum he also wrote (BEA-1456). Two lines of one
+  // brief can disagree — his did — and the kinder reading is the one he meant: post what there is
+  // and say how little there was, rather than fail and write nothing.
+  if (QUIET_IS_FINE.test([...said, ...trouble].join(' . '))) {
+    return { ...base, minRows: 0, allowEmptyWhen: ALLOW_EMPTY_NOTHING_MATCHED, ...readColumns(plan, said.join(' . '), base) };
+  }
+
   if (!said.length) return base;
   const text = said.join(' . ');
 
@@ -217,4 +242,12 @@ export function contractInWords(contract: WorkerContract): string[] {
       : `Finding nothing is fine when ${c.allowEmptyWhen} — but recognising nothing out of an answer that DID have something in it is a failure, and nothing is written.`,
   );
   return lines;
+}
+
+
+/** Just the column part of a brief-derived contract, so the quiet-day road can reuse it. */
+function readColumns(plan: AgentPlan, text: string, base: WorkerContract): Pick<WorkerContract, 'columns' | 'mustHave'> {
+  const columns = Array.from(new Set([...(base.columns || []), ...columnsNamedIn(text)]));
+  const mustHave = Array.from(new Set([...(base.mustHave || []), ...columns.filter((c) => IDENTITY_COLUMNS.includes(c.toLowerCase())).slice(0, 1)]));
+  return { columns, mustHave };
 }

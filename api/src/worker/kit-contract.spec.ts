@@ -261,3 +261,48 @@ describe('contracts: a worker knows what "it worked" means (BEA-1391)', () => {
     expect(reached).toEqual(['output']);
   });
 });
+
+/**
+ * The two ways a run can end with nothing, told apart (BEA-1456).
+ *
+ * Reading nothing is OUR bug and must fail loudly. Keeping nothing is an answer about his day and
+ * must say so in words that are true. They used to share one sentence — "N sources answered but
+ * recognised 0 rows" — and his Sunday email run was told its 8 perfectly-read emails were unreadable.
+ */
+describe('nothing came back, for two very different reasons', () => {
+  // The kit's own check, exercised directly on what a run really knows about its fetches.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { checkContract } = require('./kit/kit.js');
+  const table = { columns: ['a'], rows: [] as any[][] };
+  const base = { minRows: 1, maxRows: 5000, columns: [], mustHave: [], freshnessDays: null, allowEmptyWhen: 'every source returned an empty answer' };
+
+  it('says plainly that things came back and none of them matched', () => {
+    const v = checkContract(table, base, [{ id: 's', label: 'Gmail', rows: 8, empty: false, unrecognised: false }], Date.now());
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('8 things came back and none of them matched what you asked to keep');
+    // And it tells him how to make a quiet day acceptable, rather than only that it failed.
+    expect(v.reason).toContain('If a quiet day is all right');
+    // It must NEVER claim we could not read the answer — we read all eight.
+    expect(v.reason).not.toContain('recognised 0 rows');
+  });
+
+  it('finishes done when he said a quiet day is fine', () => {
+    const v = checkContract(table, { ...base, minRows: 0 }, [{ id: 's', label: 'Gmail', rows: 8, empty: false, unrecognised: false }], Date.now());
+    expect(v.ok).toBe(true);
+    expect(v.empty).toBe(true);
+    expect(v.why).toContain('none of them matched');
+  });
+
+  it('still fails loudly when we genuinely could not read the answer', () => {
+    // The BEA-1377 case: data arrived, no shape here read a row out of it. Our bug, not his day.
+    const v = checkContract(table, base, [{ id: 's', label: 'Gmail', rows: 0, empty: false, unrecognised: true, why: 'fetched 8 answers but recognised 0 rows' }], Date.now());
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('it is a bug here');
+  });
+
+  it('still finishes done when the vendor genuinely had nothing', () => {
+    const v = checkContract(table, base, [{ id: 's', label: 'Gmail', rows: 0, empty: true, unrecognised: false }], Date.now());
+    expect(v.ok).toBe(true);
+    expect(v.why).toContain('every source came back empty');
+  });
+});
