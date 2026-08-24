@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
@@ -28,6 +29,22 @@ export type WorkerState = {
   /** The plan the job would run today. When it differs from the worker's, the worker is stale. */
   planHash: string;
   stale: boolean;
+  /**
+   * The live worker was built against an OLDER parts box than the one on the server (BEA-1461).
+   *
+   * Deliberately not `stale`, and it must never be folded into it: stale means "the plan changed and
+   * this program no longer does what the job says", which is a reason to distrust the worker. This
+   * means "the plan is exactly right, and there are tools this program was never told about" — the
+   * worker is correct and still runs, it is just missing what was added since.
+   *
+   * It exists because the coarse signals both stayed silent when the tools were opened (BEA-1457):
+   * the plan did not change, and the kit MAJOR did not move because the change was additive. A
+   * worker built the day before sat there looking perfectly current with none of the new doors, and
+   * the only way to find out was to remember.
+   */
+  partsBoxOld: boolean;
+  /** What to tell him about it, in his own words. Empty when there is nothing to say. */
+  partsBoxNote?: string;
   /**
    * A repair that passed its tests but changes the rows, waiting for the owner to decide (BEA-1393).
    * Never live — the promotion guard held it back on purpose.
@@ -116,6 +133,7 @@ export class WorkerBuildService implements OnModuleInit {
       repairing: rows.some((b: any) => b.origin === 'repair' && (b.status === 'queued' || (b.status === 'building' && Date.now() - new Date(b.startedAt).getTime() < BUILD_STUCK_MS))),
       planHash,
       stale: !!worker && worker.planHash !== planHash,
+      ...partsBox(worker, this.kitRevNow()),
       compilable,
       reason: compilable ? undefined : cannot,
       building,
@@ -158,6 +176,7 @@ export class WorkerBuildService implements OnModuleInit {
         reason: opts.reason || null,
         planHash: req.planHash,
         kit: kit.version,
+        kitRev: kit.rev,
         sampleIds: JSON.stringify(req.sampleIds),
       },
     });
@@ -220,7 +239,7 @@ export class WorkerBuildService implements OnModuleInit {
   async materials(
     job: any,
     opts: { version: number; previousVersion?: number | null; origin?: 'build' | 'rebuild'; reason?: string | null } = { version: 1 },
-  ): Promise<{ plan: AgentPlan; cards: ToolKnowledge[]; kit: { version: string; js: string; doc: string }; req: BuildRequest }> {
+  ): Promise<{ plan: AgentPlan; cards: ToolKnowledge[]; kit: { version: string; js: string; doc: string; rev: string }; req: BuildRequest }> {
     const plan = planFromAgent(job);
     const cards = await this.cards(plan);
     const samples = await this.samplesFor(plan, cards);
@@ -360,7 +379,7 @@ export class WorkerBuildService implements OnModuleInit {
   }
 
   /** The kit this app is running, read from disk once per build — file and docs, both pinned. */
-  private kit(): { version: string; js: string; doc: string } {
+  private kit(): { version: string; js: string; doc: string; rev: string } {
     const dir = join(__dirname, 'kit');
     let js = '';
     let doc = '';
@@ -373,7 +392,21 @@ export class WorkerBuildService implements OnModuleInit {
       throw new BadRequestException(`The kit could not be read on the server (${String(e?.message || e).slice(0, 120)}), so nothing can be built against it.`);
     }
     const m = /KIT_VERSION\s*=\s*'([^']+)'/.exec(js);
-    return { version: m ? m[1] : '1', js, doc };
+    // The MAJOR (`version`) is what the runner refuses a worker on — it only moves when the kit
+    // breaks something. That is deliberately coarse, and it is why a worker built the day before the
+    // tools were opened (BEA-1457) still reads as perfectly current: nothing about its plan changed
+    // and the major did not move either, so no existing signal says a word.
+    //
+    // `rev` is the fine one: a hash of the kit's own contents. It changes the moment anybody edits
+    // the parts box, with nobody having to remember to bump anything — which is the failure this is
+    // closing, not a new number to maintain.
+    const rev = createHash('sha256').update(`${js}\n---\n${doc}`).digest('hex').slice(0, 12);
+    return { version: m ? m[1] : '1', js, doc, rev };
+  }
+
+  /** The parts box a worker would be built against right now. Null when it cannot be read at all. */
+  kitRevNow(): string | null {
+    try { return this.kit().rev; } catch { return null; }
   }
 
   /**
@@ -430,6 +463,7 @@ export class WorkerBuildService implements OnModuleInit {
       reason: b.reason || null,
       planHash: b.planHash,
       kit: b.kit,
+      kitRev: b.kitRev || null,
       tests,
       sampleCount: countOf(b.sampleIds),
       sessionId: b.sessionId || null,
@@ -463,4 +497,30 @@ function countOf(raw: any): number {
   } catch {
     return 0;
   }
+}
+
+/**
+ * Is the live worker's parts box older than the server's, and what do we tell him about it?
+ *
+ * Three states, and the middle one is the whole point:
+ *  - **no worker, or the kit cannot be read** → nothing to say;
+ *  - **the worker predates the revision stamp** (`kitRev` null — every build before BEA-1461) → say
+ *    so plainly. Treating "unknown" as old is the honest reading: those builds really were compiled
+ *    against a kit that had no `kit.call`, no `kit.facts`, no `kit.think` and no `kit.research`;
+ *  - **the revisions differ** → the parts box changed under it.
+ *
+ * It never blocks a run. The kit change that prompted this was additive, so an older worker still
+ * works perfectly — it just cannot use what it was never told about, and he should be the one to
+ * decide whether that matters rather than finding out by testing.
+ */
+export function partsBox(worker: any, revNow: string | null): { partsBoxOld: boolean; partsBoxNote?: string } {
+  if (!worker || !revNow) return { partsBoxOld: false };
+  const was = worker.kitRev || null;
+  if (was === revNow) return { partsBoxOld: false };
+  return {
+    partsBoxOld: true,
+    partsBoxNote: was
+      ? 'This worker was built against an older parts box, so anything added to it since is not in this program. Rebuild it to pick the new tools up — the plan is unchanged, so nothing else about the job moves.'
+      : 'This worker was built before the tools were opened up, so it cannot call anything outside its own plan, and it never sees what a service really answers. Rebuild it to give it the full set — the plan is unchanged, so nothing else about the job moves.',
+  };
 }

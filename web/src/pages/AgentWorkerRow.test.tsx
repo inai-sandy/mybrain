@@ -101,6 +101,37 @@ describe('the open row', () => {
     expect(screen.getByTestId('worker-road')).toHaveTextContent('Next run: on worker v3.');
   });
 
+  /**
+   * "Your worker predates the tools, and nothing tells you" (BEA-1461).
+   *
+   * The owner's email agent sat on a v1 worker built the day before the tools were opened, and every
+   * signal on this screen stayed silent: the plan had not changed (so not stale) and the kit MAJOR
+   * had not moved (the change was additive). It read as perfectly current while having none of the
+   * new doors, and the only way to know was to remember.
+   */
+  it('says when a worker predates tools that were added since', () => {
+    mount(state({ partsBoxOld: true, partsBoxNote: 'This worker was built before the tools were opened up, so it cannot call anything outside its own plan, and it never sees what a service really answers. Rebuild it to give it the full set — the plan is unchanged, so nothing else about the job moves.' }));
+    const note = screen.getByTestId('worker-parts-box');
+    expect(note).toHaveTextContent('built before the tools were opened up');
+    // The reassurance is half the message: he must not think his job changed under him.
+    expect(note).toHaveTextContent('the plan is unchanged');
+    // It is the SERVER's sentence, never a second copy written here.
+    expect(note).not.toHaveTextContent('out of date');
+  });
+
+  it('says nothing when the worker is on the current parts box', () => {
+    mount(state({ partsBoxOld: false }));
+    expect(screen.queryByTestId('worker-parts-box')).toBeNull();
+  });
+
+  it('a STALE worker wins — he is not told two different things at once', () => {
+    // Stale means "the plan changed, this program no longer does what the job says" and is the more
+    // serious of the two. Showing both would bury it under a milder, bluer sentence.
+    mount(state({ stale: true, partsBoxOld: true, partsBoxNote: 'older parts box' }));
+    expect(screen.getByTestId('worker-stale')).toBeTruthy();
+    expect(screen.queryByTestId('worker-parts-box')).toBeNull();
+  });
+
   it('a held repair offers the owner the decision, and only him', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
     (globalThis as any).fetch = fetchMock;

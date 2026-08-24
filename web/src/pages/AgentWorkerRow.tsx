@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Hammer, Loader2, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Hammer, Loader2, Sparkles, Wrench } from 'lucide-react';
 
 /**
  * The **Worker** row of the job's Settings accordion (BEA-1394, agent workers 9/10 —
@@ -13,6 +13,9 @@ import { AlertTriangle, CheckCircle2, Hammer, Loader2, Wrench } from 'lucide-rea
  *  • what the NEXT run will really do, in the server's own words (the same function that dispatches);
  *  • what "it worked" means, reusing the contract lines BEA-1391 already renders — never a second copy;
  *  • staleness ("the plan changed since v2 was built") with **Rebuild**;
+ *  • a worker built against an OLDER parts box than the server's (BEA-1461) — said in its own words
+ *    and its own colour, because it is not staleness: the plan is right, the program is correct and
+ *    still runs, it simply predates tools that were added since;
  *  • the repair history, and the accept/decline buttons for a repair held back by the promotion guard;
  *  • what the last run cost — credits and AI tokens.
  */
@@ -39,6 +42,9 @@ export type WorkerState = {
   held?: WorkerBuild | null;
   repairing?: boolean;
   stale: boolean;
+  /** Built against an older kit than the server's — separate from `stale` on purpose (BEA-1461). */
+  partsBoxOld?: boolean;
+  partsBoxNote?: string;
   compilable: boolean;
   reason?: string;
   building: boolean;
@@ -177,6 +183,18 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
         <p className="flex items-start gap-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400" data-testid="worker-stale">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>Your plan changed since v{w.worker?.version} was built, so this worker is out of date. Rebuild it to use it again — until then this job runs the old way.</span>
+        </p>
+      )}
+
+      {/* 2b · built against an older parts box (BEA-1461) — NOT the same thing as stale.
+              Stale says "the plan changed, so this program no longer does what the job says" and is
+              a reason to distrust it. This says "the plan is exactly right, and there are tools it
+              was never told about" — it still runs correctly, it is just missing what came later.
+              Blue, not amber: nothing is wrong, something is available. */}
+      {w.partsBoxOld && !w.stale && (
+        <p className="flex items-start gap-1.5 text-[11px] font-medium text-sky-700 dark:text-sky-300" data-testid="worker-parts-box">
+          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{w.partsBoxNote}</span>
         </p>
       )}
 

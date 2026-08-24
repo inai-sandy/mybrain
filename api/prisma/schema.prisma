@@ -791,6 +791,14 @@ model WorkerBuild {
   planHash   String
   /// The kit major this worker was compiled and tested against (`meta.kit`).
   kit        String    @default("1")
+  /// The EXACT parts box it was compiled against: a hash of `kit.js` + `KIT.md` (BEA-1461).
+  ///
+  /// The major above only moves when the kit breaks something, which is why it stayed on "1" when
+  /// the tools were opened (BEA-1457) and a worker built the day before read as perfectly current
+  /// while missing every new door. This changes whenever anyone edits the kit, with nobody having to
+  /// remember to bump it. Null on every build made before this column existed — read as "old",
+  /// which is the truth about them.
+  kitRev     String?
   /// JSON {passed, failed, at} as the runner parsed it out of `node --test`.
   tests      String?
   /// How many saved `ToolSample`s the tests stood on, and which ones (JSON string array of ids) —
