@@ -931,14 +931,45 @@ every route, never the old `ready:true, workers:0` that made a promoted worker i
 the first build on EACCES. **A build's tests run where `/parity` runs**: `childEnv()` (none of the
 host's environment) and `node --import <preload> --test`, the preload throwing on `fetch`/`net`/`tls`/
 `http`/`https`/`dns`; the Codex turn itself stays networked ON PURPOSE and the README says so. **A
-worker may only call its own job's actions** — the `{actionId,args}` road is checked against
-`planActionIds` ∪ `Agent.tools` (§C says there is no exception; add it to the job instead). **A
 worker run's journal is dropped inside `AgentService.finishRun()`** (registered by
 `WorkerDispatchService`, after the failure hook that reads it), so the stall watchdog, a deadline with
 no default and an overtaken run stop leaking whole fetched tables. **`deleteAgent` also sweeps the
 run-scoped `ServiceGate` rows** (a permanent /tools release is left alone). **Failing evidence has a
 wider deny list** (`NO_FAILING_SERVICES`: calendar, drive, notes, contacts, photos, meetings) on top
 of `NO_SAMPLE_SERVICES`. And the owner has **NINE** agents, not six — all enabled, all `useWorker:false`.
+
+**A worker has FULL access, and reads the vendor's answer itself (BEA-1457/BEA-1460).** The owner,
+2026-08-24: *"Codex is also an AI coding agent… I tested in my local Codex, and it worked in two
+seconds."* He was right — six failed runs in a row, none of them the model's: the compile rule twice,
+a 100 KB body limit, a tripwire's wording, a prompt that never named `brief`, a loader that dropped
+it. Every one was plumbing between Codex and his accounts, and two design choices kept that plumbing
+needing a person. Both are gone. **(1) The app no longer throws the answer away.** `POST /api/worker/tool`
+returns `data` — the untouched payload — beside `table` on BOTH roads, capped by `rawAnswer()` at
+`RAW_MAX` (2 MB, the sample store's own constant) with `dataTruncated` past it, so an oversized answer
+degrades to the old behaviour rather than failing. `kit.call(actionId, args)` is the door; `kit.tool`
+and `kit.fetchSource` are unchanged, so nothing already built breaks. **The program reads the answer**
+— a shape nobody anticipated is now a change in `worker.mjs` with a test beside it, not a change in the
+app, which is what recipes / learned shapes / the BEA-1377 tripwire all existed to work around.
+**(2) The per-job allow-list is REMOVED** — `jobActionIds()` is deleted and any connected action is
+callable. Nothing that protects him lived there: the daily ceiling is checked BEFORE every call by
+`guard()` (fail-closed), the can't-undo gate still parks the run and asks him, a `ToolCall` row is
+still written, and a trial still writes and sends nothing — all in `ServiceActionsService`, one layer
+down. `worker-api.spec.ts` REPLACED BEA-1401's test with three that prove those guards fire on the exact
+call it used to refuse; do not reinstate the list. Two more doors: `kit.facts({service?,q?,actionId?})`
+reads the catalog and fact cards free and **outside the call order** (a lookup has nothing to replay, and
+giving it a `seq` would break a resume for a program that looks something up on one run and not the next),
+and `kit.research(question)` restores `deep_research`, which had been reachable from the removed engine
+road and nowhere else. Both are **soft** in the kit (`postSoft`): their `error` is a value to check, not
+a thrown `WorkerFailed` — "I looked and there wasn't one" must be tellable from "this is broken". A
+failed research run still reports its spend, because searches are paid for before anyone knows if the run
+will produce anything. **The build brief was rewritten to match**: no `recipe.json`, no "the raw answer
+never leaves the app", the whole connected catalog from `ToolLookupService.services()` instead of a
+hand-picked ~50, and the honest short list of what still stops it. `KIT_VERSION` stays `'1'` — every
+change is additive, so no promoted worker is refused. Traps: `WorkerController`'s constructor gained
+`lookup` and `research_` LAST (the field is `research_` because the route method is `research`);
+`WorkerBuildService` gained `lookup` LAST; the test harness replays saved `ToolSample`s, which are
+**masked** on the way in and never exist for Gmail/WhatsApp at all, so raw-answer tests must use a
+`SAMPLE_SERVICES` service and a real run's unmasked `data` is untested by construction.
 
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
