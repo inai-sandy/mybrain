@@ -10,9 +10,12 @@ import { ASK_DEADLINE_HOURS, OwnerAskService } from './owner-ask.service';
 import { SocialAgentRunService, SHAPE_MAX_TOKENS, mergeTables } from '../social/social-agent-run.service';
 import { SocialBudgetService, BudgetCheck } from '../social/social-budget.service';
 import { SourceFetchService } from '../social/source-fetch.service';
-import { planActionIds, planFromAgent, sourceHint, sourceLabel, clampPages } from '../social/plan';
+import { planFromAgent, sourceHint, sourceLabel, clampPages } from '../social/plan';
 import { ReadRecipe, readAnswer, readNote } from '../social/read-recipe';
 import { tableOf } from '../social/rows';
+import { RAW_MAX } from '../tools/tool-sample';
+import { ToolLookupService } from '../tools/tool-lookup.service';
+import { DeepResearchService } from '../tools/deep-research.service';
 import { RunJournalService } from './run-journal.service';
 import { WorkerTokenGuard } from './worker-token.guard';
 import { TrialService } from './trial.service';
@@ -38,6 +41,9 @@ const AI_MAX_TOKENS = SHAPE_MAX_TOKENS;
  * body is 4,096 characters; this leaves room and keeps one runaway job from writing an essay.
  */
 export const MESSAGE_CHARS = 3500;
+
+/** How many actions one `kit.facts` lookup lists. Enough to choose from, not enough to be a wall. */
+export const FACTS_MAX = 40;
 
 /**
  * The callback API (BEA-1387, agent workers 2/10 — `specs/AGENT-WORKERS.md` §C).
@@ -74,6 +80,9 @@ export class WorkerController {
     private readonly owner?: OwnerAskService, // the question's road to the owner's phone (BEA-1392)
     private readonly gates?: ServiceGatesService,
     private readonly trials?: TrialService, // holds a trial's rows and message instead of writing/sending (BEA-1408)
+    private readonly lookup?: ToolLookupService, // what exists, for `kit.facts` (BEA-1457)
+    // Named `research_` because the ROUTE is called `research` and a method may not shadow a field.
+    private readonly research_?: DeepResearchService, // `kit.research` (BEA-1458)
   ) {}
 
   // ---- fetching ------------------------------------------------------------------------------
@@ -130,6 +139,10 @@ export class WorkerController {
           why: out.why || null,
           stop: out.stop || null,
           ...this.readWith(out.r ? out.r.data : undefined, body?.recipe, step),
+          // The paged/creators road keeps the app's reading — paging really does need the know-how
+          // cards, and a worker has no database to read them from. But it gets the real answer too
+          // (BEA-1457), so a program that disagrees with how a row was read can just read it itself.
+          ...rawAnswer(out.r ? out.r.data : undefined),
         };
       });
       if (trial && !hit.replayed) await this.trials?.holdFetched?.(runId, Number((hit.value as any)?.table?.rows?.length) || 0);
@@ -138,16 +151,18 @@ export class WorkerController {
 
     const actionId = String(body?.actionId || '');
     if (!actionId.startsWith('svc:')) throw new BadRequestException('Give a sourceId from the job\'s plan, or an actionId that starts with "svc:".');
-    // …and it must be one of THIS job's own actions (BEA-1401 — §C, "a worker is its own job and
-    // nothing else"). Without this a worker could reach any action of any connected service, bounded
-    // only by the credit ceiling and the can't-undo gate — the whole point of the worker road is that
-    // it is the job's plan compiled, so its reach is the job's reach and nothing wider.
-    const allowed = jobActionIds(job);
-    if (!allowed.has(actionId)) {
-      throw new BadRequestException(
-        `This job may not call ${actionId}. A worker may only call its own job's actions${allowed.size ? ` (${[...allowed].slice(0, 8).join(', ')}${allowed.size > 8 ? `, +${allowed.size - 8} more` : ''})` : ''} — add it to the job if it really belongs there.`,
-      );
-    }
+    // Any connected action, not just this job's own (BEA-1457). The per-job allow-list that used to
+    // stand here (BEA-1401) was the thing that made a worker brittle and every new capability a hole
+    // cut by hand: a program that discovers mid-run that it needs one more call could not make it.
+    //
+    // Nothing is given up by removing it, because none of the real guards ever lived here. They live
+    // in `ServiceActionsService`, one layer down, and they still fire on every single call:
+    //   - the can't-undo gate parks the run and asks the owner (a read is never gated);
+    //   - the daily credit ceiling is checked BEFORE the call by `guard()`, fail-closed;
+    //   - a `ToolCall` row is written whatever happens, so the ledger stays whole;
+    //   - a trial writes nothing and sends nothing, whatever it calls.
+    // What a runaway program can now do is spend a day's credits on the wrong reads. What it still
+    // cannot do is anything irreversible without his yes.
     const args = body?.args && typeof body.args === 'object' ? body.args : {};
     const hit = await this.journal.once(runId, seq, 'tool', { actionId, args }, async () => {
       const stop = await this.guard(runId, job, seq)(actionId);
@@ -159,8 +174,78 @@ export class WorkerController {
         error: r.error || null,
         notFound: !!r.notFound,
         stop: r.ok ? null : r.error || 'the call failed',
+        // The app's reading, kept so nothing already built breaks…
         table: r.ok ? tableOf(r.data) : null,
+        // …and the answer the vendor really sent, which is the whole point of BEA-1457. Before this,
+        // `tableOf()` ran and the original was thrown away, so a shape our reader did not know could
+        // only ever be fixed in the app — recipes, learned shapes, tripwires, each one hours of work
+        // and a chance to get it wrong. A program that can see the answer just reads it.
+        ...rawAnswer(r.ok ? r.data : undefined),
       };
+    });
+    return { ...(hit.value as any), replayed: hit.replayed };
+  }
+
+  // ---- looking things up ------------------------------------------------------------------------
+
+  /**
+   * What exists and what it does (`kit.facts`) — the same catalog and the same fact cards the chat
+   * builder reads, reachable from inside a run (BEA-1457).
+   *
+   * Free: no vendor call, no credits, no journal position. A lookup has no effect to replay, and
+   * giving it a place in the call order would mean a program that looks something up on Tuesday and
+   * not on Wednesday could never resume. So it is like `kit.checkpoint` — outside the order.
+   *
+   * This is what lets a worker find an action nobody thought of when it was compiled, which is the
+   * other half of removing the allow-list: reach is no use without discovery.
+   */
+  @Post('facts')
+  async facts(@Req() req: any, @Body() body: any) {
+    who(req); // the token still has to be a real run's
+    if (!this.lookup) return { ok: false, error: 'the tool catalog is not available on this run', services: [], actions: [], card: null };
+    const actionId = String(body?.actionId || '').trim();
+    if (actionId) {
+      const card = await this.lookup.getAction(actionId).catch(() => null);
+      return { ok: !!card, actionId, card: card?.text || null, error: card ? null : `nothing in the catalog is called ${actionId}` };
+    }
+    const service = String(body?.service || '').trim();
+    if (service) {
+      const actions = await this.lookup.findActions(service, String(body?.q || '')).catch(() => []);
+      return { ok: true, service, actions: (actions || []).slice(0, FACTS_MAX).map((a: any) => ({ id: a.id, name: a.name || null, what: a.what || a.description || null })) };
+    }
+    const services = await this.lookup.services().catch(() => []);
+    return { ok: true, services: (services || []).map((s: any) => ({ slug: s.slug, name: s.name, actions: s.actions })) };
+  }
+
+  /**
+   * Deep research (`kit.research`) — ours, budgeted, on the flat-rate engine (BEA-1458).
+   *
+   * This was reachable from the old road and from nowhere else, so removing that road took it away
+   * from every agent — a regression stated openly at the time and closed here. The hard caps live in
+   * `DeepResearchService` (24 searches, 10 page reads) and nothing a worker sends can exceed them.
+   */
+  @Post('research')
+  async research(@Req() req: any, @Body() body: any) {
+    const { runId } = who(req);
+    const seq = seqOf(body);
+    if (!this.research_) throw new BadRequestException('Deep research is not available on this run.');
+    const question = String(body?.question || '').trim();
+    if (!question) throw new BadRequestException('Deep research needs a question.');
+    const step = this.stepper(runId);
+    const budget = body?.budget && typeof body.budget === 'object' ? body.budget : undefined;
+    const hit = await this.journal.once(runId, seq, 'research', { question, budget: budget || null }, async () => {
+      try {
+        const out = await this.research_!.run(question, {
+          budget,
+          onLine: (t: string) => { void this.agent.stampProgress?.(runId, String(t).slice(0, 200)); },
+        });
+        await step({ label: `Researched: ${question.slice(0, 120)}`, status: 'done', detail: `${out.spend?.sources || 0} sources`, nodeId: nodeIdOf(seq) });
+        return { ok: true, report: out.report, spend: out.spend || null, error: null };
+      } catch (e: any) {
+        // A failed research run still spent search credits — the spend rides on the error on purpose
+        // (`DeepResearchError`), so it is reported rather than silently written off.
+        return { ok: false, report: null, spend: e?.spend || null, error: String(e?.message || e).slice(0, 300) };
+      }
     });
     return { ...(hit.value as any), replayed: hit.replayed };
   }
@@ -649,23 +734,27 @@ export class WorkerController {
 }
 
 /**
- * Every action id this job may call (BEA-1401): the ones its plan really fetches, plus whatever the
- * owner put in its toolbox — `Agent.tools` means exactly "the action ids this job may call", and it
- * is recomputed from the sources on every save (BEA-1374), so the two together are the job's reach.
- * A job with an unreadable plan still gets its toolbox rather than nothing.
+ * The vendor's answer, as it really arrived, ready to ride back to the worker (BEA-1457).
+ *
+ * Capped at `RAW_MAX` — the same 2 MB figure BEA-1395 measured a real Instagram profile answer
+ * against, and the same one the sample store uses, so "too big to keep" means one thing in this
+ * codebase and not two. Over the cap the raw answer is left out and `dataTruncated` says so; the
+ * app's own `table` is still there, so an oversized answer degrades to exactly the old behaviour
+ * instead of failing.
+ *
+ * The journal records this value, and the journal is dropped when the run finishes.
  */
-function jobActionIds(job: any): Set<string> {
-  const out = new Set<string>();
-  for (const t of Array.isArray(job?.tools) ? job.tools : []) {
-    const id = String(t || '');
-    if (id.startsWith('svc:')) out.add(id);
-  }
+export function rawAnswer(data: any): { data?: any; dataTruncated?: boolean; dataBytes?: number } {
+  if (data === undefined) return {};
+  let bytes = 0;
   try {
-    for (const id of planActionIds(planFromAgent(job))) if (id) out.add(String(id));
+    bytes = Buffer.byteLength(JSON.stringify(data ?? null), 'utf8');
   } catch {
-    /* a plan that cannot be read leaves the toolbox as the answer */
+    // Circular or otherwise unserialisable: it cannot cross the wire, so say so rather than throw.
+    return { dataTruncated: true };
   }
-  return out;
+  if (bytes > RAW_MAX) return { dataTruncated: true, dataBytes: bytes };
+  return { data, dataBytes: bytes };
 }
 
 /** A worker call's step id — its place in the run's call order, stable across every replay. */

@@ -149,34 +149,52 @@ describe('the callback routes', () => {
     expect(WORKER_HELPERS).toEqual(['social-shape', 'social-alert', 'worker-think']);
   });
 
-  it('a worker may only call its OWN job\'s actions (BEA-1401)', async () => {
-    // "The worker IS the build": its reach is the job's reach. Before this, `{actionId,args}` was
-    // checked only for the `svc:` prefix, so a worker could reach any action of any connected
-    // service — held back by nothing but the credit ceiling and the can't-undo gate.
-    const world = await makeWorld({ job: job(), samples: SAMPLES });
-    const { kit } = await spawnKit(world, 'r', 'ag1');
-
-    await expect(kit.tool('svc:github.delete_a_repository', { repo: 'notes' })).rejects.toThrow(/may not call svc:github\.delete_a_repository/i);
-    await expect(kit.tool('svc:gmail.fetch_emails', {})).rejects.toThrow(/only call its own job's actions/i);
-    expect(world.calls).toHaveLength(0); // refused BEFORE anything is run, so nothing is spent
-    expect((await world.journal.list('r')).filter((e: any) => e.fn !== 'seed')).toEqual([]); // nothing recorded either
-
-    // …and the job's own action still goes through, exactly as before.
-    const out: any = await kit.tool(HASHTAG, { hashtag: 'x' });
-    expect(out.ok).toBe(true);
-    expect(world.calls.map((c: any) => c.id)).toEqual([HASHTAG]);
-  });
-
-  it('a job whose toolbox names an action it has no source for may still call it', async () => {
-    // `Agent.tools` means "the action ids this job may call" — a tool the owner put on the job is the
-    // job's, whether or not the plan fetches from it.
-    const extra = 'svc:instagram.user_posts';
+  /**
+   * The per-job allow-list is GONE (BEA-1457), and this is where that is written down.
+   *
+   * BEA-1401 checked every `{actionId,args}` call against `planActionIds ∪ Agent.tools`, on the
+   * reasoning that "the worker IS the build, so its reach is the job's reach". In practice that rule
+   * is what made a worker brittle: a program that worked out mid-run that it needed one more call
+   * could not make it, and every new capability became a hole someone had to cut by hand. Six failed
+   * runs in a row, none of them the model's fault, is what settled it.
+   *
+   * Removing it gives up **nothing that was protecting him**, because none of the real guards ever
+   * lived in that list — they live one layer down in `ServiceActionsService` and fire on every call
+   * whatever its id. The two tests below prove that on the very call the old list refused.
+   */
+  it('may call an action that is in neither its plan nor its toolbox (BEA-1457)', async () => {
+    const outside = 'svc:instagram.user_posts';
     const world = await makeWorld({
-      job: { ...job(), tools: [HASHTAG, extra] },
-      samples: [...SAMPLES, { actionId: extra, args: { handle: 'a' }, data: { items: [{ id: 'p9' }] } }],
+      job: job(), // tools: [HASHTAG] only — `outside` is nowhere on this job
+      samples: [...SAMPLES, { actionId: outside, args: { handle: 'a' }, data: { items: [{ id: 'p9' }] } }],
     });
     const { kit } = await spawnKit(world, 'r', 'ag1');
-    expect((await kit.tool(extra, { handle: 'a' }) as any).ok).toBe(true);
+
+    const out: any = await kit.call(outside, { handle: 'a' });
+    expect(out.ok).toBe(true);
+    // Wider reach is not anonymity: it is still recorded against this run and this job.
+    expect(world.calls.map((c: any) => c.id)).toEqual([outside]);
+    expect(world.calls[0].ctx.runKind).toBe('worker');
+    expect(world.calls[0].ctx.agentId).toBe('ag1');
+  });
+
+  it('but a can’t-undo action still stops and asks him, wherever it came from', async () => {
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    world.actions.gated.add('svc:github.delete_a_repository');
+    const { kit } = await spawnKit(world, 'r', 'ag1');
+
+    // The guard that matters. It never depended on the allow-list, and it does not now: the run
+    // parks and the owner is asked, rather than the call being refused or quietly made.
+    await expect(kit.call('svc:github.delete_a_repository', { repo: 'notes' })).rejects.toMatchObject({ paused: true });
+  });
+
+  it('and the credit ceiling still stops one before it is made', async () => {
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    world.budget.check = async () => ({ ok: false, reason: 'Today’s Social credit ceiling (500) is reached.', spent: 500, ceiling: 500, estimate: 1 });
+    const { kit } = await spawnKit(world, 'r', 'ag1');
+
+    await expect(kit.call('svc:instagram.user_posts', { handle: 'a' })).rejects.toThrow(/credit ceiling/i);
+    expect(world.calls).toHaveLength(0); // checked BEFORE the call, so nothing was spent
   });
 
   it('the fetch stamps progress as it pages, so a slow run is never mistaken for a stuck one', async () => {

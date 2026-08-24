@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
 import { BriefService } from '../agent/brief.service';
 import { ToolLessonService, shapeInWords } from '../tools/tool-lesson.service';
+import { ToolLookupService } from '../tools/tool-lookup.service';
 import { ToolKnowledgeService, ToolKnowledge } from '../tools/tool-knowledge.service';
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { AgentPlan, PlanBlock, planActionIds, planFromAgent, sourceActionId, sourceLabel } from '../social/plan';
@@ -75,6 +76,7 @@ export class WorkerBuildService implements OnModuleInit {
     private readonly samples?: ToolSampleService,
     private readonly briefs?: BriefService,
     private readonly lessons?: ToolLessonService, // the learned shapes a recipe is written from (BEA-1415)
+    private readonly lookup?: ToolLookupService, // the whole shelf, for the build brief (BEA-1457)
   ) {}
 
   onModuleInit() {
@@ -230,6 +232,11 @@ export class WorkerBuildService implements OnModuleInit {
     // What each answer really looks like, learned from real calls (BEA-1415). The only thing Codex
     // can write a reading recipe from when a service's answers are never kept.
     const shapes = await this.shapesFor(plan);
+    // The whole shelf, not the shortlist (BEA-1457). A worker may now call anything the owner has
+    // connected and look up anything it does not know, so the build turn is shown what exists rather
+    // than only the actions this job's plan already named. A catalog that cannot be read is simply
+    // absent from the brief — the lookup still works at run time.
+    const catalog = await this.lookup?.services?.().catch(() => null);
     const req = buildRequest({
       job: { id: job.id, name: job.name },
       plan,
@@ -238,6 +245,7 @@ export class WorkerBuildService implements OnModuleInit {
       kit,
       brief: brief || null,
       shapes,
+      catalog: (catalog || []).map((s: any) => ({ slug: String(s.slug), name: String(s.name), actions: Number(s.actions) || 0 })),
       version: opts.version,
       previousVersion: opts.previousVersion ?? null,
       origin: opts.origin || 'build',

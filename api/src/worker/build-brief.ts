@@ -63,6 +63,14 @@ export type BuildInputs = {
    * already read well and could not help the one that started the whole conversation.
    */
   shapes?: Record<string, string>;
+  /**
+   * Every service the owner has connected (BEA-1457) — slug, name and how many actions it has.
+   *
+   * Codex used to be shown only the actions this job's plan already named, which is precisely why
+   * every new capability needed a person to add it. It can now call anything connected and look up
+   * anything it does not know (`kit.facts`), so it is shown the shelf rather than the shortlist.
+   */
+  catalog?: { slug: string; name: string; actions: number }[];
 };
 
 /** What `BriefService.forCodex()` hands over. Kept structural so this file needs no Nest import. */
@@ -310,21 +318,63 @@ function briefText(inp: BuildInputs, planHash: string, index: any, contract: Wor
 You are writing a small Node program that runs one agent job of My Brain. You are inside its version
 folder (\`v${inp.version}\`) and everything you write goes here. ${inp.previousVersion ? `The job is on v${inp.previousVersion} today; it keeps running until this one passes its tests.` : 'This job has no worker yet — it runs on the plan runner until this one passes its tests.'}
 ${inp.reason ? `\nWhy this build: ${inp.reason}\n` : ''}
-Write two files, and a third when a tool's answer needs it:
+Write two files:
 
-- **\`worker.mjs\`** — the plan below, in code. It must \`export async function run(kit)\` and, when
-  started by the worker runner, build a kit from the environment and run once. \`kit/KIT.md\` in this
-  folder has the template and the whole API. Read it FIRST.
+- **\`worker.mjs\`** — the job, in code. It must \`export async function run(kit)\` and, when started
+  by the worker runner, build a kit from the environment and run once. \`kit/KIT.md\` in this folder
+  has the template and the whole API. Read it FIRST.
 - **\`worker.test.mjs\`** — its tests, run with \`node --test worker.test.mjs\` from this folder.
-- **\`recipe.json\`** — how each tool's answer should be READ, when the general reader gets it wrong.
-  Look at the real answers in \`samples/\` first. If the app already reads a source into sensible
-  columns, leave that source out: an unnecessary recipe is one more thing that has to stay true.
-  \`kit/KIT.md\` has the shape and the three rules — every path must exist, reading may not drop
-  anything, and the raw answer never leaves the app.
 
 Then run \`node --test worker.test.mjs\` yourself and fix what fails. **Green tests are the only way
 this worker goes live.** If they cannot pass, leave them failing and say why in your final message —
 the job stays on the road it is on, and lying about it is worse than failing.
+
+## What you can reach
+
+**Any action the owner has connected.** There is no per-job list of permitted calls and no shortlist
+of actions chosen for you. If it is connected, \`kit.call\` reaches it.
+
+\`\`\`js
+const r = await kit.call('svc:gmail.fetch_emails', { max_results: 25 });
+if (!r.ok) throw new Error(r.error);
+// r.data is the answer GMAIL ACTUALLY SENT. Read it here, in this file.
+const mails = (r.data?.messages || []).map((m) => ({ from: m.sender, subject: m.subject }));
+\`\`\`
+
+**\`r.data\` is the real payload, not a summary of it.** This is the important part and it is new:
+older workers were handed \`r.table\`, the app's own reading of the answer, and never saw the answer
+itself — so an unfamiliar shape could only be fixed by changing the app. Now you read it. If a field
+moves or a vendor nests something differently, that is a change in *this file*, with a test beside it.
+
+\`r.table\` is still there and is often perfectly good for a plain list. Use it when it is right, and
+read \`r.data\` yourself the moment it is not. \`r.dataTruncated\` means the answer was over 2 MB and
+only \`table\` came through — handle that case, do not assume \`data\` is always present.
+
+**Don't know what exists? Look it up, mid-run, for free:**
+
+\`\`\`js
+await kit.facts();                                        // every connected service
+await kit.facts({ service: 'gmail', q: 'label' });         // that service's actions
+await kit.facts({ actionId: 'svc:gmail.fetch_emails' });   // the full fact card for one
+\`\`\`
+
+**Two more doors**, when the job needs them:
+
+\`\`\`js
+const verdict = await kit.think('Which of these matter to a founder?  …', { json: true });
+const found   = await kit.research('What changed in EU battery rules this month?');
+\`\`\`
+
+\`kit.think\` is a real model call on his account (tokens counted onto the run). \`kit.research\` runs
+our own budgeted deep research — it plans the sub-questions, reads pages and writes a cited report.
+
+${(inp.catalog || []).length ? `Connected right now:
+
+${(inp.catalog || []).slice(0, 60).map((s) => `- \`${s.slug}\` — ${s.name} (${s.actions} actions)`).join('\n')}
+` : ''}
+**What still stops you, and it is short:** the daily credit ceiling is checked before every call; a
+call that cannot be undone parks the run and asks him (let \`WorkerPaused\` out, exactly like
+\`kit.ask\`); every call is written to his ledger. Reads are never gated. Nothing else is in your way.
 
 ${inp.brief ? `## What this is FOR — read this before anything else
 
@@ -367,10 +417,14 @@ vendor, never read a key, never write outside this folder.
 
 ${Object.keys(inp.shapes || {}).length ? `## What each answer really looks like
 
-These shapes were read off REAL answers from his account. Where a source has no saved answer in
-\`samples/\` — Gmail, WhatsApp and anything else whose contents we never keep — **this is what you
-write \`recipe.json\` from.** Every path below was really there; anything not on the list will be
-refused when the recipe is checked.
+These shapes were read off REAL answers from his account: the paths that were there and what kind of
+thing sat at each one. **Write your reading code against these.** They exist because some services —
+Gmail, WhatsApp, anything carrying somebody's messages — never have their contents saved, on purpose,
+so there is no fixture in \`samples/\` for them and this is the only true description of their answer
+you will get.
+
+Nothing here is a promise about *values*, only about structure. Code defensively: a path that exists
+can still hold null.
 
 ${Object.values(inp.shapes || {}).join('\n\n')}
 
@@ -458,10 +512,14 @@ function fakeKit(routes) {
 }
 \`\`\`
 
-\`fetchImpl(route, body)\` is the ONE seam: \`route\` is \`tool\`, \`merge\`, \`ai\`, \`output\`,
-\`step\`, \`notify\` or \`finish\`, and whatever you answer is what the kit hands the worker. Answer
-\`tool\` from the saved files, and \`merge\`/\`ai\`/\`output\`/\`notify\` with the shapes \`kit/KIT.md\`
-documents.
+\`fetchImpl(route, body)\` is the ONE seam: \`route\` is \`tool\`, \`facts\`, \`research\`, \`merge\`,
+\`ai\`, \`output\`, \`step\`, \`notify\`, \`ask\` or \`finish\`, and whatever you answer is what the kit
+hands the worker. Answer \`tool\` from the saved files — including its \`data\`, so your reading code
+is what the test really exercises — and the rest with the shapes \`kit/KIT.md\` documents.
+
+**Test your reading, not just your plumbing.** The most valuable test here is one that takes a real
+saved \`data\` payload and asserts the rows you pull out of it. That is the test that catches a vendor
+moving a field, and it is the one that lets this worker repair itself later without a single call.
 
 ## What the tests must prove
 

@@ -118,6 +118,22 @@ function makeKit(opts) {
   // swallowed `ContractError`, or a check of some other table, still reach the output.
   let passed = null;
 
+  /**
+   * A route whose `error` is an ANSWER, not a crash (BEA-1457/1458).
+   *
+   * `post()` below turns any `error` field into a failed run, which is right for a fetch or a write:
+   * there is nothing sensible to do with half a sheet. It is wrong for a lookup that found nothing
+   * and for research that came back empty — those are results a program should look at and decide
+   * about, and throwing would make "I checked and there wasn't one" indistinguishable from a bug.
+   *
+   * A pause still comes out, because a pause is never a value.
+   */
+  const postSoft = async (route, body) => {
+    const answer = await call(route, body);
+    if (answer && answer.paused) throw new WorkerPaused(answer.question || 'the owner has to approve this', answer.waitpointId);
+    return answer;
+  };
+
   const post = async (route, body) => {
     const answer = await call(route, body);
     if (answer && answer.error) throw new WorkerFailed(String(answer.error));
@@ -165,6 +181,89 @@ function makeKit(opts) {
       if (r.stop) throw new WorkerFailed(r.stop);
       remember(String(actionId), r);
       return r;
+    },
+
+    /**
+     * **Any connected action, and the answer the vendor really sent** (BEA-1457).
+     *
+     * This is the main door. `kit.tool` hands you the app's reading of an answer (`table`);
+     * `kit.call` hands you `data` — the payload itself, exactly as it arrived — and you read it.
+     * That is the difference that matters: a shape nobody anticipated is now yours to handle in
+     * code, in this file, with a test beside it. It is not a change somebody has to make in the app.
+     *
+     * There is no per-job allow-list: if the owner has connected it, you may call it. Use
+     * `kit.facts()` to find out what exists. Everything that protects him still runs on every call —
+     * the daily credit ceiling before it, a `ToolCall` row after it, and the can't-undo gate, which
+     * parks the run and asks him rather than refusing (let `WorkerPaused` out, exactly like `ask`).
+     *
+     * ```js
+     * const r = await kit.call('svc:gmail.fetch_emails', { max_results: 25 });
+     * if (!r.ok) throw new Error(r.error);
+     * const mails = (r.data?.messages || []).map(m => ({ from: m.sender, subject: m.subject }));
+     * ```
+     *
+     * Answers `{ ok, data, dataBytes, dataTruncated?, table, credits, error, notFound }`.
+     * `dataTruncated` means the answer was over 2 MB and only `table` came through — handle it, do
+     * not assume `data` is always there.
+     */
+    async call(actionId, args) {
+      const r = await post('tool', { seq: seq++, actionId: String(actionId), args: args || {} });
+      if (r.stop) throw new WorkerFailed(r.stop);
+      remember(String(actionId), r);
+      return r;
+    },
+
+    /**
+     * **What exists, and what it does** (BEA-1457) — the owner's whole catalog, from inside the run.
+     *
+     * Free: no vendor call, no credits, and NOT part of the call order, so looking something up can
+     * never change what a replay does. Three shapes:
+     *
+     * ```js
+     * await kit.facts();                                   // → { services: [{slug, name, actions}] }
+     * await kit.facts({ service: 'gmail', q: 'send' });     // → { actions: [{id, name, what}] }
+     * await kit.facts({ actionId: 'svc:gmail.fetch_emails' }); // → { card } — the whole fact card
+     * ```
+     *
+     * Reach without discovery is no use: this is how a worker finds a call nobody thought of when it
+     * was written.
+     */
+    async facts(what) {
+      const w = what || {};
+      return postSoft('facts', { actionId: w.actionId || undefined, service: w.service || undefined, q: w.q || undefined });
+    },
+
+    /**
+     * **Think.** A real model call — Sonnet 5 on the owner's own account, tokens counted onto this
+     * run — for the judgement a program cannot compile into rules ("is this email worth his
+     * evening?"). Returns the text.
+     *
+     * `opts.json: true` asks for JSON and parses it for you, returning null when the reply is not
+     * JSON, so a bad reply is a value you can check rather than a crash.
+     */
+    async think(prompt, opts) {
+      const o2 = opts || {};
+      const text = await kit.ai('worker-think', prompt, { maxTokens: o2.maxTokens || 4000 });
+      if (!o2.json) return text;
+      try {
+        return JSON.parse(String(text).replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, ''));
+      } catch {
+        return null;
+      }
+    },
+
+    /**
+     * **Deep research** (BEA-1458) — ours, not a search box handed to a model: it plans the
+     * sub-questions, runs the searches, reads the pages and writes a report with its sources. Runs
+     * on the flat-rate engine, so it costs search credits (~30c) and not dollars.
+     *
+     * Hard caps live in the app (24 searches, 10 page reads) and nothing here can exceed them.
+     * Answers `{ ok, report, spend, error }` — a failure still reports what it spent, because
+     * searches are paid for before anyone knows whether the run will produce anything.
+     */
+    async research(question, opts) {
+      const o2 = opts || {};
+      return postSoft('research', { seq: seq++, question: String(question), budget: o2.budget || undefined });
     },
 
     /** Several sources' tables → one, by the app's own merge rule (a `source` column, de-duped on the id). */

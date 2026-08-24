@@ -273,9 +273,37 @@ export async function makeWorld(opts: {
   // The REAL question road (BEA-1392): the same service the app registers on the callback
   // controller, with only the WhatsApp send itself faked.
   const owner = new OwnerAskService(agent as any, alerts as any, gates as any);
-  const controller = new WorkerController(journal, tokens, agent as any, actions as any, sources, social, llm as any, budget as any, alerts as any, owner, gates as any);
+  // What exists, for `kit.facts` (BEA-1457). A fake shelf: three services, and one real fact card.
+  const lookup = {
+    services: async () => [
+      { slug: 'instagram', name: 'Instagram', actions: 41 },
+      { slug: 'gmail', name: 'Gmail', actions: 27 },
+      { slug: 'googlesheets', name: 'Google Sheets', actions: 36 },
+    ],
+    findActions: async (service: string, words: string) => [
+      { id: `svc:${service}.fetch_emails`, name: 'Fetch emails', what: `matched "${words}"` },
+      { id: `svc:${service}.send_email`, name: 'Send an email', what: null },
+    ],
+    getAction: async (id: string) => (String(id).startsWith('svc:') ? { id, text: `# ${id}\nWhat it does: the fact card.` } : null),
+  };
+  // `kit.research` (BEA-1458). Answers a report, or throws with the spend riding on the error.
+  const research = {
+    calls: [] as string[],
+    fail: null as string | null,
+    run: async (question: string, _o: any) => {
+      research.calls.push(question);
+      if (research.fail) {
+        const e: any = new Error(research.fail);
+        e.spend = { searches: 3, extracts: 1, sources: 0 };
+        throw e;
+      }
+      return { report: `# ${question}\n\nThe report.`, spend: { searches: 4, extracts: 2, sources: 6 } };
+    },
+  };
 
-  return { prisma, store, calls, sheets, shaped, documents, actions, alerts, budget, gates, agent, social, sources, journal, tokens, controller, owner, llm };
+  const controller = new WorkerController(journal, tokens, agent as any, actions as any, sources, social, llm as any, budget as any, alerts as any, owner, gates as any, undefined, lookup as any, research as any);
+
+  return { prisma, store, calls, sheets, shaped, documents, actions, alerts, budget, gates, agent, social, sources, journal, tokens, controller, owner, llm, lookup, research };
 }
 
 /**
@@ -285,7 +313,7 @@ export async function makeWorld(opts: {
 export async function spawnKit(world: any, runId: string, agentId: string, opts: { trial?: boolean } = {}) {
   const spawn = await world.tokens.mint(runId, agentId, opts.trial ? { trial: true } : {});
   const req = { worker: { runId: spawn.runId, agentId: spawn.agentId, expiresAt: spawn.expiresAt, ...(opts.trial ? { trial: true } : {}) } };
-  const routes: Record<string, string> = { tool: 'tool', merge: 'merge', ai: 'ai', step: 'step', output: 'output', notify: 'notify', ask: 'ask', finish: 'finish' };
+  const routes: Record<string, string> = { tool: 'tool', facts: 'facts', research: 'research', merge: 'merge', ai: 'ai', step: 'step', output: 'output', notify: 'notify', ask: 'ask', finish: 'finish' };
   const fetchImpl = async (route: string, body: any) => {
     if (!world.tokens.verify(spawn.token)) throw new Error('This route is for a worker run, and needs its own run token.');
     const fn = routes[route];

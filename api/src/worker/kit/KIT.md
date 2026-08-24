@@ -51,43 +51,71 @@ await kit.ai('social-alert', prompt)         // a plain helper call (allow-liste
 Only shape when the plan says to. A plan whose task is "keep every result as fetched" has **no AI
 step at all** — shaping it would cost tokens and change the rows.
 
-## Reading a tool's answer
+## Calling anything, and reading the answer yourself
 
 ```js
-const recipe = JSON.parse(readFileSync(new URL('./recipe.json', import.meta.url), 'utf8'));
-const got = await kit.fetchSource('svc:gmail.fetch_emails', { recipe: recipe['svc:gmail.fetch_emails'] });
+const r = await kit.call('svc:gmail.fetch_emails', { max_results: 25 });
+if (!r.ok) throw new Error(r.error);
+const mails = (r.data?.messages || []).map((m) => ({ from: m.sender, subject: m.subject }));
 ```
 
-The app has ONE general reader for every vendor on earth, and it is often wrong about a shape it has
-not met — `payload.headers.0.value` instead of `subject`, or a single wrapped object read as a table
-of its own parts. `recipe.json` is how THIS tool's answer should be read, written from the real saved
-answer in `samples/`.
+`kit.call(actionId, args)` reaches **any action the owner has connected** — there is no per-job
+allow-list. It answers:
 
-```jsonc
-{
-  "svc:gmail.fetch_emails": {
-    "listPath": "data.messages",
-    "columns": {
-      "id":      "id",
-      "subject": "payload.headers.Subject",
-      "from":    "payload.headers.From",
-      "date":    "internalDate"
-    },
-    "idField": "id"
-  }
-}
+| field | what it is |
+|---|---|
+| `ok` | the call succeeded |
+| `data` | **the answer the vendor really sent**, whole |
+| `dataBytes` | how big it was |
+| `dataTruncated` | over 2 MB, so `data` was left out — `table` still came through |
+| `table` | the app's own general reading of it, `{columns, rows}` |
+| `credits` | what it cost |
+| `error`, `notFound` | why not, when `ok` is false |
+
+**Read `data` in your own code.** The app's general reader has to work for every vendor on earth and
+is often wrong about a shape it has not met — `payload.headers.0.value` where you wanted `subject`,
+or a single wrapped object read as a table of its own parts. When that happens, it is not something
+to report and wait on: pull the fields out here, and put a test beside it using the saved answer in
+`samples/`. That test is what catches the vendor moving a field next month.
+
+Use `r.table` when it is genuinely right — a plain list of flat items usually is. Do not use it when
+it is not.
+
+### Finding out what exists
+
+```js
+await kit.facts();                                        // every connected service
+await kit.facts({ service: 'gmail', q: 'label' });         // that service's actions
+await kit.facts({ actionId: 'svc:gmail.fetch_emails' });   // the whole fact card for one
 ```
 
-- A path is dotted. `payload.headers.Subject` on a list of `{name, value}` pairs reads the pair
-  **named** Subject — the shape half the world's APIs use for headers and custom fields.
-- **Every path must exist** in the real answer. The app checks each one, on every run, and refuses
-  the whole recipe with a plain reason if one does not.
-- **Reading is not filtering.** N things in the answer must become N rows. Dropping the ones he does
-  not want is the shaping step's job, further down, where he can see it happen. A recipe that reads
-  fewer rows than there are items is refused.
-- The raw answer stays in the app. You send the recipe in; you never receive the payload.
-- Write one entry per source id. Leave a source out entirely if the general reader already reads it
-  well — an unnecessary recipe is one more thing to keep true.
+Free — no vendor call, no credits — and deliberately **not** part of the call order, so looking
+something up can never change what a replay does.
+
+### Thinking, and researching
+
+```js
+const picked = await kit.think('Which of these matter to a founder?\n' + list, { json: true });
+const report = await kit.research('What changed in EU battery rules this month?');
+```
+
+`kit.think` is a real model call (Sonnet 5, his account, tokens counted onto the run) for judgement
+you cannot write as rules. `json: true` parses the reply and gives you `null` if it was not JSON, so
+a bad answer is a value to check rather than a crash.
+
+`kit.research` runs our own budgeted deep research — it plans the sub-questions, runs the searches,
+reads the pages and writes a cited report. Answers `{ ok, report, spend, error }`; a failure still
+reports its spend, because searches are paid for before anyone knows if the run will produce
+anything.
+
+### What still stands in your way
+
+Short list, and none of it is arbitrary:
+
+- the **daily credit ceiling** is checked before every call, and a call over it stops the run;
+- a call that **cannot be undone** parks the run and asks him — `WorkerPaused` comes out, and you let
+  it out exactly as you do for `kit.ask`. Reads are never gated;
+- every call is written to his ledger whatever happens.
 
 ## Output
 
