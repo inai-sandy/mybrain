@@ -124,7 +124,9 @@ export class GoalTrialService implements OnModuleInit {
       // Off until he keeps it. Approving the GOAL starts one run; it does not put a schedule live.
       enabled: false,
     };
-    const existing = await this.prisma.agent.findFirst({ where: { areaId, origin: 'goal' }, orderBy: { createdAt: 'desc' } }).catch(() => null);
+    // By AREA, for the same reason (BEA-1467): a job whose origin did not survive the create would
+    // never be found here either, and every approval would make one more duplicate agent.
+    const existing = await this.prisma.agent.findFirst({ where: { areaId }, orderBy: { createdAt: 'desc' } }).catch(() => null);
     if (existing) {
       await this.agent.updateAgent(existing.id, input).catch(() => undefined);
       return { id: String(existing.id) };

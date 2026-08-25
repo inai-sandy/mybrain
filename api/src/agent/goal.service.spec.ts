@@ -173,3 +173,51 @@ describe('approving, and sending it back', () => {
     await expect(w.svc.approve('a1')).rejects.toThrow(/no goal to approve/i);
   });
 });
+
+/**
+ * WHAT BECAME OF IT — found by the AREA, never by a label (BEA-1467).
+ *
+ * His very first real goal was stranded by this. The job was created moments before `'goal'` became
+ * an accepted origin, so `createAgent` quietly rewrote it to `'chat'`; the lookup asked for
+ * `origin: 'goal'`, found nothing, and reported "building" for an hour about a run that had already
+ * finished and failed with a perfectly clear reason.
+ *
+ * Two lessons, both already written in the project rules and both broken the same day: a label is
+ * not a fact, and a screen that cannot go wrong loudly will go wrong quietly.
+ */
+describe('the goal reports its own outcome', () => {
+  const withRun = (agent: any, run: any) => {
+    const rows = [{ id: 'g1', areaId: 'a1', version: 1, status: 'approved', text: 'The goal.', tools: '[]', transcript: '[]', approvedAt: new Date() }];
+    const prisma: any = {
+      agentGoal: { findFirst: async () => rows[0], create: async () => rows[0], update: async () => rows[0] },
+      agent: { findFirst: async ({ where }: any) => (where.areaId === 'a1' && (!where.origin || where.origin === agent?.origin) ? agent : null) },
+      agentRun: { findFirst: async () => run },
+    };
+    return new (GoalService as any)(prisma, { completeHelper: async () => 'x' });
+  };
+
+  it('finds the job even when its origin was rewritten to something else', async () => {
+    // Exactly his case: origin 'chat' on a job the goal road created.
+    const svc = withRun({ id: 'j1', origin: 'chat' }, { id: 'r1', status: 'failed', error: 'I could not find a Gmail action.', startedAt: new Date() });
+    const g = await svc.latest('a1');
+    expect(g.run.status).toBe('failed');
+    expect(g.run.error).toContain('could not find a Gmail action');
+  });
+
+  it('carries a good run’s own words through untouched', async () => {
+    const svc = withRun({ id: 'j1', origin: 'goal' }, { id: 'r1', status: 'done', resultText: 'Read 14 emails, kept 2.', startedAt: new Date() });
+    const g = await svc.latest('a1');
+    expect(g.run.status).toBe('done');
+    expect(g.run.resultText).toBe('Read 14 emails, kept 2.');
+  });
+
+  it('says "building" only when there really is no run yet', async () => {
+    const svc = withRun({ id: 'j1', origin: 'goal' }, null);
+    expect((await svc.latest('a1')).run.status).toBe('building');
+  });
+
+  it('says "building" when the job itself has not been made yet', async () => {
+    const svc = withRun(null, null);
+    expect((await svc.latest('a1')).run.status).toBe('building');
+  });
+});

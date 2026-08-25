@@ -86,7 +86,11 @@ export class GoalService {
    * both a Codex turn still going and a build that died before it made a run.
    */
   private async runFor(areaId: string): Promise<GoalView['run']> {
-    const job = await this.prisma?.agent?.findFirst?.({ where: { areaId, origin: 'goal' }, orderBy: { createdAt: 'desc' } }).catch(() => null);
+    // Find it by the AREA, not by `origin`. Origin is a label, and relying on it stranded his very
+    // first goal: the job was created before 'goal' was an accepted origin, so it was silently
+    // stored as 'chat' and this lookup missed it — leaving the screen saying "building" for ever
+    // about a run that had already failed. The area is the thing that is actually true.
+    const job = await this.prisma?.agent?.findFirst?.({ where: { areaId }, orderBy: { createdAt: 'desc' } }).catch(() => null);
     if (!job) return { status: 'building' };
     const run: any = await this.prisma?.agentRun?.findFirst?.({ where: { agentId: job.id }, orderBy: { startedAt: 'desc' } }).catch(() => null);
     if (!run) return { status: 'building', agentId: String(job.id) };
