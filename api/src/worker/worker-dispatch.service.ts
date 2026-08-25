@@ -89,7 +89,7 @@ export class WorkerDispatchService implements OnModuleInit {
     // do this whole job" — which answers no for a brief-built job that writes anywhere. That made a
     // job with a green, promoted worker fall back to the engine on every single run.
     const cannot = WorkerBuildService.whyNotCompilableFor(job);
-    if (cannot) return { use: false, say: `Ran it the old way — ${cannot}` };
+    if (cannot) return { use: false, say: `Ran it the old way — ${lowerFirst(cannot)}` };
     const worker = await this.builds.livePromoted(job.id).catch(() => null);
     if (!worker) {
       return { use: false, say: 'Ran it the old way — no worker is built for this job yet. Build one in Settings → Worker.' };
@@ -204,4 +204,22 @@ export class WorkerDispatchService implements OnModuleInit {
     const r = await this.runner.remove(jobId).catch(() => ({ ok: false, error: 'the worker runner could not be reached' }));
     if (!r?.ok) this.log.warn(`worker folder for ${jobId} was not removed: ${r?.error || 'unknown reason'}`);
   }
+}
+
+/**
+ * Join a stand-alone sentence onto the end of another one (BEA-1462).
+ *
+ * `whyNotCompilableFor()` writes sentences that start a paragraph on the build screen ("This job has
+ * nothing to fetch from yet…"). Dropping one straight after "Ran it the old way — " gives a capital
+ * letter in the middle of a sentence, which reads as a machine stitching two strings together — and
+ * it is on the run screen, which is the owner's, not a log.
+ *
+ * An id or an acronym keeps its case: `svc:gmail.send_email is not something an agent can use` must
+ * not become `Svc:` — or worse, be "corrected" the other way.
+ */
+export function lowerFirst(s: string): string {
+  const t = String(s || '');
+  const first = t.split(/\s/)[0] || '';
+  if (first.includes(':') || first === first.toUpperCase()) return t; // an id, or an acronym
+  return t.charAt(0).toLowerCase() + t.slice(1);
 }

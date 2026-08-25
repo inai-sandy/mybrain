@@ -321,3 +321,30 @@ describe('The one door — `startRun` obeys the switch (BEA-1394)', () => {
     expect(b.executed).toEqual(['run-1']);
   });
 });
+
+/**
+ * The run screen is the owner's, not a log (BEA-1462).
+ *
+ * `whyNotCompilableFor()` writes sentences that START a paragraph on the build screen. The
+ * dispatcher now reuses them — which is the point, one rule in one place — but stitching one
+ * straight onto "Ran it the old way — " produced a capital letter mid-sentence.
+ */
+describe('the fallback sentence reads like a sentence', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { lowerFirst } = require('./worker-dispatch.service');
+
+  it('lowercases a stand-alone sentence being joined onto another', () => {
+    expect(lowerFirst('This job has nothing to fetch from yet, so there is nothing to build.'))
+      .toBe('this job has nothing to fetch from yet, so there is nothing to build.');
+  });
+
+  it('leaves an action id alone — "Svc:" would be worse than the capital', () => {
+    expect(lowerFirst('svc:gmail.send_email is not something an agent can use.')).toBe('svc:gmail.send_email is not something an agent can use.');
+    expect(lowerFirst('AI News Daily is not something an agent can use.')).toBe('AI News Daily is not something an agent can use.');
+  });
+
+  it('survives empty and rubbish input rather than throwing on the run screen', () => {
+    expect(lowerFirst('')).toBe('');
+    expect(lowerFirst(null as any)).toBe('');
+  });
+});
