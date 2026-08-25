@@ -117,7 +117,13 @@ describe('what Codex is asked', () => {
   it('sends only the tools he named', () => {
     const t = p();
     expect(t).toContain('svc:gmail.fetch_emails');
-    expect(t).not.toContain('svc:notion');
+    // Checked on the TOOLS SECTION, not the whole prompt. The prose elsewhere names
+    // `svc:notion.create_comment` as the worked example of a matcher picking wrongly (BEA-1470), and
+    // an example is not a tool being handed over. The thing this test protects is that no fact card
+    // he did not ask for is shipped.
+    const section = t.slice(t.indexOf('## '));
+    expect(section).not.toMatch(/### `svc:notion/);
+    expect(t).not.toContain('svc:instagram');
   });
 
   it('tells Codex its closing paragraph reaches HIM', () => {
@@ -130,6 +136,15 @@ describe('what Codex is asked', () => {
     const t = p();
     expect(t).toContain('Green tests are the only way this goes live');
     expect(t).toMatch(/lying about it is worse than\s+failing/);
+  });
+
+  it('tells it to PIN the exact ids rather than match on words at run time (BEA-1470)', () => {
+    const t = p();
+    expect(t).toContain('Pin the exact action ids while you build');
+    // Grounded in what actually happened, not a rule from nowhere: a matcher searching Notion for
+    // "create" + "page" chose `create_comment`, because a Notion comment is attached to a page.
+    expect(t).toContain('svc:notion.create_comment');
+    expect(t).toContain('a pinned id is a thing a test can assert');
   });
 
   it('says which version is live so it does not think it is replacing nothing', () => {

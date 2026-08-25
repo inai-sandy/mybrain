@@ -27,6 +27,14 @@ import { FlowsService } from './flows.service';
  * that would be a model call per agent for nobody watching; they keep the "Draw the flow" button
  * until they are next saved.
  */
+/**
+ * Origins whose agent runs a program somebody compiled, not a graph this app drew.
+ *
+ * There is nothing to guess at for these, and guessing produces a picture that reads as an
+ * explanation while describing something that never runs.
+ */
+const COMPILED_ORIGINS = new Set(['brief', 'goal']);
+
 @Injectable()
 export class AgentFlowSyncService implements OnModuleInit, AgentFlowSync {
   private readonly log = new Logger('AgentFlowSync');
@@ -113,14 +121,19 @@ export class AgentFlowSyncService implements OnModuleInit, AgentFlowSync {
    * the background. A hand-drawn locked flow (AI News Daily, BEA-1259) is never re-planned.
    */
   async planNormal(agent: any): Promise<void> {
-    // A brief-built agent is NEVER planned (BEA-1453).
+    // An agent whose work is a COMPILED PROGRAM is never planned (BEA-1453, and again BEA-1470).
     //
     // The owner's first real agent got a 16-node graph from a model he had never spoken to, thirty
     // seconds after he pressed Create, and it put the Notion write in a branch racing the Gmail
     // fetch. No screen shows him that before it runs. A brief-built agent runs a PROGRAM Codex
     // wrote and tested, so there is nothing here to guess at — and a picture drawn by guessing is
     // worse than no picture, because it looks like an explanation.
-    if (String(agent?.origin || '') === 'brief') return;
+    //
+    // BEA-1470: this rule named `'brief'` alone, and a `'goal'` agent — the new road — walked
+    // straight past it. He opened the Flow tab and found a sixteen-box diagram of a job that does
+    // nothing of the kind, because the planner had invented one. A SET rather than a string, so the
+    // next origin whose work is a program is covered by adding one word here.
+    if (COMPILED_ORIGINS.has(String(agent?.origin || ''))) return;
     const prompt = String(agent.prompt || '').trim();
     if (!prompt) return; // nothing to plan from yet
     let flow: any = (await this.flows.list(agent.id))[0] || null;

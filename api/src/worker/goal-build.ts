@@ -143,6 +143,16 @@ look for a way around it, and never leave the step out.** The first real build d
 saw WhatsApp's send marked as needing confirmation, decided there was no "safe" action, and failed
 the whole run — with the action it needed listed right in front of it.
 
+**Pin the exact action ids while you build.** The documents give you every id — write the ones you
+chose into the program as literal strings. Do **not** write a matcher that searches action names or
+descriptions at run time and picks whatever scores highest. That is not a hypothetical objection: a
+build did exactly that, searched Notion for something matching "create" and "page", and picked
+\`svc:notion.create_comment\` — because a Notion comment is attached to a page, so the word was in its
+description. It then called it with no arguments and the run died on a missing field.
+
+Choosing at build time is also what makes your tests real: a pinned id is a thing a test can assert,
+and a matcher can only be tested against the fixture you happened to imagine.
+
 
 ${toolsText(inp.tools)}
 
