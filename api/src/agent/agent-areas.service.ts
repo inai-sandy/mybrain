@@ -1002,6 +1002,11 @@ export class AgentAreasService {
         }
       }
     }
+    // The goal and its conversation go with the area (BEA-1467). `AgentGoal` has no foreign key —
+    // deliberately, so a goal survives its job being rebuilt — which means it has to be swept by
+    // hand here, exactly like `SocialWatch` and `RunJournal`. A new table that no cleanup path knows
+    // about is the same mistake that has cost a live run four times this week.
+    await (this.prisma as any).agentGoal?.deleteMany?.({ where: { areaId: id } }).catch(() => undefined);
     await (this.prisma as any).agentArea.delete({ where: { id } }).catch(() => { throw new NotFoundException('Agent not found'); });
     // Its half-finished new-job conversation goes too (BEA-1191). Nothing reads an orphaned one, but
     // each holds up to 40 messages and they would pile up forever — the same "cleanup happens in one
