@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, Res }
 import { Response } from 'express';
 import { sendJson } from '../common/send-json';
 import { ComposioProvider } from './composio.provider';
+import { ToolDocsService } from './tool-doc.service';
 import { ServiceGatesService } from './service-gates.service';
 import { ServiceInfo } from './service-provider';
 
@@ -63,6 +64,7 @@ export class ServicesController {
     private readonly services: ComposioProvider,
     // Optional + LAST — the spec builds this controller with the provider alone.
     private readonly gates?: ServiceGatesService,
+    private readonly docs?: ToolDocsService, // write a newly connected tool's document at once (BEA-1468)
   ) {}
 
   /**
@@ -140,7 +142,14 @@ export class ServicesController {
   @Post(':slug/connect')
   async connect(@Param('slug') slug: string, @Body() body: { label?: string; credentials?: Record<string, any> }) {
     const r = await this.services.connect(String(slug || ''), { label: body?.label, credentials: body?.credentials });
-    if (r.ok) this.services.refresh();
+    if (r.ok) {
+      this.services.refresh();
+      // Write the new tool's document NOW (BEA-1468). The watcher would catch it within twenty
+      // seconds anyway, but he asked whether linking a tool creates its document immediately, and
+      // "almost" is not the answer when a tool with no document is a tool Codex cannot find.
+      // Never awaited: a slow catalogue walk must not hold up the connect he is waiting on.
+      void this.docs?.rebuild?.().catch(() => undefined);
+    }
     // Never log the body — it can carry the owner's own client secret or API key.
     this.log.log(`connect ${slug}: ${r.ok ? (r.done ? 'done' : 'sent to sign in') : r.needsCredentials ? 'needs credentials' : 'refused'}`);
     return r;
@@ -181,7 +190,11 @@ export class ServicesController {
   @Delete('connections/:id')
   async disconnect(@Param('id') id: string) {
     const r = await this.services.disconnect(String(id || ''));
-    if (r.ok) this.services.refresh();
+    if (r.ok) {
+      this.services.refresh();
+      // A disconnected tool's document must stop saying "its actions can be called" (BEA-1468).
+      void this.docs?.rebuild?.().catch(() => undefined);
+    }
     return r;
   }
 

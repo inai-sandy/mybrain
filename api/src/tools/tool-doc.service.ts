@@ -2,10 +2,22 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { ToolCatalogService } from './tool-catalog.service';
 import { ToolLookupService } from './tool-lookup.service';
+import { ComposioProvider } from './composio.provider';
 import { DocAction, docHash, toolDocText, toolIndexText } from './tool-doc';
 
-/** How often every tool's document is rebuilt from the catalog. */
+/** How often every tool's document is rebuilt from the catalog, when nothing else has changed. */
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How often we check whether the owner has connected or disconnected something (BEA-1468).
+ *
+ * He asked the obvious question — *"when I link a new tool will it create a new document
+ * immediately?"* — and the honest answer was no: it would have waited up to a day. Watching the
+ * catalog's own generation counter catches EVERY road a connection can change by, including a
+ * one-click sign-in that finishes minutes after the button was pressed, which no route handler could
+ * hook on its own.
+ */
+const WATCH_MS = 20_000;
 
 /**
  * ONE DOCUMENT PER TOOL, kept up to date, read by Codex (BEA-1468).
@@ -27,12 +39,16 @@ export class ToolDocsService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('ToolDocs');
   private building = false;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private watch: ReturnType<typeof setInterval> | null = null;
+  /** The connection generation the documents were last built for. */
+  private builtGen = -1;
 
   constructor(
     private readonly prisma: PrismaService,
     // Optional + LAST — spec harnesses build services positionally with fewer arguments.
     private readonly catalog?: ToolCatalogService,
     private readonly lookup?: ToolLookupService,
+    private readonly services?: ComposioProvider, // its generation moves whenever a connection changes
   ) {}
 
   onModuleInit() {
@@ -42,11 +58,31 @@ export class ToolDocsService implements OnModuleInit, OnModuleDestroy {
     // …and once a day after that. A vendor adding an action must not need anybody to notice.
     // A plain interval, like every other recurring job here — this project has no cron module.
     this.timer = setInterval(() => void this.rebuild().catch((e) => this.log.warn(`daily rebuild failed: ${e?.message || e}`)), DAY_MS);
+    // …and the moment he connects or disconnects anything. A new tool with no document is a tool
+    // Codex cannot find, which is exactly how his first real build failed.
+    this.watch = setInterval(() => void this.ifConnectionsChanged(), WATCH_MS);
+  }
+
+  /**
+   * Rebuild when the owner's connections have moved, and only then.
+   *
+   * Cheap: one integer compare per tick. The generation is the provider's own counter, so this sees
+   * a connect, a disconnect, an added second account and a sign-in that completed asynchronously —
+   * all the roads a route handler would have to be told about one at a time.
+   */
+  private async ifConnectionsChanged(): Promise<void> {
+    const gen = this.services?.generation?.() ?? 0;
+    if (gen === this.builtGen) return;
+    this.builtGen = gen;
+    const out = await this.rebuild().catch((e) => { this.log.warn(`rebuild after a connection change failed: ${e?.message || e}`); return null; });
+    if (out?.changed) this.log.log(`connections changed — ${out.changed} tool document${out.changed === 1 ? '' : 's'} rewritten`);
   }
 
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
+    if (this.watch) clearInterval(this.watch);
     this.timer = null;
+    this.watch = null;
   }
 
   /** What exists, for the "what tools do I have?" question. */
@@ -131,6 +167,7 @@ export class ToolDocsService implements OnModuleInit, OnModuleDestroy {
         }).catch((e: any) => this.log.warn(`could not write the ${service} document: ${e?.message || e}`));
         changed++;
       }
+      this.builtGen = this.services?.generation?.() ?? 0;
       if (changed) this.log.log(`tool documents: ${byService.size} tools, ${changed} changed`);
       return { tools: byService.size, changed };
     } finally {

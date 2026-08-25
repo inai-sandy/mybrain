@@ -125,3 +125,75 @@ describe('Codex is told the documents exist', () => {
     }
   });
 });
+
+/**
+ * "When I link a new tool will it create a new document immediately?" (BEA-1468)
+ *
+ * His question, and the honest first answer was NO — it would have waited up to a day. A tool with
+ * no document is a tool Codex cannot find, which is precisely how his first real build failed.
+ *
+ * Two roads, on purpose. Connecting through the UI writes the document at once. The generation
+ * watcher catches everything the route handler cannot see: a one-click sign-in that completes
+ * minutes later, a second account added to a service, a disconnection from elsewhere.
+ */
+describe('a newly connected tool gets its document at once', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ToolDocsService } = require('./tool-doc.service');
+
+  function svc(gen: () => number) {
+    const rows: any[] = [];
+    const prisma: any = {
+      toolDoc: {
+        findMany: async () => rows,
+        findUnique: async ({ where }: any) => rows.find((r) => r.service === where.service) || null,
+        upsert: async ({ where, create, update }: any) => {
+          const now = rows.find((r) => r.service === where.service);
+          if (now) Object.assign(now, update);
+          else rows.push({ service: where.service, ...create });
+        },
+      },
+    };
+    const catalog: any = { catalog: async () => ({ tools: [{ id: 'svc:notion.create_notion_page', service: 'notion', name: 'Create a page', connected: true }] }) };
+    const s = new ToolDocsService(prisma, catalog, undefined, { generation: gen });
+    return { s, rows };
+  }
+
+  it('rebuilds when the connection generation moves', async () => {
+    let gen = 1;
+    const { s, rows } = svc(() => gen);
+    await s.rebuild();
+    expect(rows).toHaveLength(1);
+
+    // Nothing changed → the watcher does nothing at all.
+    rows.length = 0;
+    await (s as any).ifConnectionsChanged();
+    expect(rows).toHaveLength(0);
+
+    // He connects something → the generation moves → the documents are rewritten.
+    gen = 2;
+    await (s as any).ifConnectionsChanged();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].service).toBe('notion');
+  });
+
+  it('does not rewrite a document whose text has not changed', async () => {
+    const { s, rows } = svc(() => 1);
+    await s.rebuild();
+    const first = rows[0].text;
+    const out = await s.rebuild();
+    expect(out.changed).toBe(0);      // the hash matched, so the row was left alone
+    expect(rows[0].text).toBe(first);
+  });
+
+  it('the connect route asks for a rebuild without waiting on it', () => {
+    // Never awaited: a catalogue walk must not hold up the connect he is standing in front of.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readFileSync } = require('fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { join } = require('path');
+    const src = readFileSync(join(__dirname, 'services.controller.ts'), 'utf8');
+    expect(src).toContain('void this.docs?.rebuild?.()');
+    // …and a DISCONNECTED tool must stop claiming its actions can be called.
+    expect(src.split('void this.docs?.rebuild?.()').length - 1).toBe(2);
+  });
+});
