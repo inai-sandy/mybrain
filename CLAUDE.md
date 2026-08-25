@@ -974,6 +974,28 @@ change is additive, so no promoted worker is refused. Traps: `WorkerController`'
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.
+- **A rule with two call sites should be a function with one.** This has now cost three real runs.
+  "Can this job have a worker?" lived in the build, in `state()` and in `WorkerDispatchService.decideFor()`;
+  BEA-1454 fixed two and the third quietly sent the owner's agent down the engine road on EVERY run
+  while its own Settings screen said the worker was live and current. Same story for the hash: the
+  dispatcher compared `planHashOf(plan)` against a `planHash` the build stamps as
+  `buildHashOf(plan, brief)`, which for any job with an approved brief can never be equal — so a
+  worker promoted seconds earlier was reported "out of date, rebuild it", for ever. Both now go
+  through `WorkerBuildService.whyNotCompilableFor()` and `WorkerBuildService.buildHashFor()`, and
+  `worker-build.spec.ts` fails if either old form reappears in EITHER file. When you find yourself
+  copying a condition, export it instead — and when you write the guard test, match on the **call**
+  (`isDirectFetchAgent\s*\(`) not the word, or it trips on its own explanatory comment and teaches
+  the next person to delete the explanation (BEA-1462).
+- **Two screens that answer one question must call one function.** The bug above was findable in one
+  HTTP call: `GET /api/agent/agents/<id>/worker` returned `compilable:true` and
+  `road.say:"…runs on the engine…"` in the SAME body. Probing a live route for self-contradiction is
+  cheap and catches what green tests do not.
+- **Adding a capability is only half of it.** Every failure this week was the same shape: something
+  added on one side, and something on the other side that never heard about it — the loader that
+  dropped `brief`, the prompt that never named it, the compile rule left in a second place, the
+  dispatcher left in a third, and a worker built the day before the tools opened that still read as
+  "current". Before shipping a capability, ask what ELSE has an opinion about it: the prompt, the
+  loader, the dispatcher, the staleness check, the screen.
 - **Optional deps go LAST in a constructor** — many spec files build services positionally with fewer args. Guard optional delegates with `?.` too: spec harnesses pass partial Prisma stubs, so `this.prisma.flow.findMany` throws where `this.prisma.flow?.findMany?.()` degrades.
 - **`llm.complete()` runs on the app's GENERAL model, not the engine.** Its `label` argument is only a usage-log tag — it selects nothing. That setting is a moving target (`qwen/qwen3.7-max` → `moonshotai/kimi-k3` inside one day), so a bare `complete()` is how agent work silently ended up on a model nobody chose. Use `completeHelper('<key>', …)` with a key registered in `LlmService.HELPERS`, and a test in `llm/agent-calls-follow-a-named-model.spec.ts` enforces this for the flow, agent and bridge services. A helper that HAS a model now returns null rather than quietly finishing on the general one (BEA-1248).
 - **This project compiles with `strict: false`, so discriminated unions do NOT narrow.** `{ok:true;a}|{ok:false;b}` looks right and fails to compile — without `strictNullChecks` TypeScript will not narrow on the literal, so every `x.b` after `if (x.ok)` errors. Use optional fields (`{ok:boolean; a?; b?}`) instead; see `hermes/grade.ts`.
