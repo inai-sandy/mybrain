@@ -249,14 +249,19 @@ export function briefInWords(payload: BriefPayload): string {
   const d = payload.brief.delivery;
   if (d.whatsapp || d.telegram) {
     out.push('## The message it sends', '');
-    out.push(`It goes to ${[d.whatsapp ? 'WhatsApp' : '', d.telegram ? 'Telegram' : ''].filter(Boolean).join(' and ')}. **This is the shape he approved. Send this shape, filled in with the real data — not a summary of it, and never a row count.**`, '');
-    out.push('```text', d.messageText || '(nothing written — this brief should not have been approved)', '```', '');
+    out.push(`It goes to ${[d.whatsapp ? 'WhatsApp' : '', d.telegram ? 'Telegram' : ''].filter(Boolean).join(' and ')}. **You write this message. Not a template with the gaps filled — the actual words, from the actual rows.**`, '');
+    out.push('While talking it through he sketched roughly what he had in mind:', '');
+    out.push('```text', d.messageText || '(he did not sketch one — write what the conversation says he wants)', '```', '');
     out.push(
-      'Anything in <angle brackets> is a hole to fill from the rows. Everything else is literal text he will read.',
+      '**That sketch is a hint about tone and length, and nothing more.** It is not a template and there are no holes to fill. Read the conversation, work out what he actually wants to know when this arrives on his phone, and write that.',
       '',
-      '**Nothing that reads as an instruction may end up in the message he receives.** If a line in the shape above tells YOU what to do rather than telling HIM something, follow it and leave it out of what you send. He is reading this on his phone; a rule about how to build it is noise there.',
+      'Three things it taught us the hard way:',
       '',
-      'Pass the finished message as `message` to `kit.notify`, and give `headline` a single line with no newline in it for the WhatsApp template. See `kit/KIT.md`.',
+      '- **A count is not a summary.** "2 important emails summarised" tells him nothing he wanted; the two summaries themselves do. If the result is small enough to read on a phone, put it IN the message rather than pointing at it.',
+      '- **Never promise a link you do not have.** A sketch that ends "Read it here: <some_url>" will leave a dangling label the moment there is no url — on a trial run there never is one. Either you have a link and you name what it opens, or you say nothing about links at all.',
+      '- **Nothing that reads as an instruction may reach him.** If a line tells YOU what to do rather than telling HIM something, do it and leave it out. He is reading this on his phone.',
+      '',
+      'Pass the whole message as `message` to `kit.notify`. `headline` is optional — give one only if a single no-newline line is genuinely useful for the WhatsApp template; otherwise leave it out and the app takes your first line. See `kit/KIT.md`.',
       '',
     );
   } else {

@@ -178,10 +178,23 @@ export class BriefTrialService {
     const reopened = await this.agent.reopenForDecision(runId, 'Waiting for you to say whether to keep it.');
     if (!reopened) return;
 
-    const read = trial.fetched > 0 ? `read ${trial.fetched}, kept ${trial.rowCount}` : `${trial.rowCount} row${trial.rowCount === 1 ? '' : 's'}`;
-    const cost = trial.credits === 0 ? 'cost nothing' : `cost ${trial.credits} credit${trial.credits === 1 ? '' : 's'}`;
+    // WHAT HAPPENED, IN THE WORKER'S OWN WORDS (BEA-1463).
+    //
+    // This line used to be assembled here from counters the app keeps, and it was wrong on the
+    // owner's first real trial: it read *"It 1 row, cost nothing"* — no verb, and "1 row" for a run
+    // that had read fourteen emails and kept two. Both halves were the app talking about a program
+    // it does not understand. The program had already said it perfectly — `resultText` on its own
+    // run was "2 important emails summarised" — and nobody asked it.
+    //
+    // So the program's sentence is the sentence. The app adds only the two things it alone knows:
+    // that nothing was saved or sent, and how to answer.
+    const run: any = await this.agent.getRun?.(runId).catch(() => null);
+    const said = String(run?.resultText || '').trim();
+    const cost = trial.credits > 0 ? ` It cost ${trial.credits} credit${trial.credits === 1 ? '' : 's'}.` : '';
     const question = [
-      `"${brief.name || 'Your new agent'}" ran once. It ${read}, ${cost}, and nothing was saved or sent.`,
+      said
+        ? `"${brief.name || 'Your new agent'}" ran once: ${said}.${cost} Nothing was saved and nothing was sent.`
+        : `"${brief.name || 'Your new agent'}" ran once.${cost} Nothing was saved and nothing was sent.`,
       trial.message ? `\nThis is what it would send you:\n\n${trial.message}` : '',
       '\nKeep it? Reply "keep it", or tell me what was wrong.',
     ].filter(Boolean).join('\n');

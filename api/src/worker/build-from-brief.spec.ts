@@ -87,12 +87,17 @@ describe('what Codex is given', () => {
 
   // ---- the message: the whole point ---------------------------------------------------------------
 
-  it('hands over the exact message he approved, and forbids a row count', () => {
+  it('hands the message he sketched over as a HINT, and tells Codex to write the real one', () => {
+    // Was: "This is the shape he approved. Send this shape, filled in with the real data."
+    // That instruction produced the first real message he ever received from this system, and it was
+    // broken three ways: a count where he wanted the summaries, a "Read it here:" with nothing after
+    // it, and an unfillable <notion_page_url> for a job that writes a document. His verdict:
+    // *"It should just send the transcription to Codex… It will not create any rough idea."*
     const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
-    expect(req.brief).toContain('Work (14)');
-    expect(req.brief).toContain('• Ravi — quote needs a reply today');
-    expect(req.brief).toContain('This is the shape he approved');
-    expect(req.brief).toContain('never a row count');
+    expect(req.brief).toContain('Work (14)');            // his sketch still crosses, whole
+    expect(req.brief).toContain('You write this message');
+    expect(req.brief).toContain('Not a template with the gaps filled');
+    expect(req.brief).toContain('a hint about tone and length, and nothing more');
   });
 
   it('says plainly when nothing is sent', () => {
@@ -282,16 +287,24 @@ describe('"read" and "kept" are not the same promise', () => {
  * message is noise on a phone.
  */
 describe('the shape and the rules about it are different things', () => {
-  it('tells Codex what a hole is, and that rules must not be sent', () => {
+  it('there are no holes to fill any more — that idea is gone', () => {
     const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
-    expect(req.brief).toContain('<angle brackets> is a hole to fill');
-    expect(req.brief).toContain('Nothing that reads as an instruction may end up in the message he receives');
+    expect(req.brief).not.toContain('hole to fill');
+    expect(req.brief).toContain('It is not a template and there are no holes to fill');
   });
 
-  it('still insists the shape itself is sent, not a summary of it', () => {
+  it('teaches the three things that broke his first real message', () => {
     const req = buildRequest({ ...MATERIALS, brief: payload() } as any);
-    expect(req.brief).toContain('never a row count');
-    expect(req.brief).toContain('filled in with the real data');
+    // 1. he got "2 important emails summarised" instead of the two summaries
+    expect(req.brief).toContain('A count is not a summary');
+    // 2. he got "Read it here:" followed by nothing, because a trial has no url
+    expect(req.brief).toContain('Never promise a link you do not have');
+    // 3. instructions to the builder must never reach his phone
+    expect(req.brief).toContain('Nothing that reads as an instruction may reach him');
+  });
+
+  it('stops demanding a headline — Codex decides whether one helps', () => {
+    expect(buildRequest({ ...MATERIALS, brief: payload() } as any).brief).toContain('`headline` is optional');
   });
 });
 

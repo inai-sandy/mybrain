@@ -1898,6 +1898,42 @@ model RunJournal {
 /// `transcript` is the WHOLE conversation, every turn, nothing summarised — the owner's decision on
 /// 2026-08-22. Killed lines and killed turns are MARKED, never deleted, so a later reader can see
 /// he considered a thing and said no.
+/// THE GOAL — what this agent is for, written by CODEX from the conversation (BEA-1463).
+///
+/// The owner's instruction, 2026-08-25: *"Mainly based on a conversation, Codex has to create a
+/// goal. And it has to match the output with the goal."* And, about the chat model: *"It will not
+/// summarize. It will not create any rough idea based on my discussion. It should not do any of
+/// that stuff. It should just send the transcription to Codex."*
+///
+/// So this replaces `AgentBrief`. The difference is not the shape, it is the AUTHOR. A brief was the
+/// app's structured reading of a conversation — seven sections, tagged lines, a message template
+/// with holes — and every one of those structures produced a defect the owner had to find: a receipt
+/// instead of a summary, a link that could never be filled, a sentence with no verb. The goal is
+/// Codex's own words, from the whole transcript, and nothing is built until the owner approves it.
+model AgentGoal {
+  id        String   @id @default(uuid())
+  areaId    String
+  version   Int      @default(1)
+  /// proposed | approved | sent_back. Only `approved` may be built from.
+  status    String   @default("proposed")
+  /// Codex's own text. Never parsed, never re-shaped, never summarised — shown to him as written.
+  text      String   @default("")
+  /// What he said when he sent it back, carried into the next attempt so Codex sees the correction.
+  note      String?
+  /// The action ids he named in the chat, whose information went over with the transcript.
+  tools     String   @default("[]")
+  /// The conversation this goal was written from — kept whole, so a rebuild reads what this read.
+  transcript String  @default("[]")
+  /// The Codex session that wrote it, for tracing a bad goal back to its turn.
+  sessionId String?
+  approvedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([areaId, status])
+  @@index([areaId, version])
+}
+
 model AgentBrief {
   id     String @id @default(uuid())
   areaId String

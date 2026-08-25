@@ -4,6 +4,7 @@ import { AgentsImportService } from './agents-import.service';
 import { AgentAreasService, AreaTool } from './agent-areas.service';
 import { BuilderSampleService } from './builder-sample.service';
 import { BriefService } from './brief.service';
+import { GoalService } from './goal.service';
 import { TOP_BUILDER_SESSION } from './builder-session';
 
 type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[]; folderId?: string | null; useWorker?: boolean };
@@ -22,6 +23,7 @@ export class AgentController {
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly samples?: BuilderSampleService,
     private readonly briefs?: BriefService,
+    private readonly goals?: GoalService, // the goal Codex writes and he approves (BEA-1463)
   ) {}
 
   // ---- agent AREAS (BEA-1095): agent = area, job = the real unit ----
@@ -222,6 +224,45 @@ export class AgentController {
     const current = await this.currentBrief(id);
     const out = await this.briefs!.approve(current.id);
     return { ok: out.ok, brief: out.brief || current, refusals: out.refusals || [] };
+  }
+
+  // ---- the goal (BEA-1463) --------------------------------------------------------------------
+  //
+  // The owner's design: the chat only talks; when he says "ok" the whole conversation goes to Codex,
+  // Codex writes the goal, and nothing is built until he approves it. These four routes are that,
+  // and they do no reading of their own — `GoalService` carries the conversation over and stores
+  // what comes back, exactly as written.
+
+  /** What Codex proposed, if anything. Null before he has sent the conversation over. */
+  @Get('areas/:id/goal')
+  goal(@Param('id') id: string) {
+    return this.goals!.latest(id);
+  }
+
+  /** He said "ok": send Codex the conversation and the tools he named, and ask for the goal. */
+  @Post('areas/:id/goal')
+  goalPropose(@Param('id') id: string, @Body() body: any) {
+    const transcript = Array.isArray(body?.transcript) ? body.transcript : [];
+    const tools = Array.isArray(body?.tools) ? body.tools.map((t: any) => String(t)) : [];
+    return this.goals!.propose(id, { transcript, tools });
+  }
+
+  /** He answered a question Codex asked while working out the goal. */
+  @Post('areas/:id/goal/answer')
+  goalAnswer(@Param('id') id: string, @Body() body: any) {
+    return this.goals!.answer(id, String(body?.text || ''));
+  }
+
+  /** He approved it. This is the ONE thing that lets a build happen. */
+  @Post('areas/:id/goal/approve')
+  goalApprove(@Param('id') id: string) {
+    return this.goals!.approve(id);
+  }
+
+  /** He sent it back. His words go straight to Codex, which writes it again. */
+  @Post('areas/:id/goal/send-back')
+  goalSendBack(@Param('id') id: string, @Body() body: any) {
+    return this.goals!.sendBack(id, String(body?.note || ''));
   }
 
   @Get('areas/:id')
