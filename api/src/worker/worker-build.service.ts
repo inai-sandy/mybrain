@@ -191,6 +191,30 @@ export class WorkerBuildService implements OnModuleInit {
     return WorkerBuildService.whyNotCompilableFor(job);
   }
 
+  /**
+   * The newest failed run of this job, in the three shapes that actually help (BEA-1478): what it
+   * said, how far it got, and the exact arguments each call carried.
+   *
+   * The arguments matter most. Twice a program "set" a value that never left the building — a
+   * misspelt key, then a falsy flag — and in both cases the code looked right and the call did not.
+   * The `ToolCall` ledger is the only place that difference is visible.
+   */
+  private async lastFailureFor(agentId: string): Promise<any | null> {
+    const run: any = await this.prisma?.agentRun?.findFirst?.({ where: { agentId, status: 'failed' }, orderBy: { startedAt: 'desc' } }).catch(() => null);
+    if (!run?.error) return null;
+    let steps: string[] = [];
+    try {
+      const parsed = JSON.parse(run.stepLog || '[]');
+      steps = (Array.isArray(parsed) ? parsed : []).map((s: any) => `${s.status || ''} — ${String(s.label || '').slice(0, 160)}`).slice(-10);
+    } catch { steps = []; }
+    const rows: any[] = (await this.prisma?.toolCall?.findMany?.({ where: { runId: run.id }, orderBy: { id: 'asc' }, take: 12 }).catch(() => [])) || [];
+    return {
+      error: String(run.error).slice(0, 1200),
+      steps,
+      calls: rows.map((r: any) => ({ action: String(r.action || ''), args: String(r.arguments || '{}').slice(0, 400), error: r.ok ? undefined : String(r.error || '').slice(0, 200) })),
+    };
+  }
+
   private async goalMaterials(job: any, goal: any, kit: { version: string; js: string; doc: string; rev: string }, opts: any): Promise<BuildRequest> {
     let transcript: any[] = [];
     try { const t = JSON.parse(String((goal as any).transcript || '[]')); transcript = Array.isArray(t) ? t : []; } catch { transcript = []; }
@@ -218,10 +242,16 @@ export class WorkerBuildService implements OnModuleInit {
       }
     } catch { toolDocs = []; }
 
+    // What broke last time, and the arguments that REALLY went out (BEA-1478). Read from the job's
+    // own newest failed run, so a rebuild starts by looking at the evidence rather than at a general
+    // note somebody wrote afterwards.
+    const lastFailure = await this.lastFailureFor(job.id).catch(() => null);
+
     const inp = {
       job: { id: job.id, name: job.name },
       goal: String(goal.text || ''),
       toolDocs,
+      lastFailure,
       transcript,
       tools,
       kit,

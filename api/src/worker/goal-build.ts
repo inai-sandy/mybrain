@@ -35,6 +35,16 @@ export type GoalBuildInputs = {
    * not, and pinned an action id that does not exist.
    */
   toolDocs?: { service: string; text: string }[];
+  /**
+   * What went wrong the LAST time this job ran (BEA-1478) — the error, and the exact arguments that
+   * really reached the vendor.
+   *
+   * Three rebuilds in a row died on the same Gmail 413, and each time I answered by writing another
+   * general note about Gmail. That was the wrong tool: the last one was not a fact about Gmail at
+   * all, it was one call site in ONE program forgetting a flag. A note teaches every future agent
+   * something true; it cannot see a bug in the code it is about to replace. This can.
+   */
+  lastFailure?: { error: string; steps: string[]; calls: { action: string; args: string; error?: string }[] } | null;
   version: number;
   previousVersion?: number | null;
   reason?: string | null;
@@ -171,7 +181,25 @@ the real one was in the document it did not open.
 ${(inp.toolDocs || []).map((d) => d.text).join('\n\n---\n\n')}
 ` : ''}
 
-## Green tests are the only way this goes live
+${inp.lastFailure ? `## What happened when this last ran — read this before you write anything
+
+The previous program failed. This is the most specific information you have about what actually
+breaks, and it is about the code you are replacing.
+
+**It said:**
+
+${inp.lastFailure.error}
+
+${inp.lastFailure.steps.length ? `**It got this far:**\n\n${inp.lastFailure.steps.map((x) => `- ${x}`).join('\n')}\n` : ''}
+${inp.lastFailure.calls.length ? `**The arguments that really reached the vendor** — not what the program meant to send, what actually went out:
+
+${inp.lastFailure.calls.map((c) => `- \`${c.action}\` -> \`${c.args}\`${c.error ? ` -> ${c.error}` : ''}`).join('\n')}
+
+Compare those against what you intend to send. A flag missing from that list was never sent, whatever
+the code looked like — that is exactly how the last three attempts died, and twice the program "set"
+a value that never left the building.
+` : ''}
+` : ''}## Green tests are the only way this goes live
 
 Run \`node --test worker.test.mjs\` yourself and fix what fails. If they cannot pass, leave them
 failing and say why — the job stays on the road it is already on, and lying about it is worse than

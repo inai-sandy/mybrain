@@ -160,6 +160,34 @@ describe('what Codex is asked', () => {
     expect(p()).not.toContain('The tools this conversation names, in full');
   });
 
+  /**
+   * THE LAST FAILURE IS EVIDENCE, NOT BACKGROUND (BEA-1478).
+   *
+   * Three rebuilds died on the same Gmail 413 and each time the answer was another general note
+   * about Gmail. The third cause was not about Gmail at all — one call site in one program never
+   * sent a flag. A note teaches every future agent something true; it cannot see a bug in the code
+   * it is replacing. The sent arguments can, because they show what left the building rather than
+   * what the code appeared to do.
+   */
+  it('shows what broke last time, and the arguments that really went out', () => {
+    const t = goalBuildPrompt(inputs({
+      lastFailure: {
+        error: 'Gmail could not do that: HTTP 413 — payload too large.',
+        steps: ['done — Checked pinned actions', 'failed — Gmail could not do that'],
+        calls: [{ action: 'svc:gmail.fetch_emails', args: '{"user_id":"x","max_results":100}', error: 'HTTP 413' }],
+      },
+    }) as any);
+    expect(t).toContain('What happened when this last ran');
+    expect(t).toContain('HTTP 413');
+    expect(t).toContain('"max_results":100');
+    // The sentence that makes the evidence usable rather than decorative.
+    expect(t).toContain('A flag missing from that list was never sent');
+  });
+
+  it('says nothing about a last failure when there has not been one', () => {
+    expect(p()).not.toContain('What happened when this last ran');
+  });
+
   it('says which version is live so it does not think it is replacing nothing', () => {
     expect(goalBuildPrompt(inputs({ previousVersion: 3 }))).toContain('runs on v3 today');
   });
