@@ -612,11 +612,18 @@ export class ToolKnowledgeService {
       paging,
       cost,
       health,
-      // Learned facts come FIRST: they are about this account and this month, while a hand note is
-      // general. Both are kept — a human still knows things one request and one answer cannot show.
+      // HAND NOTES FIRST (BEA-1476). They used to come second, and `cardText` only renders the first
+      // eight — so on Gmail, four near-identical learned lessons ("`maxResults` is not something this
+      // action takes", then the same for `end`, `start`, `account") pushed the hand-written trap off
+      // the end of the card. That trap said exactly why the action was failing, and Codex never saw
+      // it: two builds died on the same HTTP 413 while the answer sat at position nine.
+      //
+      // A hand note is there because a person decided it mattered enough to write down. A learned
+      // one is generated, and generated things repeat. So the curated few go first and the rest fill
+      // whatever budget is left.
       notes: [
-        ...learned.map((l: any) => `${l.text} (learned by using it — ${l.confidence}${l.timesSeen > 1 ? `, seen ${l.timesSeen} times` : ''})`),
         ...notes.flatMap((n) => n.notes),
+        ...learned.map((l: any) => `${l.text} (learned by using it — ${l.confidence}${l.timesSeen > 1 ? `, seen ${l.timesSeen} times` : ''})`),
       ],
       ...(action.retired ? { retired: true } : {}),
       updatedAt: new Date().toISOString(),

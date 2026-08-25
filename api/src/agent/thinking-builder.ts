@@ -109,7 +109,10 @@ export function cardText(card: ToolKnowledge, budget = CARD_CHAR_BUDGET): string
   const cost = c.free ? 'free (no credits)' : c.credits ? `${fmt(c.credits.typical)} credit${c.credits.typical === 1 ? '' : 's'} per call typical (${fmt(c.credits.min)}–${fmt(c.credits.max)})` : c.note ? oneLine(c.note, 100) : 'unknown — assume 1 credit per call';
   lines.push(`cost: ${cost}${c.credits && c.note ? ` — ${oneLine(c.note, 80)}` : ''}`);
   lines.push(`health: ${healthWord}${health.note ? ` — ${oneLine(health.note, 240)}` : ''}`);
-  for (const n of (card.notes || []).slice(0, 8)) lines.push(`note: ${oneLine(n, 240)}`);
+  // Twelve, not eight (BEA-1476). A card with a lot of learned lessons was silently losing its
+  // hand-written traps off the end — and the one it lost was the one that explained a failure two
+  // builds in a row died on.
+  for (const n of (card.notes || []).slice(0, 12)) lines.push(`note: ${oneLine(n, 240)}`);
   const text = lines.join('\n');
   return text.length > budget ? `${text.slice(0, budget - 1)}…` : text;
 }

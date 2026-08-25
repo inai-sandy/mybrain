@@ -260,3 +260,42 @@ describe('the tools his words mention', () => {
     expect(toolsNamedIn('', known)).toEqual([]);
   });
 });
+
+/**
+ * A HAND-WRITTEN TRAP MUST NOT FALL OFF THE CARD (BEA-1476).
+ *
+ * Two builds in a row died on the same Gmail HTTP 413. The trap explaining exactly why was on the
+ * card — at position nine, and `cardText` rendered eight. What pushed it off was four near-identical
+ * generated lessons: "`maxResults` is not something this action takes", then the same sentence for
+ * `end`, `start` and `account`.
+ *
+ * So the curated few go first and the generated many fill what is left. A person wrote a hand note
+ * because they decided it mattered; a learned note is produced automatically, and automatic things
+ * repeat.
+ */
+describe('which notes survive onto the card', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { cardText } = require('../agent/thinking-builder');
+
+  const card = (notes: string[]) => ({
+    actionId: 'svc:gmail.fetch_emails',
+    name: 'Fetch emails',
+    description: 'Reads a mailbox.',
+    params: [],
+    fields: [],
+    notes,
+  });
+
+  it('keeps a hand note that sits behind a pile of generated ones', () => {
+    const many = Array.from({ length: 9 }, (_, i) => `\`arg${i}\` is not something this action takes.`);
+    const t = cardText(card(['THE TRAP: verbose:true is what causes the 413.', ...many]) as any);
+    expect(t).toContain('THE TRAP: verbose:true');
+  });
+
+  it('shows more than eight, because eight was the cut that lost it', () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => `note number ${i}`);
+    const t = cardText(card(twelve) as any);
+    expect(t).toContain('note number 8');
+    expect(t).toContain('note number 11');
+  });
+});
