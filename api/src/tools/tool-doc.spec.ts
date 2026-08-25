@@ -299,3 +299,44 @@ describe('which notes survive onto the card', () => {
     expect(t).toContain('note number 11');
   });
 });
+
+/**
+ * EVERY note reaches Codex (BEA-1476).
+ *
+ * A hand-written Gmail trap explained exactly why two builds in a row died on HTTP 413. It was on
+ * the card. Codex never saw it. Tracing that ended in an indirection — the documents rendered
+ * through a writer registered elsewhere at boot — where the card held the note, the renderer showed
+ * it when called directly, and the route still returned one.
+ *
+ * So the documents render their own cards now, in one function, showing every note. A program about
+ * to call a thing needs the trap that stops it failing more than it needs brevity.
+ */
+describe('an action card written for Codex', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { writeCard } = require('./tool-doc.service');
+
+  const card = (notes: string[]) => ({
+    actionId: 'svc:gmail.fetch_emails',
+    name: 'Fetch emails',
+    description: 'Reads a mailbox.',
+    params: [{ name: 'max_results', type: 'integer', description: 'How many per page.' }, { name: 'query', type: 'string', required: true }],
+    fields: [{ path: 'messages[].subject', kind: 'text' }],
+    notes,
+  });
+
+  it('shows EVERY note, however many there are', () => {
+    const notes = [...Array.from({ length: 11 }, (_, i) => `generated lesson ${i}`), 'THE TRAP: verbose:true causes the 413.'];
+    const t = writeCard(card(notes));
+    expect(t).toContain('THE TRAP: verbose:true');
+    expect((t.match(/^note:/gm) || []).length).toBe(12);
+  });
+
+  it('marks which parameters are required, since guessing those is what breaks calls', () => {
+    expect(writeCard(card([]))).toContain('query* (string)');
+    expect(writeCard(card([]))).toContain('max_results (integer)');
+  });
+
+  it('survives a card with almost nothing on it', () => {
+    expect(writeCard({ actionId: 'svc:x.y' })).toContain('svc:x.y');
+  });
+});

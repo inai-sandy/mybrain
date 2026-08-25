@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ToolCatalogService } from './tool-catalog.service';
-import { ToolLookupService } from './tool-lookup.service';
+import { ToolKnowledgeService } from './tool-knowledge.service';
 import { ComposioProvider } from './composio.provider';
 import { DocAction, docHash, toolDocText, toolIndexText } from './tool-doc';
 
@@ -47,7 +47,7 @@ export class ToolDocsService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     // Optional + LAST — spec harnesses build services positionally with fewer arguments.
     private readonly catalog?: ToolCatalogService,
-    private readonly lookup?: ToolLookupService,
+    private readonly knowledge?: ToolKnowledgeService,
     private readonly services?: ComposioProvider, // its generation moves whenever a connection changes
   ) {}
 
@@ -114,12 +114,17 @@ export class ToolDocsService implements OnModuleInit, OnModuleDestroy {
   async action(actionId: string): Promise<{ actionId: string; text: string } | null> {
     const id = String(actionId || '').trim();
     if (!id.startsWith('svc:')) return null;
-    // Through the LOOKUP service, which already renders a card as text. `cardText` itself lives with
-    // the builder's prompt-writing, and importing that here would drag the agent module into the
-    // catalog — the cycle `tool-lookup.service.ts` was written to avoid.
-    const got = await this.lookup?.getAction?.(id).catch(() => null);
-    if (!got) return null;
-    return { actionId: id, text: String(got.text || '') };
+    // Rendered HERE, from the card itself (BEA-1476).
+    //
+    // This used to go through `ToolLookupService.getAction()`, which renders with whatever writer
+    // somebody registered at boot. Chasing why a hand-written trap never reached Codex ended in that
+    // indirection: the card held the note, the renderer showed it when called directly, and the
+    // route still returned one note. An extra hop nobody owns is not worth the doubt — this asks the
+    // knowledge service for the card and writes it out, and what Codex reads is decided in one place
+    // I can point at.
+    const card: any = await this.knowledge?.card?.(id).catch(() => null);
+    if (!card) return null;
+    return { actionId: id, text: writeCard(card) };
   }
 
   /**
@@ -180,4 +185,31 @@ export class ToolDocsService implements OnModuleInit, OnModuleDestroy {
 function pretty(slug: string): string {
   const s = String(slug || '').replace(/[-_]+/g, ' ').trim();
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : slug;
+}
+
+/**
+ * One action's card as text, for Codex (BEA-1476).
+ *
+ * Deliberately its own function, in this file, showing EVERY note. The builder has its own renderer
+ * with its own budget; a document is read by a program that is about to call the thing, so the trap
+ * that stops it failing matters more here than brevity does.
+ */
+export function writeCard(card: any): string {
+  const out: string[] = [];
+  out.push(`### ${card.actionId} — ${card.name || ''}`.trim());
+  if (card.description) out.push(`what: ${one(card.description, 400)}`);
+  const params = (card.params || []).map((p: any) => `${p.name}${p.required ? '*' : ''} (${p.type || 'string'})${p.description ? ` — ${one(p.description, 120)}` : ''}`);
+  if (params.length) out.push(`params: ${params.join(' · ')}`);
+  const fields = (card.fields || []).map((f: any) => `${f.path} (${f.kind})`);
+  if (fields.length) out.push(`fields: ${fields.slice(0, 40).join(', ')}`);
+  if (card.paging?.how) out.push(`paging: ${card.paging.how === 'none' ? 'does not page' : `${card.paging.how}${card.paging.field ? ` via "${card.paging.field}"` : ''}`}`);
+  if (card.cost) out.push(`cost: ${card.cost.free ? 'free (no credits)' : card.cost.credits ? `about ${card.cost.credits.typical} credits` : 'unknown'}`);
+  if (card.health?.text) out.push(`health: ${one(card.health.text, 260)}`);
+  // EVERY note. The whole reason this function exists.
+  for (const n of card.notes || []) out.push(`note: ${one(n, 400)}`);
+  return out.join('\n');
+}
+
+function one(v: any, max: number): string {
+  return String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
