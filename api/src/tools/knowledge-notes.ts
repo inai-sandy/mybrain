@@ -164,7 +164,13 @@ export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
   },
   {
     match: 'svc:gmail.fetch_emails',
-    notes: ['The list comes back in ARRIVAL order, not date order — re-sort on messageTimestamp.'],
+    notes: [
+      'The list comes back in ARRIVAL order, not date order — re-sort on messageTimestamp.',
+      // Recorded from a real build (BEA-1473): a program asked for a whole day of mail with full
+      // bodies in one call and the vendor refused the lot with HTTP 413 — no rows, no partial
+      // answer. Its own guidance is the fix, so it is written here where the next build will read it.
+      'Asking for too much at once is REFUSED whole: "HTTP 413 — the tool response payload is too large". A day of mail with full bodies in one call will hit it. Pass max_results (25 or so), page with the cursor, and ask for bodies only for the messages you have already decided you need.',
+    ],
   },
 
   // ---- WhatsApp (our own gateway, BEA-1384) ----------------------------------------------------
