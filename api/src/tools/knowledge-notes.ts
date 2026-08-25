@@ -169,7 +169,13 @@ export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
       // Recorded from a real build (BEA-1473): a program asked for a whole day of mail with full
       // bodies in one call and the vendor refused the lot with HTTP 413 — no rows, no partial
       // answer. Its own guidance is the fix, so it is written here where the next build will read it.
-      'Asking for too much at once is REFUSED whole: "HTTP 413 — the tool response payload is too large". A day of mail with full bodies in one call will hit it. Pass max_results (25 or so), page with the cursor, and ask for bodies only for the messages you have already decided you need.',
+      // Measured, not guessed (BEA-1475). Two real builds died here. The first passed `maxResults`
+      // (wrong case) so the cap was dropped entirely; the second got the cap right — `max_results:50`
+      // with a sensible query — and still died, because `verbose:true` pulls the full body of every
+      // one of those 50 at once. The size limit is on the WHOLE response, so a correct limit plus a
+      // verbose flag is still too much.
+      'HTTP 413 "payload is too large" refuses the WHOLE response — no rows, no partial answer. Two things cause it, and the second is the one that surprises people: (1) no cap, so pass max_results (25 is safe); (2) verbose:true, which pulls the full body of EVERY message in the page. `verbose:true` with max_results:50 is over the limit even with a tight query.',
+      'The way that works: list first with verbose:false (or ids_only:true) to get senders, subjects and timestamps cheaply, decide which messages you actually care about, and only then fetch bodies for those few. Do not fetch 50 bodies to keep 3.',
     ],
   },
 
