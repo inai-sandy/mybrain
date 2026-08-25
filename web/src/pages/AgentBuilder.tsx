@@ -3,7 +3,7 @@ import { Loader2, Sparkles, X, CalendarClock, Wrench, Check, Repeat } from 'luci
 import { useToast } from '../ui/Toast';
 import { ChatInput } from '../ui/ChatInput';
 import { PlanCard, PlanCost } from '../ui/PlanCard';
-import { BriefProposalCard } from '../ui/BriefProposalCard';
+import { SendToCodex } from '../ui/SendToCodex';
 import { BuilderLine, BuilderMessage } from '../ui/BuilderMessage';
 
 /** What a Social result hands the builder (BEA-1372): the call just made + a compact view of its answer. */
@@ -38,10 +38,45 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, fo
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  // The tools the chat heard him NAME (BEA-1466) — the one thing it collects, shown so he can
+  // correct it. Never a shortlist the app chose.
+  const [namedTools, setNamedTools] = useState<string[]>([]);
+  const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLDivElement>(null);
 
-  function adopt(d: any) { setLog(d.log || []); setSpec(d.spec || null); setPlan(d.plan || null); setBrief(d.brief || null); setCost(d.cost || null); setGoal(d.goal || null); setPlanHidden(false); }
+  function adopt(d: any) { setLog(d.log || []); setSpec(d.spec || null); setPlan(d.plan || null); setBrief(d.brief || null); setCost(d.cost || null); setGoal(d.goal || null); setPlanHidden(false); if (Array.isArray(d.tools)) setNamedTools(d.tools.map(String)); }
+
+  /**
+   * "ok" — his whole conversation goes to Codex, with the tools he named (BEA-1466).
+   *
+   * Nothing is summarised on the way. The turns cross exactly as they were said, which is the entire
+   * point of this path: every structure the app has ever put in between quietly changed what he
+   * asked for. Codex answers with the goal, and he reads it on the goal screen.
+   */
+  async function sendToCodex() {
+    if (sending) return;
+    setSending(true);
+    try {
+      const r = await fetch('/api/agent/builder/send-to-codex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: log.map((m: any) => ({ who: m.who === 'you' ? 'you' : 'assistant', text: String(m.text || '') })),
+          tools: namedTools,
+          folderId: folderId ?? null,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.message || 'Codex could not be reached');
+      onCreated(`/agent/ar/${d.areaId}/brief`);
+    } catch (e: any) {
+      setLog((p) => [...p, { who: 'ai', text: e?.message || 'Codex could not be reached. Nothing was built.' }]);
+    } finally {
+      setSending(false);
+    }
+  }
+
   const seededRef = useRef(false); // one seed POST per mount — StrictMode runs the effect twice in dev
   useEffect(() => {
     if (seed?.tool) {
@@ -123,18 +158,17 @@ export function AgentBuilder({ onCreated, onUseForm, onClose, seed, onSeeded, fo
         <div className="min-h-[200px] flex-1 space-y-2 overflow-y-auto px-4 py-3">
           {log.length === 0 && (
             <p className="rounded-xl bg-zinc-50 p-3 text-sm text-zinc-500 dark:bg-zinc-800/60">
-              Tell me what this agent is for — in your own words. For example: <i>“a daily news agent — tech news and AI news separately, every morning at 7, WhatsApp me the brief.”</i> I'll ask what I need, show you the full plan, and only build it when you press Create.
+              Tell me what this agent is for — in your own words. For example: <i>“a daily news agent — tech news and AI news separately, every morning at 7, WhatsApp me the summary.”</i> Say which tools it should use. When you are happy, press Send to Codex — your whole conversation goes over and Codex tells you what it will build.
             </p>
           )}
           {log.map((m, i) => <BuilderMessage key={i} m={m} />)}
           {busy && <div className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />thinking…</div>}
 
-          {/* the plan-with-cost of a direct agent (BEA-1371/1372) */}
-          {/* A brief supersedes a plan — the same one-proposal-at-a-time rule the server keeps. */}
-          {brief && <BriefProposalCard card={brief} opening={creating} onOpen={create} />}
-          {plan && !brief && !spec && !planHidden && <PlanCard plan={plan} cost={cost} goal={goal} creating={creating} onCreate={create} onChange={changeSomething} onDismiss={() => setPlanHidden(true)} />}
-          {plan && !spec && planHidden && (
-            <button onClick={() => setPlanHidden(false)} className="text-xs text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300" data-testid="plan-show-again">Show the plan again</button>
+          {/* THE CHAT DESIGNS NOTHING (BEA-1466). There is no brief card and no plan card any more —
+              the chat talks, and when he is ready his whole conversation goes to Codex, which writes
+              the goal he approves. His instruction: "It should just send the transcription to Codex." */}
+          {log.length > 0 && (
+            <SendToCodex tools={namedTools} turns={log.length} busy={sending} onSend={sendToCodex} />
           )}
 
           {/* the evolving proposal */}

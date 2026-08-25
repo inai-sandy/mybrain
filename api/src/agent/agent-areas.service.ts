@@ -19,6 +19,16 @@ import {
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
 import { LOOKUP_TEXT, ToolLookupService, lookupRequestOf, lookupText } from '../tools/tool-lookup.service';
+/**
+ * The chat designs nothing (BEA-1466).
+ *
+ * A constant rather than a setting: the owner asked for one behaviour, not a switch, and a switch
+ * would be one more place for the two roads to disagree. The brief machinery below it stays intact
+ * because his nine existing agents were built through it and still run on it — this only stops the
+ * CHAT from feeding it.
+ */
+const CHAT_ONLY = true;
+
 import { BRIEF_TEXT, BriefProblem, ProposedBrief, briefCardOf, briefHeldNote, briefRequestOf, checkProposedBrief, readProposedBrief } from './brief-turn';
 import { BriefService } from './brief.service';
 
@@ -360,7 +370,12 @@ export class AgentAreasService {
         // A BRIEF (BEA-1424) — what he reads and approves, and the only thing that gets built. Checked
         // here rather than trusted: the prompt asks for these things, and this builder has talked its
         // way past a prompt four times over. One send-back per reason, never a loop.
-        const rawBrief = briefRequestOf(g);
+        // THE CHAT ONLY CHATS (BEA-1466). The prompt says the brief field is always null; this is
+        // what makes it true whatever the model sends, because this builder has talked its way past
+        // a prompt more than once. A brief that arrives now is DROPPED, silently and on purpose —
+        // it is not an error he needs to see, it is a habit being unlearned. What he wants goes to
+        // Codex as the conversation itself, and Codex writes the goal (BEA-1463).
+        const rawBrief = CHAT_ONLY ? null : briefRequestOf(g);
         if (rawBrief) {
           const proposed = readProposedBrief(rawBrief);
           if (!proposed) {
@@ -380,6 +395,8 @@ export class AgentAreasService {
           break;
         }
 
+        // Same for a plan — the eight boxes are gone and the chat may not resurrect them.
+        if (CHAT_ONLY) break;
         if (!g?.plan || typeof g.plan !== 'object') break;
         const check = validatePlan(g.plan, allowedIds);
         if (!check.plan) {

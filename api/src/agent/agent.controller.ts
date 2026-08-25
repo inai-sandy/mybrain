@@ -87,6 +87,24 @@ export class AgentController {
     return this.areas.builderCreate({ folderId: body?.folderId ?? null });
   }
 
+  /**
+   * "ok" from the top-level chat (BEA-1466) — his conversation goes to Codex.
+   *
+   * The chat has no area until this moment, so one is made here to hold the goal, the runs and the
+   * program. Its name is a placeholder: Codex names the job properly from the goal it writes
+   * (`titleOf`), because naming a thing from a conversation is reading it, and the app does not do
+   * that any more.
+   */
+  @Post('builder/send-to-codex')
+  async builderSendToCodex(@Body() body: any) {
+    const transcript = Array.isArray(body?.transcript) ? body.transcript : [];
+    const tools = Array.isArray(body?.tools) ? body.tools.map((t: any) => String(t)) : [];
+    if (!transcript.length) throw new BadRequestException('There is nothing to send yet — say what you want first.');
+    const area = await this.areas.create({ name: 'New agent', folderId: body?.folderId ?? null });
+    const goal = await this.goals!.propose(String((area as any).id), { transcript, tools });
+    return { areaId: String((area as any).id), goal };
+  }
+
   @Delete('builder')
   builderReset() {
     return this.areas.builderReset();

@@ -110,7 +110,7 @@ describe('AgentBuilder with a seed', () => {
     expect(screen.getByText(/Prefer the quick form/)).toBeTruthy();
   });
 
-  it('a 🔎 sample line mid-conversation is its own muted row (text as written), never a bubble; a plan turn shows the card with Change something → focuses the input, Not now → hides it', async () => {
+  it('a 🔎 sample line mid-conversation is its own muted row (text as written), never a bubble; and the chat offers Send to Codex instead of a plan card (BEA-1466)', async () => {
     const PLAN = { name: 'Hashtag digest', sources: [{ kind: 'source', id: 'svc:instagram.search_hashtag', actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'smarthomeindia' }, pages: 2 }], merge: false, output: { kind: 'sheet', append: false }, notify: { whatsapp: false, telegram: false }, schedule: null, mode: 'run' };
     const SAMPLE = '🔎 I tried Instagram · Popular Search (query: home automation) — 12 posts · fields: id, caption, owner, url · no date field · 1 credit';
     const state: any = { current: { log: [], spec: null, plan: null, cost: null }, reply: { reply: 'Here is the plan.', plan: PLAN, cost: { credits: 2, aiTokens: 0, items: 24, how: 'Instagram search hashtag: 2 pages × 1 credit = 2 → ≈ 2 credits per run.' } } };
@@ -126,14 +126,16 @@ describe('AgentBuilder with a seed', () => {
     expect(row.textContent).toContain('I tried Instagram · Popular Search (query: home automation) — 12 posts · fields: id, caption, owner, url · no date field · 1 credit');
     expect(row.textContent).not.toMatch(/\{/); // never a JSON wall
     // the plan card, with the three buttons
-    await waitFor(() => expect(screen.getByTestId('builder-plan')).toBeTruthy());
-    expect(screen.getByTestId('builder-plan-cost').textContent).toMatch(/≈ 2 credits per run · no AI cost/);
-    fireEvent.click(screen.getByTestId('plan-change'));
-    expect(document.activeElement).toBe(screen.getByRole('textbox'));
-    fireEvent.click(screen.getByTestId('plan-dismiss'));
+    // The plan card is GONE (BEA-1466). The chat designs nothing now: it talks, collects the tools
+    // he names, and sends the whole conversation to Codex, which writes the goal he approves. His
+    // instruction: "It will not create any rough idea based on my discussion."
     expect(screen.queryByTestId('builder-plan')).toBeNull();
-    fireEvent.click(screen.getByTestId('plan-show-again'));
-    expect(screen.getByTestId('builder-plan')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('send-to-codex')).toBeTruthy());
+    expect(screen.getByTestId('send-to-codex').textContent).toContain('exactly as written');
+    // And it never summarises what he said back at him on the way.
+    expect(screen.getByTestId('send-to-codex').textContent).not.toMatch(/what I understood|in summary/i);
+    // There is no "show the plan again" either — there is no plan to show.
+    expect(screen.queryByTestId('plan-show-again')).toBeNull();
   });
 
   it('BuilderMessage: kind sample or a leading 🔎 → the muted row; a plain ai line → the bubble', () => {
