@@ -52,7 +52,8 @@ function world(opts: { job?: any; worker?: any; runner?: any; journal?: { seq: n
   // would test nothing. `WorkerBuildService.buildHashFor` needs no database for a job with no brief.
   const builds: any = {
     livePromoted: async () => opts.worker ?? null,
-    buildHashFor: (job: any) => WorkerBuildService.prototype.buildHashFor.call({ briefs: undefined }, job),
+    buildHashFor: (job: any) => WorkerBuildService.prototype.buildHashFor.call({ briefs: undefined, goals: undefined }, job),
+    whyNotBuildable: (job: any) => WorkerBuildService.prototype.whyNotBuildable.call({ goals: undefined }, job),
   };
   const tokens: any = {
     mint: async (runId: string, agentId: string) => ({ token: `t-${runId}`, seed: { now: 1, random: 2 }, runId, agentId }),

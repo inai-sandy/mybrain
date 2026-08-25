@@ -15,6 +15,9 @@ import { isServiceToolId } from '../tools/service-provider';
 import { tableOf } from '../social/rows';
 import { argsHashOf } from '../tools/tool-sample';
 import { BuildRequest, BuildSample, buildHashOf, buildRequest, planHashOf } from './build-brief';
+import { goalBuildFiles, goalBuildPrompt, goalHash } from './goal-build';
+import { GoalService } from '../agent/goal.service';
+import { cardText } from '../agent/thinking-builder';
 import { WorkerRunnerClient } from './worker-runner.client';
 
 /** A build that has been going this long is not going to finish — its row stops blocking the next one. */
@@ -94,6 +97,7 @@ export class WorkerBuildService implements OnModuleInit {
     private readonly briefs?: BriefService,
     private readonly lessons?: ToolLessonService, // the learned shapes a recipe is written from (BEA-1415)
     private readonly lookup?: ToolLookupService, // the whole shelf, for the build brief (BEA-1457)
+    private readonly goals?: GoalService, // the goal HE approved, which the build now stands on (BEA-1464)
   ) {}
 
   onModuleInit() {
@@ -150,10 +154,64 @@ export class WorkerBuildService implements OnModuleInit {
    * "the plan changed, rebuild it" — including a run seconds after a fresh, green, promoted build.
    */
   async buildHashFor(job: any): Promise<string> {
+    // A goal-built job is hashed on its GOAL (BEA-1464). It has no plan, so `planHashOf` would hash
+    // an empty shape — identical for every such job — and `whyNotCompilableFor` would refuse it for
+    // having no sources. Either one alone would send a perfectly good worker down the old road on
+    // every single run, which is precisely the failure BEA-1462 was.
+    const goal = job?.areaId ? await this.goals?.approved?.(job.areaId).catch(() => null) : null;
+    if (goal && String(goal.text || '').trim()) return goalHash(Number(goal.version) || 1, String(goal.text || ''));
     if (WorkerBuildService.whyNotCompilableFor(job)) return '';
     const plan = planFromAgent(job);
     const brief = job?.areaId ? await this.briefs?.forCodex?.(job.areaId).catch(() => null) : null;
     return buildHashOf(plan, brief || null);
+  }
+
+  /**
+   * The build request when he has approved a goal (BEA-1464).
+   *
+   * Deliberately short: the goal, the conversation, the tools he named, the parts box. The hash is
+   * of the GOAL and the conversation, because those are now what the program was built from — a
+   * plan hash would mark a worker stale for an edit to a plan nobody reads any more.
+   */
+  /**
+   * Can this job have a program at all? (BEA-1464)
+   *
+   * An approved goal is a yes, whatever the job's columns say — the goal IS the specification and
+   * there is no plan to inspect. Everything else falls back to the old rule unchanged, so the nine
+   * live jobs behave exactly as they did.
+   */
+  async whyNotBuildable(job: any): Promise<string> {
+    const goal = job?.areaId ? await this.goals?.approved?.(job.areaId).catch(() => null) : null;
+    if (goal && String(goal.text || '').trim()) return '';
+    return WorkerBuildService.whyNotCompilableFor(job);
+  }
+
+  private async goalMaterials(job: any, goal: any, kit: { version: string; js: string; doc: string; rev: string }, opts: any): Promise<BuildRequest> {
+    let transcript: any[] = [];
+    try { const t = JSON.parse(String((goal as any).transcript || '[]')); transcript = Array.isArray(t) ? t : []; } catch { transcript = []; }
+    const tools: any[] = [];
+    for (const id of goal.tools || []) {
+      const card = await this.knowledge?.card?.(String(id)).catch(() => null);
+      let sample: any = undefined;
+      try { sample = (await this.samples?.replay?.(String(id)))?.data ?? undefined; } catch { sample = undefined; }
+      tools.push({ actionId: String(id), name: (card as any)?.name || null, card: card ? cardText(card as any) : null, sample });
+    }
+    const inp = {
+      job: { id: job.id, name: job.name },
+      goal: String(goal.text || ''),
+      transcript,
+      tools,
+      kit,
+      version: opts.version,
+      previousVersion: opts.previousVersion ?? null,
+      reason: opts.reason ?? null,
+    };
+    return {
+      brief: goalBuildPrompt(inp),
+      files: goalBuildFiles(inp),
+      planHash: goalHash(Number(goal.version) || 1, String(goal.text || '')),
+      sampleIds: [],
+    };
   }
 
   // ---- the build turn ---------------------------------------------------------------------------
@@ -271,6 +329,15 @@ export class WorkerBuildService implements OnModuleInit {
     // than only the actions this job's plan already named. A catalog that cannot be read is simply
     // absent from the brief — the lookup still works at run time.
     const catalog = await this.lookup?.services?.().catch(() => null);
+    // THE NEW ROAD (BEA-1464). An approved goal means the conversation and that goal ARE the
+    // specification — no plan, no contract, no brief. The old road stays exactly as it was for every
+    // job that has no goal, so nothing already live changes underneath him.
+    const goal = job.areaId ? await this.goals?.approved?.(job.areaId).catch(() => null) : null;
+    if (goal && String(goal.text || '').trim()) {
+      const req = await this.goalMaterials(job, goal, kit, opts);
+      return { plan, cards, kit, req };
+    }
+
     const req = buildRequest({
       job: { id: job.id, name: job.name },
       plan,

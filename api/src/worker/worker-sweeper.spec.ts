@@ -253,6 +253,13 @@ describe('the stall watchdog — both roads', () => {
   it('reads the last step or checkpoint as the moment of life', () => {
     const at = ago(5).toISOString();
     expect(lastActivityAt({ startedAt: ago(90), stepLog: JSON.stringify([{ at }]) })).toBe(new Date(at).getTime());
-    expect(lastActivityAt({ startedAt: ago(90), stepLog: 'not json' })).toBe(ago(90).getTime());
+
+    // BEA-1414, the flaky test that failed roughly one ship in ten all week and was filed without a
+    // diagnosis. `ago()` reads `Date.now()` on every call, so calling it twice — once to build the
+    // input, once to build the expectation — compares two different clocks. When the millisecond
+    // ticked in between, the assertion failed by exactly 1 (`…194` vs `…193`) and the whole ship
+    // rolled back. One timestamp, taken once, used for both.
+    const started = ago(90);
+    expect(lastActivityAt({ startedAt: started, stepLog: 'not json' })).toBe(started.getTime());
   });
 });

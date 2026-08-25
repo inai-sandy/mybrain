@@ -88,7 +88,9 @@ export class WorkerDispatchService implements OnModuleInit {
     // `isDirectFetchAgent` used to stand here, and it is a DIFFERENT question — "can the plan runner
     // do this whole job" — which answers no for a brief-built job that writes anywhere. That made a
     // job with a green, promoted worker fall back to the engine on every single run.
-    const cannot = WorkerBuildService.whyNotCompilableFor(job);
+    // An approved goal is its own answer here (BEA-1464): the goal IS the specification, so there
+    // is no plan for the old rule to inspect and it would refuse the job for having no sources.
+    const cannot = await this.builds.whyNotBuildable(job);
     if (cannot) return { use: false, say: `Ran it the old way — ${lowerFirst(cannot)}` };
     const worker = await this.builds.livePromoted(job.id).catch(() => null);
     if (!worker) {
