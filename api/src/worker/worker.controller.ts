@@ -201,6 +201,10 @@ export class WorkerController {
         credits: Number(r.credits) || 0,
         error: r.error || null,
         notFound: !!r.notFound,
+        // Arguments this action does not take, so they never went out (BEA-1474). Said out loud so a
+        // program can fix its own spelling — a silently dropped `maxResults` is what made Gmail
+        // refuse a whole day of mail with HTTP 413 while the run looked like it had asked for a cap.
+        ...((r as any).droppedArgs?.length ? { droppedArgs: (r as any).droppedArgs } : {}),
         stop: r.ok ? null : r.error || 'the call failed',
         // The app's reading, kept so nothing already built breaks…
         table: r.ok ? tableOf(r.data) : null,

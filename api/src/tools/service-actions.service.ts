@@ -88,6 +88,14 @@ export type ServiceRunResult = {
   outOfCredits?: boolean;
   /** The provider answered "nothing matches" (a search with no results) — see `ExecuteResult.notFound` (BEA-1359). */
   notFound?: boolean;
+  /**
+   * Argument names the caller passed that this action does not take, so they were NOT sent (BEA-1474).
+   *
+   * Never a failure — the call still ran. It exists because the drop used to be silent: Codex asked
+   * Gmail for `maxResults`, the schema calls it `max_results`, the limit disappeared, and Gmail was
+   * asked for a whole day of mail uncapped until the vendor refused it all with HTTP 413.
+   */
+  droppedArgs?: string[];
   actionName?: string;
   serviceName?: string;
   /**
@@ -104,6 +112,8 @@ export type ServiceRunResult = {
 
 @Injectable()
 export class ServiceActionsService {
+  /** Argument names the last `keepKnown()` discarded — see there for why this is not silent (BEA-1474). */
+  private dropped: string[] = [];
   private readonly log = new Logger('ServiceActions');
 
   /**
@@ -310,7 +320,7 @@ export class ServiceActionsService {
       const why = this.plainReason(res?.error);
       const status = Number.isFinite(res?.status) ? Number(res.status) : undefined;
       const r = await fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk, credits, status, notFound: !!res?.notFound });
-      return { ...r, actionName: action.name, serviceName: name };
+      return { ...r, actionName: action.name, serviceName: name, ...(this.dropped.length ? { droppedArgs: this.dropped.slice() } : {}) };
     }
 
     const summary = this.summarise(res.data);
@@ -454,6 +464,17 @@ export class ServiceActionsService {
     if (!names.length) return {};
     const out: Record<string, any> = {};
     for (const k of names) if (values[k] !== undefined && values[k] !== null) out[k] = values[k];
+    // WHAT WAS THROWN AWAY (BEA-1474). Recorded on the instance so `runDetailed()` can hand it back
+    // to the caller, because silently dropping an argument is how this bit him for real:
+    //
+    // Codex passed `maxResults` to Gmail. The schema calls it `max_results`. The limit vanished here
+    // without a word, Gmail was asked for a whole day of mail with no cap, and the vendor refused
+    // the entire response with HTTP 413. The run failed, and every piece of evidence pointed at
+    // Codex "asking for too much" — when it had asked for a limit and this line deleted it.
+    //
+    // Nothing is added back and nothing is guessed at: an unknown key is still not sent. It is just
+    // no longer secret.
+    this.dropped = Object.keys(values || {}).filter((k) => !names.includes(k) && values[k] !== undefined && values[k] !== null);
     return out;
   }
 

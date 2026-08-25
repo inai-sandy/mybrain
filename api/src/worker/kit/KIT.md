@@ -71,12 +71,19 @@ allow-list. It answers:
 | `table` | the app's own general reading of it, `{columns, rows}` |
 | `credits` | what it cost |
 | `error`, `notFound` | why not, when `ok` is false |
+| `droppedArgs` | argument names this action does **not** take, so they were never sent |
 
 **Read `data` in your own code.** The app's general reader has to work for every vendor on earth and
 is often wrong about a shape it has not met — `payload.headers.0.value` where you wanted `subject`,
 or a single wrapped object read as a table of its own parts. When that happens, it is not something
 to report and wait on: pull the fields out here, and put a test beside it using the saved answer in
 `samples/`. That test is what catches the vendor moving a field next month.
+
+**Check `droppedArgs`.** An argument the action does not take is not sent, and the call runs without
+it. That is how a real build lost its Gmail limit: it passed `maxResults`, the schema calls it
+`max_results`, and Gmail was asked for a whole day of mail with no cap until the vendor refused the
+entire response. If something you passed comes back in `droppedArgs`, you spelled it wrong — fix it
+rather than assuming it applied.
 
 Use `r.table` when it is genuinely right — a plain list of flat items usually is. Do not use it when
 it is not.
@@ -110,12 +117,13 @@ anything.
 
 ### What still stands in your way
 
-Short list, and none of it is arbitrary:
+Almost nothing, and that is deliberate (BEA-1471 — the owner's decision, twice stated):
 
-- the **daily credit ceiling** is checked before every call, and a call over it stops the run;
-- a call that **cannot be undone** parks the run and asks him — `WorkerPaused` comes out, and you let
-  it out exactly as you do for `kit.ask`. Reads are never gated;
-- every call is written to his ledger whatever happens.
+- there is **no credit ceiling** on a worker's calls, and **no confirmation gate**. An action that
+  cannot be undone just runs. Use the right one;
+- every call is written to his ledger whatever happens, so what a run did stays knowable;
+- a **trial** performs no writes and no sends at all — reads happen, everything else is held back and
+  says so. That is the one place a call of yours will not reach the vendor.
 
 ## Output
 

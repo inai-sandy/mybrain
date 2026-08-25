@@ -332,3 +332,50 @@ describe('the prompt Codex is sent (BEA-1457)', () => {
     expect(brief).toMatch(/Reads are never gated/);
   });
 });
+
+/**
+ * A DROPPED ARGUMENT IS SAID OUT LOUD (BEA-1474).
+ *
+ * The most expensive kind of bug there is: one where the evidence points at the wrong culprit.
+ *
+ * Codex asked Gmail for `maxResults`. The schema calls it `max_results`. `keepKnown()` discarded it
+ * without a word, Gmail was asked for a whole day of mail with no cap, and the vendor refused the
+ * entire response with HTTP 413. Every visible sign said "Codex asked for too much" — and it had
+ * asked for a limit, which this app deleted.
+ *
+ * Nothing is guessed at or added back. An unknown key still is not sent. It is just no longer secret.
+ */
+describe('an argument that was thrown away is reported', () => {
+  it('names it on the answer, so the program can fix its own spelling', async () => {
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    // The fake provider mirrors the real `keepKnown`: only schema names survive.
+    (world.actions as any).runDetailed = async (_id: string, _i: string, ctx: any) => ({
+      ok: true, data: { items: [] }, credits: 0, serviceName: 'Instagram', actionName: 'User posts',
+      droppedArgs: Object.keys(ctx?.args || {}).filter((k) => k === 'maxResults'),
+    });
+    const { kit } = await spawnKit(world, 'run-1', 'ag1');
+
+    const r: any = await kit.call(POSTS, { maxResults: 25 });
+    expect(r.droppedArgs).toEqual(['maxResults']);
+  });
+
+  it('says nothing when every argument was understood', async () => {
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    const { kit } = await spawnKit(world, 'run-1', 'ag1');
+    const r: any = await kit.call(POSTS, { max_results: 25 });
+    expect(r.droppedArgs).toBeUndefined();
+  });
+
+  it('KIT.md tells Codex to check it, with what actually happened', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readFileSync } = require('fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { join } = require('path');
+    const doc = readFileSync(join(__dirname, 'kit/KIT.md'), 'utf8');
+    expect(doc).toContain('Check `droppedArgs`');
+    expect(doc).toContain('it passed `maxResults`');
+    // …and it must no longer claim guards that were removed (BEA-1471).
+    expect(doc).toContain('there is **no credit ceiling** on a worker');
+    expect(doc).not.toMatch(/the \*\*daily credit ceiling\*\* is checked before every call/);
+  });
+});
