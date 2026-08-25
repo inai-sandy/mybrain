@@ -5,6 +5,7 @@ import { LlmService } from '../llm/llm.service';
 import { AlertsService } from '../push/alerts.service';
 import { whatsappStepLabel } from '../contacts/owner-alert';
 import { ServiceActionsService } from '../tools/service-actions.service';
+import { isReadAction } from '../tools/service-provider';
 import { GatePause, ServiceGatesService } from '../tools/service-gates.service';
 import { ASK_DEADLINE_HOURS, OwnerAskService } from './owner-ask.service';
 import { SocialAgentRunService, SHAPE_MAX_TOKENS, mergeTables } from '../social/social-agent-run.service';
@@ -15,6 +16,7 @@ import { ReadRecipe, readAnswer, readNote } from '../social/read-recipe';
 import { tableOf } from '../social/rows';
 import { RAW_MAX } from '../tools/tool-sample';
 import { ToolLookupService } from '../tools/tool-lookup.service';
+import { ToolCatalogService } from '../tools/tool-catalog.service';
 import { DeepResearchService } from '../tools/deep-research.service';
 import { RunJournalService } from './run-journal.service';
 import { WorkerTokenGuard } from './worker-token.guard';
@@ -44,6 +46,15 @@ export const MESSAGE_CHARS = 3500;
 
 /** How many actions one `kit.facts` lookup lists. Enough to choose from, not enough to be a wall. */
 export const FACTS_MAX = 40;
+
+/**
+ * The worker road runs unguarded (BEA-1471) — the owner's decision, twice stated.
+ *
+ * A constant rather than a setting: he asked for one behaviour, not a switch, and a switch would be
+ * one more place for two roads to disagree. It is named so that anyone reading a runaway later can
+ * find this line and the reasoning above `guard()` in one search.
+ */
+export const UNGUARDED = true;
 
 /**
  * The callback API (BEA-1387, agent workers 2/10 — `specs/AGENT-WORKERS.md` §C).
@@ -83,6 +94,7 @@ export class WorkerController {
     private readonly lookup?: ToolLookupService, // what exists, for `kit.facts` (BEA-1457)
     // Named `research_` because the ROUTE is called `research` and a method may not shadow a field.
     private readonly research_?: DeepResearchService, // `kit.research` (BEA-1458)
+    private readonly catalog?: ToolCatalogService, // read-or-write, for the trial guard (BEA-1471)
   ) {}
 
   // ---- fetching ------------------------------------------------------------------------------
@@ -164,6 +176,22 @@ export class WorkerController {
     // What a runaway program can now do is spend a day's credits on the wrong reads. What it still
     // cannot do is anything irreversible without his yes.
     const args = body?.args && typeof body.args === 'object' ? body.args : {};
+
+    // A TRIAL WRITES NOTHING — including through this road (BEA-1471).
+    //
+    // The promise on his screen is "Nothing was saved and nothing was sent", and until now it was
+    // only true of `kit.writeDocument` and `kit.notify`. A program calling Notion or WhatsApp
+    // through `kit.call` — which is what every program written since BEA-1457 actually does — really
+    // wrote and really sent. The comment a few lines below this one claimed otherwise and was wrong.
+    //
+    // Reads still happen, so a trial shows him real rows from his real account. Only the writes are
+    // held, and the answer says so plainly rather than pretending to be the vendor's.
+    if (trial && !(await this.isRead(actionId))) {
+      const held = { ok: true, credits: 0, error: null, notFound: false, stop: null, table: null, trial: true, held: true, why: `This is a trial, so ${actionId} was not really called. Nothing was written and nothing was sent.` };
+      await this.stepper(runId)({ label: `Held back — ${actionId}`, status: 'info', detail: 'a trial writes nothing and sends nothing', nodeId: nodeIdOf(seq) });
+      return { ...held, replayed: false };
+    }
+
     const hit = await this.journal.once(runId, seq, 'tool', { actionId, args }, async () => {
       const stop = await this.guard(runId, job, seq)(actionId);
       if (stop) return { ok: false, credits: 0, stop, table: null };
@@ -702,6 +730,18 @@ export class WorkerController {
 
   private guard(runId: string, job: any, seq?: number) {
     return async (actionId: string): Promise<string | null> => {
+      // UNGUARDED (BEA-1471). The owner's decision, made twice and stated plainly: "Truly everything
+      // goes — zero forced rules." So the daily credit ceiling no longer stops a worker's call, and
+      // the can't-be-undone gate no longer pauses it.
+      //
+      // What that costs, written down here rather than discovered later: a looping program can spend
+      // a day's credits, and an irreversible action runs without asking him first. He knows; he was
+      // shown both consequences before choosing, and chose anyway. Do not put these back without
+      // asking him — he has already answered.
+      //
+      // What is NOT given up: every call is still written to his ledger, so what happened is always
+      // knowable afterwards, and a TRIAL still writes and sends nothing at all.
+      if (UNGUARDED) return null;
       // A gate the owner already refused is settled: the call is not made, and the step says so in
       // his own decision rather than asking him the same thing again (BEA-1392 §H).
       if (seq !== undefined) {
@@ -728,6 +768,30 @@ export class WorkerController {
    * approval spendable exactly once — the same yes can never let tomorrow's run through, and a
    * replayed worker asks for the approval at the very position that parked (BEA-1392).
    */
+  /**
+   * Is this action a read? (BEA-1471)
+   *
+   * The catalog's own answer, never a guess here: the provider's `readOnly`, the vendor's declared
+   * method, then the verb. Fail-CLOSED — an action we cannot look up is treated as a write, because
+   * being wrong in that direction holds back a read in a trial, and being wrong the other way sends
+   * a real WhatsApp message during a run that promised it would not.
+   */
+  private async isRead(actionId: string): Promise<boolean> {
+    const id = String(actionId || '');
+    const service = id.startsWith('svc:') ? id.slice(4).split('.')[0] : '';
+    // The catalog's own answer where it has one — the vendor's declared method is the most reliable
+    // signal there is — falling back to the verb, which is the same rule the sampler uses.
+    try {
+      const t: any = await this.catalog?.byId?.(id);
+      if (t) {
+        if (t.readOnly === true) return true;
+        if (String(t.method || '').toUpperCase() === 'GET') return true;
+        if (t.risky === true) return false; // a can't-be-undone action is never a read
+      }
+    } catch { /* the verb below is the fallback, and it fails closed */ }
+    return isReadAction(id, service);
+  }
+
   private ctx(runId: string, job: any, seq?: number) {
     return (id: string, args: Record<string, any>) => ({ runId, runKind: 'worker', agentId: job?.id, args, argsPinned: true, label: id, ...(seq === undefined ? {} : { nodeId: nodeIdOf(seq) }) });
   }

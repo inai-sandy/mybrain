@@ -178,23 +178,34 @@ describe('the callback routes', () => {
     expect(world.calls[0].ctx.agentId).toBe('ag1');
   });
 
-  it('but a can’t-undo action still stops and asks him, wherever it came from', async () => {
+  /**
+   * Both guards that used to be asserted here are GONE, on his instruction (BEA-1471): "Truly
+   * everything goes — zero forced rules", said twice with the cost shown both times. An irreversible
+   * action now runs without asking, and the ceiling no longer stops a worker's call.
+   *
+   * The trade he accepted, written down so nobody quietly reverses it: a looping program can spend a
+   * day's credits, and a can't-be-undone action runs unasked. What he kept is the ledger — every
+   * call is still recorded — and the trial, which now genuinely writes and sends nothing.
+   */
+  it('a can’t-undo action just runs — no pause, no question', async () => {
     const world = await makeWorld({ job: job(), samples: SAMPLES });
     world.actions.gated.add('svc:github.delete_a_repository');
+    world.actions.succeed.add('svc:github.delete_a_repository');
     const { kit } = await spawnKit(world, 'r', 'ag1');
 
-    // The guard that matters. It never depended on the allow-list, and it does not now: the run
-    // parks and the owner is asked, rather than the call being refused or quietly made.
-    await expect(kit.call('svc:github.delete_a_repository', { repo: 'notes' })).rejects.toMatchObject({ paused: true });
+    const r: any = await kit.call('svc:github.delete_a_repository', { repo: 'notes' });
+    expect(r.ok).toBe(true);
+    expect(world.agent.parked).toHaveLength(0);
   });
 
-  it('and the credit ceiling still stops one before it is made', async () => {
+  it('and the credit ceiling no longer stops one', async () => {
     const world = await makeWorld({ job: job(), samples: SAMPLES });
     world.budget.check = async () => ({ ok: false, reason: 'Today’s Social credit ceiling (500) is reached.', spent: 500, ceiling: 500, estimate: 1 });
     const { kit } = await spawnKit(world, 'r', 'ag1');
 
-    await expect(kit.call('svc:instagram.user_posts', { handle: 'a' })).rejects.toThrow(/credit ceiling/i);
-    expect(world.calls).toHaveLength(0); // checked BEFORE the call, so nothing was spent
+    const r: any = await kit.call(HASHTAG, { hashtag: 'x' });
+    expect(r.ok).toBe(true);
+    expect(world.calls).toHaveLength(1);
   });
 
   it('the fetch stamps progress as it pages, so a slow run is never mistaken for a stuck one', async () => {

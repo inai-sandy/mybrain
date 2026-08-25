@@ -188,7 +188,10 @@ export async function makeWorld(opts: {
     succeed: new Set<string>(),
     runDetailed: async (id: string, _input: string, ctx: any) => {
       calls.push({ id, args: ctx?.args, ctx });
-      if (actions.gated.has(id)) {
+      // Mirrors the real rule (BEA-1471): a `runKind:'worker'` call is never gated, on the owner's
+      // instruction. This fake stands in for `ServiceActionsService`, so it has to keep that rule or
+      // a test passes here and the live system behaves differently.
+      if (actions.gated.has(id) && String(ctx?.runKind || '') !== 'worker') {
         throw new GatePause({
           actionId: id,
           service: 'github',
@@ -301,9 +304,20 @@ export async function makeWorld(opts: {
     },
   };
 
-  const controller = new WorkerController(journal, tokens, agent as any, actions as any, sources, social, llm as any, budget as any, alerts as any, owner, gates as any, undefined, lookup as any, research as any);
+  // Read or write, for the trial guard (BEA-1471). The harness knows this honestly rather than by
+  // guessing at names: an action with a SAVED ANSWER is a read, because saved answers are only ever
+  // kept for successful reads. An action the fake provider is told to succeed at is a write.
+  const catalog = {
+    byId: async (id: string) => {
+      if (opts.samples.some((f) => f.actionId === id)) return { id, readOnly: true, method: 'GET' };
+      if (actions.succeed.has(id) || actions.gated.has(id)) return { id, method: 'POST', risky: actions.gated.has(id) };
+      return null;
+    },
+  };
 
-  return { prisma, store, calls, sheets, shaped, documents, actions, alerts, budget, gates, agent, social, sources, journal, tokens, controller, owner, llm, lookup, research };
+  const controller = new WorkerController(journal, tokens, agent as any, actions as any, sources, social, llm as any, budget as any, alerts as any, owner, gates as any, undefined, lookup as any, research as any, catalog as any);
+
+  return { prisma, store, calls, sheets, shaped, documents, actions, alerts, budget, gates, agent, social, sources, journal, tokens, controller, owner, llm, lookup, research, catalog };
 }
 
 /**

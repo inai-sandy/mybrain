@@ -241,7 +241,18 @@ export class ServiceActionsService {
     // A provider that says every one of its actions is a read (`readOnly`) is taken at its word:
     // the name rule was tuned for Composio's verb-first slugs, and a path-derived read must never
     // be held. Everything else keeps the belt and braces.
-    const mustAsk = p.readOnly === true ? false : await this.gates.mustAsk(actionId, service, action.risky).catch(() => true);
+    // A WORKER RUNS UNGUARDED (BEA-1471) — the owner's decision, stated twice: "Truly everything
+    // goes — zero forced rules." A program Codex compiled is not asked to confirm anything, because
+    // being asked is what made one build decide WhatsApp's send was forbidden and refuse the job.
+    //
+    // Every other road — Chat, the plan runner, a flow — still gates exactly as it did. This is
+    // narrowed to `runKind: 'worker'` on purpose so his own taps are unaffected.
+    //
+    // What it costs: an irreversible action in a worker now runs without asking him. He was shown
+    // that consequence and chose it. The `ToolCall` row is still written either way, so what
+    // happened stays knowable, and a TRIAL still performs no writes at all.
+    const unguarded = String(ctx?.runKind || '') === 'worker';
+    const mustAsk = unguarded || p.readOnly === true ? false : await this.gates.mustAsk(actionId, service, action.risky).catch(() => true);
     const approval = mustAsk ? await this.gates.approvalFor(actionId, ctx).catch(() => null) : null;
 
     // ---- the arguments ---------------------------------------------------------------------

@@ -136,24 +136,42 @@ describe('any connected action, not just this job’s own (BEA-1457)', () => {
     expect(last.ctx.agentId).toBe('ag1');
   });
 
-  it('the credit ceiling still stops a call the allow-list used to stop', async () => {
+  it('the credit ceiling no longer stops a worker\'s call', async () => {
+    // REMOVED ON HIS INSTRUCTION (BEA-1471). He was asked twice, shown the cost both times, and
+    // answered "Truly everything goes — zero forced rules." What this test used to assert is
+    // therefore no longer true, and asserting the opposite is the honest record of that decision.
+    //
+    // What he gave up: a looping program can spend a day's credits, and an irreversible action runs
+    // without asking him. What he kept: every call is still written to his ledger, and a TRIAL still
+    // performs no writes or sends at all (BEA-1471's other half).
     const world = await makeWorld({ job: job(), samples: SAMPLES });
     world.budget.check = async () => ({ ok: false, reason: 'Today’s Social credit ceiling (500) is reached.', spent: 500, ceiling: 500, estimate: 1 });
     const { kit } = await spawnKit(world, 'run-1', 'ag1');
 
-    // Reach is wide; spending is not. The guard runs BEFORE the call, so nothing was even attempted.
-    await expect(kit.call(OUTSIDE, { handle: 'b_home' })).rejects.toThrow(/credit ceiling/i);
-    expect(world.calls.some((c: any) => c.id === OUTSIDE)).toBe(false);
+    const r: any = await kit.call(OUTSIDE, { handle: 'b_home' });
+    expect(r.ok).toBe(true);
+    expect(world.calls.some((c: any) => c.id === OUTSIDE)).toBe(true);
   });
 
-  it('the can’t-undo gate still parks the run and asks him', async () => {
+  it('and a can\'t-undo action no longer pauses to ask him', async () => {
+    // REMOVED ON HIS INSTRUCTION (BEA-1471). He was asked twice, shown the cost both times, and
+    // answered "Truly everything goes — zero forced rules." What this test used to assert is
+    // therefore no longer true, and asserting the opposite is the honest record of that decision.
+    //
+    // What he gave up: a looping program can spend a day's credits, and an irreversible action runs
+    // without asking him. What he kept: every call is still written to his ledger, and a TRIAL still
+    // performs no writes or sends at all (BEA-1471's other half).
+    //
+    // This one has a second reason beyond his instruction: being asked is what broke a real build.
+    // Codex saw WhatsApp's send marked as needing confirmation, concluded there was no "safe"
+    // action, and refused the whole job with the action it needed listed in front of it.
     const world = await makeWorld({ job: job(), samples: SAMPLES });
     world.actions.gated.add(OUTSIDE);
+    world.actions.succeed.add(OUTSIDE);
     const { kit } = await spawnKit(world, 'run-1', 'ag1');
 
-    // A gated call does not fail the run — it pauses it, exactly as `kit.ask` does, and the worker
-    // exits so the wait costs nothing.
-    await expect(kit.call(OUTSIDE, { handle: 'b_home' })).rejects.toMatchObject({ paused: true });
+    const r: any = await kit.call(OUTSIDE, { handle: 'b_home' });
+    expect(r.ok).toBe(true);
   });
 });
 

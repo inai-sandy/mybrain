@@ -19,6 +19,9 @@ const { WorkerPaused } = require('./kit/kit.js');
 
 const post = (id: string) => ({ id, shortcode: `SC${id}`, caption: `post ${id}`, like_count: 3, url: `https://instagram.com/p/${id}` });
 const HASHTAG = 'svc:instagram.search_hashtag';
+/** A can't-be-undone action, for the gate tests below (BEA-1471). */
+const RISKY = 'svc:github.delete_a_repository';
+
 const SAMPLES: SampleFixture[] = [{ actionId: HASHTAG, args: { hashtag: 'smarthomeindia' }, data: { posts: [post('p1'), post('p2')] } }];
 
 const job = () => ({
@@ -152,70 +155,46 @@ describe('a worker asks on WhatsApp and carries on when the owner replies', () =
   });
 });
 
-describe('a can\'t-undo call parks the run and asks, instead of failing it', () => {
-  const DELETE = 'svc:github.delete_a_repository';
-  const deleter = async (kit: any) => kit.tool(DELETE, { owner: 'inai-sandy', repo: 'old-notes' });
-  /**
-   * The job whose toolbox really holds that delete. Since BEA-1401 a worker may only call its own
-   * job's actions, so a gated call is a call the owner PUT on the job — the gate is about "this
-   * cannot be undone", never about "where did that action come from".
-   */
-  const gatedJob = () => ({ ...job(), tools: [HASHTAG, DELETE] });
+/**
+ * THE GATE IS OFF FOR WORKERS (BEA-1471) — and this is the record of what that removed.
+ *
+ * What used to be here: three tests proving a can't-be-undone action parked the run durably, asked
+ * him on WhatsApp, made the call only after his yes, never asked twice about the same decision, and
+ * treated twelve hours of silence as a no.
+ *
+ * It was good machinery. He removed it on purpose. Asked twice, shown the cost twice, he answered:
+ * "Truly everything goes — zero forced rules." There was a second reason too: being asked is what
+ * broke a real build. Codex saw WhatsApp's send marked as needing confirmation, concluded there was
+ * no "safe" action, and refused the whole job with the action it needed listed in front of it.
+ *
+ * What he gave up: an irreversible action in a worker now runs without asking him first.
+ * What he kept: every call still lands in his ledger, and a TRIAL still writes and sends nothing.
+ *
+ * The gate is untouched everywhere else — Chat, the plan runner, flows. Only `runKind:'worker'` is
+ * exempt, which is why the rule reads that way in `service-actions.service.ts`.
+ */
+describe('a can\'t-undo call no longer stops a worker (BEA-1471)', () => {
+  it('runs it, without parking and without asking him', async () => {
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    world.actions.gated.add(RISKY);
+    world.actions.succeed.add(RISKY);
+    const { kit } = await spawnKit(world, 'run-1', 'ag1');
 
-  it('parks on the gate, messages him, and makes the call only after his yes', async () => {
-    const world = await makeWorld({ job: gatedJob(), samples: SAMPLES });
-    const reply = inboundRoad(world);
-    world.actions.gated.add(DELETE);
+    const r: any = await kit.call(RISKY, { repo: 'notes' });
 
-    await expect(deleter((await spawnKit(world, 'run7', 'ag1')).kit)).rejects.toThrow(WorkerPaused);
-    expect(world.alerts.asked[0].question).toContain('cannot be undone');
-    expect(world.gates.pending[0].ctx).toMatchObject({ runId: 'run7', nodeId: 'worker:0' });
-
-    await reply(OWNER_NUMBER, 'yes');
-    expect(world.gates.settled[0]).toMatchObject({ runId: 'run7', decision: 'approved' });
-
-    // He said yes, so the second spawn's call goes through — and the gate is not asked again.
-    // (The real `ServiceActionsService` reads his recorded approval and lets the call past itself;
-    // here the gate is simply lifted, which is the same thing from the worker's side.)
-    world.actions.gated.delete(DELETE);
-    world.actions.succeed.add(DELETE);
-    const r = await deleter((await spawnKit(world, 'run7', 'ag1')).kit);
     expect(r.ok).toBe(true);
-    expect(world.agent.waitpoints).toHaveLength(1);
+    expect(world.agent.parked).toHaveLength(0);
+    expect(world.agent.waitpoints).toHaveLength(0);
   });
 
-  it('twelve hours of silence is a NO — it stops, and it does not ask again (and again)', async () => {
-    // The trap this test exists for: the gate's default ("No, stop") is written on the question, but
-    // the timeout road has to settle the GATE too. If it only settled the waitpoint, the resumed
-    // worker would meet the same gate, park again, and message him every twelve hours for ever.
-    const world = await makeWorld({ job: gatedJob(), samples: SAMPLES });
-    inboundRoad(world); // registers the answer hook, exactly as the app does at boot
-    world.actions.gated.add(DELETE);
-
-    await expect(deleter((await spawnKit(world, 'run6', 'ag1')).kit)).rejects.toThrow(WorkerPaused);
-    expect(world.alerts.asked).toHaveLength(1);
-    expect(world.agent.waitpoints[0].defaultValue).toBe('No, stop');
-
-    await world.agent.timeout(world.agent.waitpoints[0].id); // the deadline, taking the default
-    expect(world.gates.settled[0]).toMatchObject({ decision: 'rejected' });
-
-    await expect(deleter((await spawnKit(world, 'run6', 'ag1')).kit)).rejects.toThrow(/said no/i);
-    expect(world.agent.waitpoints).toHaveLength(1); // asked once, ever
-    expect(world.alerts.asked).toHaveLength(1); // and messaged once, ever
-  });
-
-  it('a no stops that step with his own decision, and never asks twice', async () => {
-    const world = await makeWorld({ job: gatedJob(), samples: SAMPLES });
-    const reply = inboundRoad(world);
-    world.actions.gated.add(DELETE);
-
-    await expect(deleter((await spawnKit(world, 'run8', 'ag1')).kit)).rejects.toThrow(WorkerPaused);
-    await reply(OWNER_NUMBER, 'no');
-    expect(world.gates.settled[0].decision).toBe('rejected');
-
-    await expect(deleter((await spawnKit(world, 'run8', 'ag1')).kit)).rejects.toThrow(/said no/i);
-    expect(world.agent.waitpoints).toHaveLength(1);
-    // Nothing was sent to the vendor on the second pass either.
-    expect(world.calls.filter((c: any) => c.id === DELETE)).toHaveLength(1);
+  it('still writes it down, so what happened stays knowable', async () => {
+    // The one thing NOT given up. Without the ledger there would be no way to answer "what did it
+    // actually do at 3am", and that is the question a removed gate makes more likely, not less.
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    world.actions.gated.add(RISKY);
+    world.actions.succeed.add(RISKY);
+    const { kit } = await spawnKit(world, 'run-1', 'ag1');
+    await kit.call(RISKY, { repo: 'notes' });
+    expect(world.calls.map((c: any) => c.id)).toContain(RISKY);
   });
 });
