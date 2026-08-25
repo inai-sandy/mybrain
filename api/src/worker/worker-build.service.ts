@@ -117,7 +117,9 @@ export class WorkerBuildService implements OnModuleInit {
     // tested and promoted: `compilable:false` meant no hash was computed, an empty hash never equals
     // the one stamped on the worker, so a brand-new build read as STALE and the trial died with a
     // generic sentence. One rule, both places, or they drift the first time either changes.
-    const cannot = WorkerBuildService.whyNotCompilableFor(job);
+    // …and an approved goal is its own answer (BEA-1464): a goal-built job has no plan for the old
+    // rule to inspect, and the old rule refuses it for having no sources.
+    const cannot = await this.whyNotBuildable(job);
     const compilable = !cannot;
     const planHash = await this.buildHashFor(job);
     const rows = await this.rows(agentId, 10);
@@ -223,7 +225,7 @@ export class WorkerBuildService implements OnModuleInit {
   async build(agentId: string, opts: { reason?: string } = {}): Promise<WorkerState & { built: any }> {
     const job = await this.agent.getAgent(agentId).catch(() => null);
     if (!job) throw new BadRequestException('That job no longer exists.');
-    const why = WorkerBuildService.whyNotCompilableFor(job);
+    const why = await this.whyNotBuildable(job);
     if (why) throw new BadRequestException(why);
 
     const before = await this.state(agentId);

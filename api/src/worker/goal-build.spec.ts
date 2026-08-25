@@ -189,3 +189,31 @@ describe('a goal-built job answers the same in all three places', () => {
     expect(await WorkerBuildService.prototype.buildHashFor.call(without, job)).toBe('');
   });
 });
+
+/**
+ * …and the door itself (BEA-1464, found by re-reading what I had just shipped).
+ *
+ * `build()` and `state()` were still calling the raw `whyNotCompilableFor`. A goal-built job has no
+ * sources, so both refused it — the build would have thrown "this job has nothing to fetch from yet"
+ * before ever reaching the new road, and the screen would have said the job cannot have a worker at
+ * the same moment the dispatcher was happy to run one. That is the BEA-1462 shape exactly, and it
+ * was live for the length of one commit.
+ */
+describe('every door asks the goal-aware question', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { readFileSync } = require('fs');
+  const { join } = require('path');
+
+  it('no call site reads the raw rule any more except the rule itself', () => {
+    const src = readFileSync(join(__dirname, 'worker-build.service.ts'), 'utf8');
+    // Exactly TWO uses are legitimate, and both are fallbacks reached only after the goal has
+    // already been checked and found absent: one inside `whyNotBuildable`, one inside
+    // `buildHashFor` (which does its own goal lookup first and must not pay for a second one).
+    // Any third use is a door that forgot about goals.
+    const uses = src.split('WorkerBuildService.whyNotCompilableFor(job)').length - 1;
+    expect(uses).toBe(2);
+    expect(src).toContain('static whyNotCompilableFor');
+    // build(), state() and buildHashFor() all go through the goal-aware one.
+    expect(src.split('this.whyNotBuildable(job)').length - 1).toBeGreaterThanOrEqual(2);
+  });
+});
