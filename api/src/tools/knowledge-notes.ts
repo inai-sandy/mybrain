@@ -176,6 +176,11 @@ export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
       // verbose flag is still too much.
       'HTTP 413 "payload is too large" refuses the WHOLE response — no rows, no partial answer. Two things cause it, and the second is the one that surprises people: (1) no cap, so pass max_results (25 is safe); (2) verbose:true, which pulls the full body of EVERY message in the page. `verbose:true` with max_results:50 is over the limit even with a tight query.',
       'The way that works: list first with verbose:false (or ids_only:true) to get senders, subjects and timestamps cheaply, decide which messages you actually care about, and only then fetch bodies for those few. Do not fetch 50 bodies to keep 3.',
+      // The third build to die here (BEA-1477), and the subtlest: it MEANT to pass verbose:false, and
+      // its own argument helper skipped the value for being falsy, so the flag never went out and the
+      // default took over. What actually reached Gmail was {user_id, max_results:100,
+      // include_spam_trash:false} — no verbose anywhere.
+      'verbose DEFAULTS TO TRUE — leaving it out is the EXPENSIVE choice, not the safe one. Pass verbose:false explicitly. Watch for this in your own code: `false` is falsy, so any helper that skips empty or missing values drops it silently and you get full bodies without ever seeing why.',
     ],
   },
 
