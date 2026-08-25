@@ -169,6 +169,13 @@ program that could not find Gmail, and the owner lost an hour to it.
 If something the work needs is **not connected**, the documents say so. Say that plainly rather than
 working around it — he would rather connect it than receive an agent that quietly does less.
 
+**A confirmed action is a usable action.** Some actions cannot be undone — sending a message, deleting
+something — so the owner is asked before they run. That is a pause, not a refusal: the run stops, the
+question reaches his phone, he answers, and it carries on. **Never treat one as unavailable, never
+look for a way around it, and never leave the step out.** The first real build did exactly that: it
+saw WhatsApp's send marked as needing confirmation, decided there was no "safe" action, and failed
+the whole run — with the action it needed listed right in front of it.
+
 
 ## The conversation
 

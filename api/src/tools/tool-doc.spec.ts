@@ -38,10 +38,16 @@ describe('a tool’s document', () => {
     expect(doc()).toContain('**3 actions** (1 retired)');
   });
 
-  it('marks the ones that stop and ask, and says that is not a refusal', () => {
+  it('marks a gated action as USABLE, not as a warning (BEA-1469)', () => {
+    // The first real build read the old tag — "(asks first)" — as a warning, concluded WhatsApp had
+    // no "safe matching action", and failed the whole run. The document listed `send_text` right
+    // there. A header explaining the gate once cannot outweigh a warning sitting on the very line
+    // where the choice gets made.
     const t = doc();
-    expect(t).toContain('asks first');
-    expect(t).toContain('the run pauses, he answers, and it continues');
+    expect(t).toContain('**he confirms it** — usable');
+    expect(t).not.toContain('asks first');
+    expect(t).toContain('That is a pause, not a refusal');
+    expect(t).toContain('is not a reason to look for an alternative or to leave a step out');
     expect(t).toContain('Reads are never gated');
   });
 
@@ -115,6 +121,16 @@ describe('Codex is told the documents exist', () => {
     expect(t).toContain('list_tools');
     expect(t).toContain('tool_doc(service)');
     expect(t).toContain('action_doc(actionId)');
+  });
+
+  it('both say a confirmed action is still a usable one (BEA-1469)', () => {
+    for (const t of [goalPrompt(), buildPrompt()]) {
+      expect(t).toContain('A confirmed action is a usable action');
+      expect(t).toContain('Never treat one as unavailable');
+      // Told in the prompt AND in the document. One of the two is not enough — the document said it
+      // in its header and the build still refused, because the per-line tag read as a warning.
+      expect(t).toMatch(/failed\s*\n?the whole run/);
+    }
   });
 
   it('both say WHY, using what actually went wrong', () => {

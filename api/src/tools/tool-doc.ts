@@ -42,9 +42,17 @@ export type DocInputs = {
   actions: DocAction[];
 };
 
-/** One line of the index. The id first, because the id is the thing a program actually needs. */
+/**
+ * One line of the index. The id first, because the id is the thing a program actually needs.
+ *
+ * The tag for a gated action says **he confirms it**, not "asks first" (BEA-1469). The difference is
+ * not cosmetic: the first real build read "(asks first)" as a warning, decided WhatsApp had no "safe
+ * matching action", and failed the whole run — while the document listed `svc:whatsapp.send_text`
+ * right there and the header explained that a gate is a pause, not a refusal. A header read once
+ * cannot outweigh a warning attached to the very line where the choice is made.
+ */
 function line(a: DocAction): string {
-  const tags = [a.risky ? '**asks first**' : '', a.retired ? '_retired_' : ''].filter(Boolean).join(' · ');
+  const tags = [a.risky ? '**he confirms it** — usable' : '', a.retired ? '_retired_' : ''].filter(Boolean).join(' · ');
   const what = String(a.description || a.name || '').replace(/\s+/g, ' ').trim().slice(0, 220);
   return `- \`${a.id}\` — ${what || a.name}${tags ? ` (${tags})` : ''}`;
 }
@@ -71,7 +79,9 @@ export function toolDocText(inp: DocInputs): string {
 
   if (risky.length) {
     out.push('');
-    out.push(`**${risky.length} of them cannot be undone** and will stop and ask the owner before running. That is not a refusal — the run pauses, he answers, and it continues. Reads are never gated.`);
+    out.push(`**${risky.length} of them cannot be undone**, so the owner confirms them before they run. That is a pause, not a refusal: the run stops, the question reaches his phone, he answers, and it carries on exactly where it was.`);
+    out.push('');
+    out.push('**Use them normally.** A confirmed action is not unavailable, is not unsafe, and is not a reason to look for an alternative or to leave a step out. If the work needs one, use it — he expects to be asked. Reads are never gated at all.');
   }
 
   out.push('');

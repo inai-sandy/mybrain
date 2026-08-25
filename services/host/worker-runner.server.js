@@ -620,6 +620,34 @@ function parseTap(out) {
   return { passed: pass ? Number(pass[1]) : 0, failed: fail ? Number(fail[1]) : 0, at: new Date().toISOString() };
 }
 
+
+/**
+ * Hold a long request open so the caller's HTTP client does not give up on it (BEA-1469).
+ *
+ * Node's `fetch` (undici) aborts a request whose response HEADERS have not arrived within 300
+ * seconds, and again if the BODY goes quiet for 300 seconds. Neither is configurable from a plain
+ * `fetch()` call. `/build` and `/parity` answer nothing until the whole job is done, so any Codex
+ * turn over five minutes died at exactly five minutes — with a "fetch failed" that looked like the
+ * runner being down while the runner was in fact working perfectly.
+ *
+ * That really happened, and it wasted a whole build: Codex wrote the program at 13:21:07 and the app
+ * gave up at 13:21:28, twenty-one seconds after it had already succeeded.
+ *
+ * The fix is to say something immediately and keep saying it: headers go out at once, then a newline
+ * every twenty seconds. `JSON.parse` ignores leading whitespace, so the caller still just reads the
+ * final JSON body and nothing about the client had to change.
+ */
+function holdOpen(res) {
+  try {
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json');
+    res.flushHeaders && res.flushHeaders();
+  } catch (e) { /* the caller may already be gone */ }
+  const t = setInterval(() => { try { res.write('\n'); } catch (e) { /* gone */ } }, 20_000);
+  if (t.unref) t.unref();
+  return () => clearInterval(t);
+}
+
 async function handleBuild(req, res) {
   let body = {};
   try { body = JSON.parse(await readBody(req)); }
@@ -652,6 +680,8 @@ async function handleBuild(req, res) {
   const version = nextVersion(jobDir);
   const dir = path.join(jobDir, `v${version}`);
   const log = [];
+  /** Stops the keepalive that holds the caller's connection open (BEA-1469). Null until it starts. */
+  let stopHolding = null;
   live.set(jobId, { runId: `build-v${version}`, kind: 'build', startedAt: new Date().toISOString(), kill: () => {} });
   try {
     try { fs.mkdirSync(dir, { recursive: true }); }
@@ -695,6 +725,10 @@ async function handleBuild(req, res) {
     if (body.model) args.push('-m', String(body.model));
     args.push(brief);
     const timeoutMs = Math.min(3_600_000, Math.max(30_000, Number(body.timeoutMs) > 0 ? Number(body.timeoutMs) : BUILD_TIMEOUT));
+    // From here on the caller waits minutes, so start talking to it NOW (BEA-1469). Everything above
+    // is fast and still answers with a real status code; everything below answers 200 with an
+    // `ok:false` body, which is what the client already reads.
+    stopHolding = holdOpen(res);
     const built = await runCommand('codex', args, dir, timeoutMs, process.env);
     const sessionId = sessionIdOf(built.stdout);
     pruneWorkerTrust();
@@ -724,6 +758,7 @@ async function handleBuild(req, res) {
     // the runner's — green tests are the only thing that may move a job onto a new worker.
     res.end(JSON.stringify({ ok, version, dir, wrote, tests, sessionId, timedOut: !!built.timedOut, log: log.join('\n').slice(-20_000) }));
   } finally {
+    if (stopHolding) stopHolding();
     live.delete(jobId);
   }
 }
