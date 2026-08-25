@@ -444,7 +444,10 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         // 'chat', so every trial made ANOTHER draft job (four piled up on the owner's own agent
         // before this was caught) — and `useWorker` was dropped with it, which would have created a
         // job that quietly ran the OLD way. A wrong agent reaching him, one level down.
-        origin: ['chat', 'voice', 'import', 'social', 'brief'].includes(String(input.origin)) ? String(input.origin) : 'chat',
+        // 'goal' is the new road (BEA-1465). Leaving it out of this list silently rewrote it to
+        // 'chat', so `GoalTrialService.jobFor()` could never find the job it had just made and would
+        // have created a fresh duplicate on every approval.
+        origin: ['chat', 'voice', 'import', 'social', 'brief', 'goal'].includes(String(input.origin)) ? String(input.origin) : 'chat',
         useWorker: input.useWorker === true,
         ...(tools.length ? { tools: JSON.stringify(tools.slice(0, 60)) } : {}),
         // Where the result goes (BEA-1357): document (default) | telegram | task | sheet.

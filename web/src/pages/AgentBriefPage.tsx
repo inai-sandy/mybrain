@@ -91,6 +91,16 @@ export default function AgentBriefPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadGoal(); }, [loadGoal]);
 
+  // An approved goal is BUILDING until its run settles, and a Codex build takes minutes (BEA-1467).
+  // Without this the screen showed one static sentence for an hour while, unseen, the build had
+  // finished and the run had failed with a perfectly readable reason.
+  useEffect(() => {
+    const live = goal?.status === 'approved' && (!goal.run || goal.run.status === 'building' || goal.run.status === 'running');
+    if (!live) return;
+    const t = setInterval(() => { void loadGoal(); }, 5000);
+    return () => clearInterval(t);
+  }, [goal?.status, goal?.run?.status, loadGoal]);
+
   // A build turn is a real Codex session and takes minutes, so the screen polls rather than holding
   // a request open. The poll stops the moment it settles — never a timer left running.
   useEffect(() => {

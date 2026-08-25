@@ -109,8 +109,10 @@ describe('once he has approved it', () => {
     render(<GoalView goal={goal({ status: 'approved', approvedAt: '2026-08-25T04:00:00Z' })} {...noop} />);
     expect(screen.getByTestId('goal-approved')).toBeTruthy();
     expect(screen.queryByTestId('goal-approve')).toBeNull();
-    // His design: "run a sample task to match the goal. verify the goal and the output."
-    expect(screen.getByTestId('goal-view')).toHaveTextContent('run once and check the result against this goal');
+    // His design: "run a sample task to match the goal. verify the goal and the output." With no run
+    // recorded yet, the honest answer is that it is still working — see BEA-1467 below for why this
+    // used to be a static sentence that stayed true for two minutes and lied for the next hour.
+    expect(screen.getByTestId('goal-run-building')).toHaveTextContent('running it once');
   });
 });
 
@@ -119,5 +121,49 @@ describe('before he has sent anything over', () => {
     cleanup();
     render(<GoalView goal={null} {...noop} />);
     expect(screen.getByTestId('goal-none')).toHaveTextContent('Codex will tell you what it is going to build');
+  });
+});
+
+/**
+ * WHAT BECAME OF IT (BEA-1467).
+ *
+ * He approved a goal and watched "Codex is building it" for an hour. Underneath, Codex had built the
+ * program, run it, and failed with a sentence that told him exactly what to do — and the screen
+ * never learned, because that text was static. A quiet failure, built during the week I spent
+ * removing quiet failures.
+ */
+describe('the screen says what became of the goal', () => {
+  it('says it is still working while there is no run yet', () => {
+    render(<GoalView goal={goal({ status: 'approved', run: { status: 'building' } })} {...noop} />);
+    expect(screen.getByTestId('goal-run-building')).toHaveTextContent('takes a few minutes');
+  });
+
+  it('shows a FAILURE in the program’s own words', () => {
+    const err = 'I could not find a Gmail email search/fetch action and a WhatsApp send-message action. Connect or name the right action, then run this again.';
+    render(<GoalView goal={goal({ status: 'approved', run: { status: 'failed', error: err } })} {...noop} />);
+    const el = screen.getByTestId('goal-run-failed');
+    // Its words, not a generic "something went wrong" — they are what tells him what to do.
+    expect(el).toHaveTextContent('name the right action');
+    expect(el).toHaveTextContent('Nothing was saved or sent');
+    expect(screen.queryByTestId('goal-run-building')).toBeNull();
+  });
+
+  it('says so honestly when it failed without a reason', () => {
+    render(<GoalView goal={goal({ status: 'approved', run: { status: 'failed', error: null } })} {...noop} />);
+    expect(screen.getByTestId('goal-run-failed')).toHaveTextContent('stopped without saying why');
+  });
+
+  it('shows a good run, and points at the message on his phone', () => {
+    render(<GoalView goal={goal({ status: 'approved', run: { status: 'done', resultText: 'Read 14 emails, kept 2.' } })} {...noop} />);
+    const el = screen.getByTestId('goal-run-done');
+    expect(el).toHaveTextContent('Read 14 emails, kept 2');
+    expect(el).toHaveTextContent('nothing saved, nothing sent');
+    expect(el).toHaveTextContent('keep it or send it back');
+  });
+
+  it('never claims it is still building once the run has settled', () => {
+    // The exact bug: a static sentence that was true for two minutes and a lie for fifty-eight.
+    render(<GoalView goal={goal({ status: 'approved', run: { status: 'failed', error: 'x' } })} {...noop} />);
+    expect(screen.getByTestId('goal-view')).not.toHaveTextContent(/Codex is building it/);
   });
 });

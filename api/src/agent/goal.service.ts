@@ -24,6 +24,16 @@ export type GoalView = {
   tools: string[];
   approvedAt?: string | null;
   updatedAt?: string | null;
+  /**
+   * What happened AFTER he approved (BEA-1467) — building | ran | failed, and why.
+   *
+   * This existed nowhere, and the cost was an hour of his life: he approved a goal, Codex built the
+   * program, it ran, and it failed with a perfectly clear sentence ("I could not find a Gmail
+   * action…") — and the screen showed "Codex is building it" for the whole hour, because that text
+   * was static and nothing ever told it otherwise. A quiet failure, in the week I spent removing
+   * quiet failures.
+   */
+  run?: { status: string; error?: string | null; resultText?: string | null; agentId?: string | null; runId?: string | null; at?: string | null } | null;
 };
 
 /**
@@ -62,7 +72,32 @@ export class GoalService {
       where: { areaId: String(areaId) },
       orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
     });
-    return row ? this.view(row) : null;
+    if (!row) return null;
+    const view = this.view(row);
+    if (row.status === 'approved') view.run = await this.runFor(String(areaId));
+    return view;
+  }
+
+  /**
+   * What became of it (BEA-1467): the newest run of the job this goal built.
+   *
+   * Read rather than stored, so it cannot go stale and there is no second place for the truth to
+   * live. `building` is the honest answer for "approved, but nothing has run yet" — which covers
+   * both a Codex turn still going and a build that died before it made a run.
+   */
+  private async runFor(areaId: string): Promise<GoalView['run']> {
+    const job = await this.prisma?.agent?.findFirst?.({ where: { areaId, origin: 'goal' }, orderBy: { createdAt: 'desc' } }).catch(() => null);
+    if (!job) return { status: 'building' };
+    const run: any = await this.prisma?.agentRun?.findFirst?.({ where: { agentId: job.id }, orderBy: { startedAt: 'desc' } }).catch(() => null);
+    if (!run) return { status: 'building', agentId: String(job.id) };
+    return {
+      status: String(run.status || ''),
+      error: run.error ? String(run.error) : null,
+      resultText: run.resultText ? String(run.resultText) : null,
+      agentId: String(job.id),
+      runId: String(run.id),
+      at: run.startedAt ? new Date(run.startedAt).toISOString() : null,
+    };
   }
 
   /** The approved goal — the ONE thing a build may stand on. */

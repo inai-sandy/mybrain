@@ -30,6 +30,8 @@ export type Goal = {
   note?: string | null;
   tools: string[];
   approvedAt?: string | null;
+  /** What became of it after approval (BEA-1467) — building | done | failed, and why. */
+  run?: { status: string; error?: string | null; resultText?: string | null; agentId?: string | null; runId?: string | null } | null;
 };
 
 export function GoalView({ goal, busy, onApprove, onSendBack, onAnswer }: {
@@ -117,9 +119,7 @@ export function GoalView({ goal, busy, onApprove, onSendBack, onAnswer }: {
       )}
 
       {approved ? (
-        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-          Codex is building it. It will run once and check the result against this goal before anything is saved or sent.
-        </p>
+        <GoalOutcome run={goal.run} />
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
@@ -167,6 +167,48 @@ export function GoalView({ goal, busy, onApprove, onSendBack, onAnswer }: {
           <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Nothing is built until you approve this.</p>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * What became of the goal after he approved it (BEA-1467).
+ *
+ * This screen used to show ONE static sentence — "Codex is building it" — for ever. He sat in front
+ * of it for an hour while, unseen, Codex had built the program, run it, and failed with a perfectly
+ * clear reason. The sentence was true for about two minutes and a lie for the other fifty-eight.
+ *
+ * So it reads the run. A failure shows the program's OWN words, because they are almost always
+ * actionable — the real one was "I could not find a Gmail email search/fetch action… name the right
+ * action, then run this again", which tells him exactly what to do.
+ */
+export function GoalOutcome({ run }: { run?: Goal['run'] }) {
+  if (!run || run.status === 'building' || run.status === 'running') {
+    return (
+      <p className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400" data-testid="goal-run-building">
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+        Codex is building it, then running it once. Nothing is saved or sent. This takes a few minutes.
+      </p>
+    );
+  }
+
+  if (run.status === 'failed') {
+    return (
+      <div className="rounded-lg border border-red-300 bg-red-50/70 p-2.5 dark:border-red-500/30 dark:bg-red-500/10" data-testid="goal-run-failed">
+        <p className="text-xs font-semibold text-red-800 dark:text-red-300">It ran and could not finish</p>
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-200">
+          {run.error || 'It stopped without saying why.'}
+        </p>
+        <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">Nothing was saved or sent. Fix what it asks for and send the conversation again.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 p-2.5 dark:border-emerald-500/30 dark:bg-emerald-500/10" data-testid="goal-run-done">
+      <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">It ran once — nothing saved, nothing sent</p>
+      {run.resultText && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-200">{run.resultText}</p>}
+      <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">Check it against the goal above. There is a message on your phone to keep it or send it back.</p>
     </div>
   );
 }

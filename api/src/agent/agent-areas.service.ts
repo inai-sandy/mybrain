@@ -50,7 +50,7 @@ export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; gro
  * proposal (`spec` for the top-level builder, `job` for a job builder), the direct-fetch `plan` with
  * its `cost`, the sample counter and the design-budget counter. A reset drops all of it.
  */
-export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter; seed?: BuilderSeed | null; goal?: string | null; brief?: ProposedBrief | null };
+export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter; seed?: BuilderSeed | null; goal?: string | null; brief?: ProposedBrief | null; /** The action ids HE named (BEA-1466) — the one thing the chat still collects. */ tools?: string[] };
 
 function packState(st: BuilderState): string {
   return JSON.stringify({
@@ -141,7 +141,7 @@ export class AgentAreasService {
     const row = await this.prisma.setting.findUnique({ where: { key: this.jobKey(areaId) } }).catch(() => null);
     // Same rule as the top-level builder's loader: a field `packState` writes and this does not read
     // is saved and silently dropped (BEA-1424).
-    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, goal: v?.goal || null, brief: v?.brief || null }; } catch { return { log: [], job: null, plan: null, cost: null }; }
+    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, goal: v?.goal || null, brief: v?.brief || null, tools: v?.tools || [] }; } catch { return { log: [], job: null, plan: null, cost: null }; }
   }
   private async jobSave(areaId: string, st: BuilderState) {
     await this.prisma.setting.upsert({ where: { key: this.jobKey(areaId) }, create: { key: this.jobKey(areaId), value: packState(st) }, update: { value: packState(st) } });
@@ -150,7 +150,7 @@ export class AgentAreasService {
   async jobBuilderReset(areaId: string) { await this.jobSave(areaId, { log: [], job: null, plan: null, cost: null }); return { ok: true }; }
 
   /** One turn of the new-job conversation — the thinking builder (BEA-1371). */
-  async jobBuilderChat(areaId: string, message: string): Promise<{ reply: string; job: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null }> {
+  async jobBuilderChat(areaId: string, message: string): Promise<{ reply: string; job: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null; tools: string[] }> {
     const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');
     const area: any = await this.get(areaId);
@@ -171,7 +171,7 @@ export class AgentAreasService {
       keepProposal: (g) => (g && typeof g === 'object' && g.name && g.task ? g : null),
       label: 'agent-job-builder',
     });
-    return { reply: st.reply, job: st.state.job, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null };
+    return { reply: st.reply, job: st.state.job, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null, tools: st.state.tools || [] };
   }
 
   /** Build the job the owner just approved. `overrides` carries their tool ticks (BEA-1171). */
@@ -473,6 +473,14 @@ export class AgentAreasService {
       else if (plan) { st.plan = plan; st.cost = cost; st.brief = null; (st as any)[o.proposalKey] = null; }
       else if (proposal) { (st as any)[o.proposalKey] = proposal; st.plan = null; st.cost = null; st.brief = null; }
       st.goal = goal; // remembered for every later turn, the gate, the card and Create (BEA-1378)
+      // The tools he NAMED (BEA-1466). The prompt has asked for these since the chat stopped
+      // designing, and nothing was carrying them — so `namedTools` was always empty, Codex was told
+      // about no actions at all, and the first real run failed with "I could not find a Gmail
+      // action". Kept only when the model sends a list; a turn that mentions none must not wipe what
+      // he named three turns ago.
+      if (Array.isArray(g?.tools)) {
+        st.tools = g.tools.map((t: any) => String(t || '').trim()).filter((t: string) => t.startsWith('svc:'));
+      }
       st.design = { turns: design.turns + 1, tokens: design.tokens + spentTokens };
       st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
       await o.save(st);
@@ -594,7 +602,7 @@ export class AgentAreasService {
   }
 
   /** One builder turn: owner's message → the thinking builder's reply (+ the evolving spec or plan). */
-  async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null; brief: ReturnType<typeof briefCardOf> | null }> {
+  async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null; brief: ReturnType<typeof briefCardOf> | null; tools: string[] }> {
     const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');
     const st = await this.think({
@@ -610,7 +618,7 @@ export class AgentAreasService {
     });
     // Only the CARD goes over the wire (BEA-1424) — the brief itself has its own screen, and putting
     // the whole thing in a chat bubble is how it becomes the wall of text he scrolls past.
-    return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null, brief: st.state.brief ? briefCardOf(st.state.brief) : null };
+    return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null, goal: st.state.goal || null, brief: st.state.brief ? briefCardOf(st.state.brief) : null, tools: st.state.tools || [] };
   }
 
   /** Create the agent from the current proposal (the owner pressed Create). `folderId` = the folder the owner was inside (BEA-1380). */
