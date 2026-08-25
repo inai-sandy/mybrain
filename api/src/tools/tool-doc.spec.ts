@@ -340,3 +340,45 @@ describe('an action card written for Codex', () => {
     expect(writeCard({ actionId: 'svc:x.y' })).toContain('svc:x.y');
   });
 });
+
+/**
+ * A TRAP BELONGS BESIDE THE ACTION IT IS ABOUT (BEA-1480).
+ *
+ * The traps lived only on the fuller per-action card, one lookup away. One build fetched it and got
+ * Gmail right; the very next build did not bother, asked for 100 messages with full bodies, and died
+ * on exactly the HTTP 413 the trap describes.
+ *
+ * A warning that only helps when somebody remembers to ask for it is not a warning. Notes are rare —
+ * a few dozen across thousands of actions — so rendering them inline costs almost nothing and cannot
+ * be missed.
+ */
+describe('traps sit under their own action', () => {
+  it('renders a note directly beneath the action it warns about', () => {
+    const t = toolDocText({
+      service: 'gmail',
+      name: 'Gmail',
+      connected: true,
+      actions: [
+        { id: 'svc:gmail.fetch_emails', name: 'Fetch emails', description: 'Reads a mailbox.', notes: ['verbose DEFAULTS TO TRUE — pass verbose:false explicitly.'] },
+        { id: 'svc:gmail.send_email', name: 'Send an email', description: 'Sends.' },
+      ],
+    });
+    const lines = t.split('\n');
+    const at = lines.findIndex((l) => l.includes('svc:gmail.fetch_emails'));
+    // Directly under it — reading the action and reading its warning is one glance.
+    expect(lines[at + 1]).toContain('verbose DEFAULTS TO TRUE');
+    expect(lines[at + 1]).toContain('⚠︎');
+  });
+
+  it('leaves an action without traps exactly as it was', () => {
+    const t = toolDocText({ service: 'gmail', name: 'Gmail', connected: true, actions: [{ id: 'svc:gmail.send_email', name: 'Send', description: 'Sends.' }] });
+    expect(t).toContain('- `svc:gmail.send_email` — Sends.');
+    expect(t).not.toContain('⚠︎');
+  });
+
+  it('changes the document, so a new trap rebuilds it rather than sitting unseen', () => {
+    const without = toolDocText({ service: 'g', name: 'G', connected: true, actions: [{ id: 'svc:g.a', name: 'A' }] });
+    const with_ = toolDocText({ service: 'g', name: 'G', connected: true, actions: [{ id: 'svc:g.a', name: 'A', notes: ['careful'] }] });
+    expect(docHash(without)).not.toBe(docHash(with_));
+  });
+});

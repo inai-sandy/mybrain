@@ -4,6 +4,7 @@ import { ToolCatalogService } from './tool-catalog.service';
 import { ToolKnowledgeService } from './tool-knowledge.service';
 import { ComposioProvider } from './composio.provider';
 import { DocAction, docHash, toolDocText, toolIndexText } from './tool-doc';
+import { notesFor } from './knowledge-notes';
 
 /** How often every tool's document is rebuilt from the catalog, when nothing else has changed. */
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -155,6 +156,9 @@ export class ToolDocsService implements OnModuleInit, OnModuleDestroy {
           risky: !!t.risky,
           retired: !!t.retired,
           method: t.method ? String(t.method) : null,
+          // The hand-written traps for this exact action, inline (BEA-1480). Pure and free — a
+          // lookup in a constant, no I/O — and it puts the warning where the choice is made.
+          notes: notesFor(id, service).flatMap((n) => n.notes),
         });
         byService.set(service, seen);
       }

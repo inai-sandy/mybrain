@@ -31,6 +31,16 @@ export type DocAction = {
   retired?: boolean;
   /** GET/POST as the vendor declares it; a read is never gated. */
   method?: string | null;
+  /**
+   * The hand-written traps for THIS action (BEA-1480), rendered inline under its line.
+   *
+   * They used to live only on the fuller `action_doc`, one lookup away. A build that fetched it got
+   * Gmail right; the next build did not fetch it, asked for 100 messages with full bodies, and died
+   * on the same HTTP 413 the trap describes. A warning that only helps when somebody remembers to
+   * ask for it is not a warning. Notes are rare — a few dozen across thousands of actions — so
+   * putting them here costs almost nothing and cannot be missed.
+   */
+  notes?: string[];
 };
 
 export type DocInputs = {
@@ -54,7 +64,11 @@ export type DocInputs = {
 function line(a: DocAction): string {
   const tags = [a.risky ? '**he confirms it** — usable' : '', a.retired ? '_retired_' : ''].filter(Boolean).join(' · ');
   const what = String(a.description || a.name || '').replace(/\s+/g, ' ').trim().slice(0, 220);
-  return `- \`${a.id}\` — ${what || a.name}${tags ? ` (${tags})` : ''}`;
+  const head = `- \`${a.id}\` — ${what || a.name}${tags ? ` (${tags})` : ''}`;
+  // Traps go directly under the action they are about, indented, so choosing the action and reading
+  // its warning are the same glance (BEA-1480).
+  const notes = (a.notes || []).map((n) => `  - ⚠︎ ${String(n).replace(/\s+/g, ' ').trim()}`);
+  return notes.length ? `${head}\n${notes.join('\n')}` : head;
 }
 
 /**
