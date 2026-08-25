@@ -29,6 +29,12 @@ export type GoalBuildInputs = {
   /** Only the actions he named, with whatever the catalog really knows about each. */
   tools: ToolInfo[];
   kit: { version: string; js: string; doc: string };
+  /**
+   * The whole document for each tool his conversation actually names (BEA-1472) — every action, with
+   * its exact id. In the prompt rather than a lookup away, because a build that had to fetch it did
+   * not, and pinned an action id that does not exist.
+   */
+  toolDocs?: { service: string; text: string }[];
   version: number;
   previousVersion?: number | null;
   reason?: string | null;
@@ -155,6 +161,15 @@ and a matcher can only be tested against the fixture you happened to imagine.
 
 
 ${toolsText(inp.tools)}
+
+${(inp.toolDocs || []).length ? `## The tools this conversation names, in full
+
+Every action of each, with its exact id. **Take the ids you pin from here — do not type one from
+memory.** A build did exactly that and pinned \`svc:whatsapp.send_message\`, which does not exist;
+the real one was in the document it did not open.
+
+${(inp.toolDocs || []).map((d) => d.text).join('\n\n---\n\n')}
+` : ''}
 
 ## Green tests are the only way this goes live
 

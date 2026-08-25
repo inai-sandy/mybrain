@@ -147,6 +147,19 @@ describe('what Codex is asked', () => {
     expect(t).toContain('a pinned id is a thing a test can assert');
   });
 
+  it('carries the whole document of each tool his words name (BEA-1472)', () => {
+    const t = goalBuildPrompt(inputs({ toolDocs: [{ service: 'whatsapp', text: '# Whatsapp\n\n- `svc:whatsapp.send_text` — Send a message.' }] }) as any);
+    expect(t).toContain('The tools this conversation names, in full');
+    expect(t).toContain('svc:whatsapp.send_text');
+    // With the reason attached, so nobody trims it as noise later.
+    expect(t).toContain('do not type one from');
+    expect(t).toContain('svc:whatsapp.send_message');
+  });
+
+  it('says nothing about them when his words named none', () => {
+    expect(p()).not.toContain('The tools this conversation names, in full');
+  });
+
   it('says which version is live so it does not think it is replacing nothing', () => {
     expect(goalBuildPrompt(inputs({ previousVersion: 3 }))).toContain('runs on v3 today');
   });

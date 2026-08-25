@@ -137,3 +137,30 @@ export function toolIndexText(docs: { service: string; name: string; actions: nu
   }
   return out.join('\n');
 }
+
+/**
+ * Which tools does this conversation actually talk about? (BEA-1472)
+ *
+ * A plain string match of every known service slug and name against the goal and the conversation.
+ * No interpretation: "notion" appears in his words, so Notion's document is worth putting in front of
+ * Codex. It is not deciding anything — the full lookup is still there for everything else.
+ *
+ * This exists because of a real failure. He named no tools in the chat, so Codex had to discover
+ * them; it was told to pin exact ids, and it pinned `svc:whatsapp.send_message` — which does not
+ * exist. The document listing `svc:whatsapp.send_text` was one lookup away and it did not make it.
+ * Putting the document in the prompt removes the round-trip it skipped.
+ */
+export function toolsNamedIn(text: string, known: { service: string; name: string }[]): string[] {
+  const hay = ` ${String(text || '').toLowerCase()} `;
+  const out: string[] = [];
+  for (const k of known || []) {
+    const slug = String(k.service || '').toLowerCase();
+    const name = String(k.name || '').toLowerCase();
+    if (!slug) continue;
+    // Whole words only — "notion" must not match inside "notional", and a two-letter slug must not
+    // match half the sentence.
+    const hit = [slug, name].filter(Boolean).some((w) => w.length >= 3 && new RegExp(`[^a-z0-9]${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^a-z0-9]`).test(hay));
+    if (hit) out.push(slug);
+  }
+  return [...new Set(out)];
+}

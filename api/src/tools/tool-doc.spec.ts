@@ -213,3 +213,50 @@ describe('a newly connected tool gets its document at once', () => {
     expect(src.split('void this.docs?.rebuild?.()').length - 1).toBe(2);
   });
 });
+
+/**
+ * WHICH TOOLS DOES HIS CONVERSATION NAME? (BEA-1472)
+ *
+ * He named no tools in the chat, so Codex had to discover them. It was told to pin exact ids, and it
+ * pinned `svc:whatsapp.send_message` — which does not exist. `svc:whatsapp.send_text` was one lookup
+ * away in a document it did not open.
+ *
+ * So the documents for the tools his words actually mention now go INTO the prompt. This match is
+ * mechanical on purpose: it decides nothing, it only notices that a word is present.
+ */
+describe('the tools his words mention', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { toolsNamedIn } = require('./tool-doc');
+  const known = [
+    { service: 'gmail', name: 'Gmail' },
+    { service: 'notion', name: 'Notion' },
+    { service: 'whatsapp', name: 'Whatsapp' },
+    { service: 'instagram', name: 'Instagram' },
+    { service: 'github', name: 'Github' },
+  ];
+
+  it('finds the ones he actually talked about', () => {
+    const said = 'Every day at 22:00 read my Gmail, write the summary to a Notion page, and send the link on WhatsApp.';
+    expect(toolsNamedIn(said, known).sort()).toEqual(['gmail', 'notion', 'whatsapp']);
+  });
+
+  it('does not drag in the ones he never mentioned', () => {
+    const said = 'Read my Gmail and put it in Notion.';
+    expect(toolsNamedIn(said, known)).not.toContain('instagram');
+    expect(toolsNamedIn(said, known)).not.toContain('github');
+  });
+
+  it('matches whole words only — "notional" is not Notion', () => {
+    expect(toolsNamedIn('this is a notional example', known)).toEqual([]);
+    expect(toolsNamedIn('gmailbox', known)).toEqual([]);
+  });
+
+  it('is case-insensitive, because he types how he types', () => {
+    expect(toolsNamedIn('send it on whatsapp please', known)).toEqual(['whatsapp']);
+  });
+
+  it('says nothing rather than guessing when he named nothing', () => {
+    expect(toolsNamedIn('do the usual thing every night', known)).toEqual([]);
+    expect(toolsNamedIn('', known)).toEqual([]);
+  });
+});

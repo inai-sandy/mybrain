@@ -16,6 +16,8 @@ import { tableOf } from '../social/rows';
 import { argsHashOf } from '../tools/tool-sample';
 import { BuildRequest, BuildSample, buildHashOf, buildRequest, planHashOf } from './build-brief';
 import { goalBuildFiles, goalBuildPrompt, goalHash } from './goal-build';
+import { toolsNamedIn } from '../tools/tool-doc';
+import { ToolDocsService } from '../tools/tool-doc.service';
 import { GoalService } from '../agent/goal.service';
 import { cardText } from '../agent/thinking-builder';
 import { WorkerRunnerClient } from './worker-runner.client';
@@ -98,6 +100,7 @@ export class WorkerBuildService implements OnModuleInit {
     private readonly lessons?: ToolLessonService, // the learned shapes a recipe is written from (BEA-1415)
     private readonly lookup?: ToolLookupService, // the whole shelf, for the build brief (BEA-1457)
     private readonly goals?: GoalService, // the goal HE approved, which the build now stands on (BEA-1464)
+    private readonly docs?: ToolDocsService, // one document per tool, put in the prompt (BEA-1472)
   ) {}
 
   onModuleInit() {
@@ -198,9 +201,27 @@ export class WorkerBuildService implements OnModuleInit {
       try { sample = (await this.samples?.replay?.(String(id)))?.data ?? undefined; } catch { sample = undefined; }
       tools.push({ actionId: String(id), name: (card as any)?.name || null, card: card ? cardText(card as any) : null, sample });
     }
+    // The documents for every tool his words actually name (BEA-1472). Mechanical: a string match of
+    // known slugs against the goal and the conversation, so Notion's whole action list is IN the
+    // prompt rather than one lookup away. The build that pinned a non-existent WhatsApp id had that
+    // lookup available and did not use it.
+    let toolDocs: { service: string; text: string }[] = [];
+    try {
+      const known = await this.docs?.list?.();
+      if (known?.length) {
+        const said = `${String(goal.text || '')}\n${transcript.map((t: any) => String(t?.text || '')).join('\n')}`;
+        const named = toolsNamedIn(said, known.map((k: any) => ({ service: k.service, name: k.name })));
+        for (const slug of named.slice(0, 6)) {
+          const doc = await this.docs?.get?.(slug).catch(() => null);
+          if (doc?.text) toolDocs.push({ service: slug, text: doc.text });
+        }
+      }
+    } catch { toolDocs = []; }
+
     const inp = {
       job: { id: job.id, name: job.name },
       goal: String(goal.text || ''),
+      toolDocs,
       transcript,
       tools,
       kit,
