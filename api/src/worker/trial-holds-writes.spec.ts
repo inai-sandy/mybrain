@@ -85,3 +85,55 @@ describe('what a trial really does', () => {
     expect(world.calls).toHaveLength(0);
   });
 });
+
+/**
+ * A HELD CALL MUST BE UNDERSTANDABLE (BEA-1479).
+ *
+ * The nearest miss of the whole build. A program read his Gmail, fetched only the bodies it had
+ * chosen, judged which mattered, checked its own goal — and then failed on *"Notion created the
+ * Email Summaries page but did not return its id"*.
+ *
+ * Nothing had been created. The trial held the write, answered `ok: true`, and the program
+ * reasonably believed the page existed. `ok: true` meant "nothing went wrong"; it read as "it
+ * happened". Nothing anywhere told Codex how a rehearsal behaves.
+ */
+describe('what a held call tells the program', () => {
+  it('is marked held, and carries nothing to mistake for a result', async () => {
+    const world = await makeWorld({ job: job(), samples: SAMPLES });
+    const { kit } = await spawnKit(world, 'run-1', 'ag1', { trial: true });
+
+    const r: any = await kit.call(WRITE, { title: 'Today' });
+
+    expect(r.held).toBe(true);
+    // No id, no url, no data — because nothing was created. A program that reads `ok` alone and
+    // reaches for an id gets undefined, which is exactly what happened.
+    expect(r.data).toBeUndefined();
+    expect(r.table).toBeNull();
+    expect(r.why).toContain('not really called');
+  });
+
+  it('KIT.md tells Codex what to do with one', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readFileSync } = require('fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { join } = require('path');
+    const doc = readFileSync(join(__dirname, 'kit/KIT.md'), 'utf8');
+    expect(doc).toContain('Trials: what a held call gives you back');
+    expect(doc).toContain('`ok: true` means "nothing went wrong", **not** "it happened"');
+    expect(doc).toContain('Check `held` before you use a result');
+    expect(doc).toContain('Do not fail the run');
+    // …and the real failure, so nobody trims the section as padding.
+    expect(doc).toContain('did not return its id');
+  });
+
+  it('the build prompt says it too — one place is not enough', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readFileSync } = require('fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { join } = require('path');
+    const src = readFileSync(join(__dirname, 'goal-build.ts'), 'utf8');
+    expect(src).toContain('The first run is a rehearsal');
+    expect(src).toContain('Check');
+    expect(src).toContain('what you WOULD have written and sent');
+  });
+});

@@ -122,8 +122,32 @@ Almost nothing, and that is deliberate (BEA-1471 — the owner's decision, twice
 - there is **no credit ceiling** on a worker's calls, and **no confirmation gate**. An action that
   cannot be undone just runs. Use the right one;
 - every call is written to his ledger whatever happens, so what a run did stays knowable;
-- a **trial** performs no writes and no sends at all — reads happen, everything else is held back and
-  says so. That is the one place a call of yours will not reach the vendor.
+- a **trial** performs no writes and no sends at all — reads happen, everything else is held back.
+
+### Trials: what a held call gives you back
+
+A first run is a rehearsal. Reads really happen, so you see his real data. **Every write and every
+send is held**, and the answer comes back like this:
+
+```js
+{ ok: true, held: true, data: undefined, table: null,
+  why: 'This is a trial, so svc:notion.create_notion_page was not really called. …' }
+```
+
+`ok: true` means "nothing went wrong", **not** "it happened". `held: true` means the vendor was never
+reached, so there is **no id, no url and no data to read** — because nothing was created.
+
+Handle it like this, or a rehearsal will fail on the step after the first write:
+
+- **Check `held` before you use a result.** A page id, a row id, a message id — none of them exist.
+- **Do not fail the run.** A held call is the trial working, not an error. Carry on through the rest
+  of your steps as far as you sensibly can.
+- **Finish `done`, and say what you WOULD have done** — which page you would have created, what the
+  message would have said. That is the whole point: he reads that and decides whether to keep it.
+
+This is not hypothetical. A build got the whole job right — read his mail, chose what mattered, wrote
+the summaries — and then failed on "Notion created the page but did not return its id", because it
+treated a held call as a real one.
 
 ## Output
 

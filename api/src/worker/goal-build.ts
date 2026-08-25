@@ -199,7 +199,18 @@ Compare those against what you intend to send. A flag missing from that list was
 the code looked like — that is exactly how the last three attempts died, and twice the program "set"
 a value that never left the building.
 ` : ''}
-` : ''}## Green tests are the only way this goes live
+` : ''}## The first run is a rehearsal
+
+He watches it once before it is real. In that run every READ happens for real — you see his actual
+data — and **every write and send is held back**, answering \`{ ok: true, held: true }\` with no id,
+no url and no data, because nothing was created.
+
+**Check \`held\` before you use any result**, do not treat it as a failure, and finish \`done\` saying
+what you WOULD have written and sent. He reads that and decides whether to keep the agent. A build
+did the entire job correctly and then failed on "Notion created the page but did not return its id" —
+it had been handed a held call and believed it.
+
+## Green tests are the only way this goes live
 
 Run \`node --test worker.test.mjs\` yourself and fix what fails. If they cannot pass, leave them
 failing and say why — the job stays on the road it is already on, and lying about it is worse than
