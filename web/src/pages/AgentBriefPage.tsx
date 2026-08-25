@@ -5,6 +5,7 @@ import { useGoBack } from '../ui/useGoBack';
 import { useToast } from '../ui/Toast';
 import { Brief, BriefRefusal, BriefView, SectionKey } from '../ui/BriefView';
 import { TrialCard, TrialState } from '../ui/TrialCard';
+import { Goal, GoalView } from '../ui/GoalView';
 
 /**
  * The brief screen (BEA-1406, "Brief First") — the first of the two gates between an idea and a
@@ -30,7 +31,38 @@ export default function AgentBriefPage() {
   const [proof, setProof] = useState<any | null>(null);
   // The second gate (BEA-1408): the real run he judges before anything can be created.
   const [trial, setTrial] = useState<TrialState | null>(null);
+  // THE GOAL (BEA-1463) — what Codex says it is going to build, for him to approve. This is what
+  // replaces the brief below it: the brief is the app's reading of his conversation, and he asked
+  // for that to stop. Both are shown while the new road is being finished, so nothing he already
+  // relies on disappears underneath him mid-build.
+  const [goal, setGoal] = useState<Goal | null>(null);
+  const [goalBusy, setGoalBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadGoal = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/agent/areas/${id}/goal`);
+      setGoal(r.ok ? await r.json() : null);
+    } catch { setGoal(null); }
+  }, [id]);
+
+  const goalDo = useCallback(async (path: string, body?: any) => {
+    setGoalBusy(true);
+    try {
+      const r = await fetch(`/api/agent/areas/${id}/goal${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.message || 'That did not work');
+      setGoal(d);
+    } catch (e: any) {
+      toast('error', e?.message || 'That did not work');
+    } finally {
+      setGoalBusy(false);
+    }
+  }, [id, toast]);
 
   const take = useCallback((d: any) => {
     if (!d?.brief) return;
@@ -57,6 +89,7 @@ export default function AgentBriefPage() {
   }, [id, take, loadTrial]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadGoal(); }, [loadGoal]);
 
   // A build turn is a real Codex session and takes minutes, so the screen polls rather than holding
   // a request open. The poll stops the moment it settles — never a timer left running.
@@ -196,6 +229,18 @@ export default function AgentBriefPage() {
 
       {trial?.trial?.status === 'passed' && (
         <p className="text-[11px] text-zinc-400">The brief it was built from is below, if you want to change something.</p>
+      )}
+
+      {(goal || null) && (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-testid="goal-panel">
+          <GoalView
+            goal={goal}
+            busy={goalBusy}
+            onApprove={() => goalDo('/approve')}
+            onSendBack={(note) => goalDo('/send-back', { note })}
+            onAnswer={(text) => goalDo('/answer', { text })}
+          />
+        </section>
       )}
 
       <BriefView
