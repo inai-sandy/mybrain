@@ -134,6 +134,15 @@ export class GoalService {
     return this.propose(areaId, { transcript: turns, tools: last.tools });
   }
 
+  /**
+   * What runs the moment he approves (BEA-1465) — registered at boot by `GoalTrialService`.
+   *
+   * A seam rather than an import: WorkerModule already imports AgentModule, so AgentModule cannot
+   * import back. Same pattern as `setFlowSync` and `setWorkerDispatch`.
+   */
+  private onApproved: ((areaId: string) => any) | null = null;
+  setOnApproved(fn: (areaId: string) => any) { this.onApproved = fn; }
+
   /** He approved it. This is the only thing that lets a build happen. */
   async approve(areaId: string): Promise<GoalView> {
     const last = await this.latest(areaId);
@@ -144,6 +153,11 @@ export class GoalService {
       where: { id: last.id },
       data: { status: 'approved', approvedAt: new Date() },
     });
+    // His instruction: *"when i approve the goal it has to create an agent and run a sample task to
+    // match the goal."* Approving is the trigger, not a bookmark. Deliberately not awaited — a real
+    // Codex build takes minutes and the screen polls — and deliberately never able to fail the
+    // approval itself: the goal IS approved whatever happens next.
+    try { void Promise.resolve(this.onApproved?.(String(areaId))).catch(() => undefined); } catch { /* the approval stands */ }
     return this.view(row);
   }
 

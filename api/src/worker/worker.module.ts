@@ -7,6 +7,7 @@ import { ToolCatalogModule } from '../tools/tool-catalog.module';
 import { RunJournalService } from './run-journal.service';
 import { WorkerBuildController } from './worker-build.controller';
 import { TrialService } from './trial.service';
+import { GoalTrialService } from './goal-trial.service';
 import { BriefTrialService } from './brief-trial.service';
 import { BriefTrialController } from './brief-trial.controller';
 import { WorkerBuildService } from './worker-build.service';
@@ -49,7 +50,7 @@ import { WorkerDispatchService } from './worker-dispatch.service';
 @Module({
   imports: [AgentModule, SocialModule, ToolCatalogModule, PushModule, HermesModule], // PrismaModule + LlmModule are @Global
   controllers: [BriefTrialController, WorkerController, WorkerBuildController],
-  providers: [TrialService, BriefTrialService, RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService, OwnerAskService, WorkerSweeperService, WorkerRepairService, WorkerDispatchService],
-  exports: [TrialService, BriefTrialService, RunJournalService, WorkerTokenService, WorkerBuildService, OwnerAskService, WorkerRepairService, WorkerDispatchService],
+  providers: [TrialService, GoalTrialService, BriefTrialService, RunJournalService, WorkerTokenService, WorkerTokenGuard, WorkerRunnerClient, WorkerBuildService, OwnerAskService, WorkerSweeperService, WorkerRepairService, WorkerDispatchService],
+  exports: [TrialService, GoalTrialService, BriefTrialService, RunJournalService, WorkerTokenService, WorkerBuildService, OwnerAskService, WorkerRepairService, WorkerDispatchService],
 })
 export class WorkerModule {}
