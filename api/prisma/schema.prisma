@@ -1910,6 +1910,33 @@ model RunJournal {
 /// with holes — and every one of those structures produced a defect the owner had to find: a receipt
 /// instead of a summary, a link that could never be filled, a sentence with no verb. The goal is
 /// Codex's own words, from the whole transcript, and nothing is built until the owner approves it.
+/// ONE DOCUMENT PER TOOL, for Codex to consult (BEA-1468).
+///
+/// The owner, 2026-08-25: *"We have to create tool details individually and store them in a
+/// document. Each tool should have a document. Based on the requirement, Codex has to pull the tool
+/// information and actions information to create an agent."* And: *"Codex should have full access to
+/// all the tools and actions… If the context is not proper, it cannot create the right agent that we
+/// are looking for."*
+///
+/// Before this, what Codex knew about a tool was assembled live and thrown away, and *the app* chose
+/// which cards it got. That is the same pre-deciding that has been removed everywhere else: a build
+/// could not reach for an action nobody had thought to hand it. These rows are durable, cover every
+/// connected service, and Codex reads them itself over MCP — this build and every future one.
+model ToolDoc {
+  id       String @id @default(uuid())
+  /// The service slug — `gmail`, `notion`, `instagram`. One row per tool, which is the owner's rule.
+  service  String @unique
+  name     String @default("")
+  /// How many actions this tool has, so a reader knows the index is complete.
+  actions  Int    @default(0)
+  /// The document: what the tool is, and every action it has, in markdown.
+  text     String @default("")
+  /// Of `text` — so a rebuild that changes nothing does not churn the row or its timestamp.
+  hash     String @default("")
+  builtAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model AgentGoal {
   id        String   @id @default(uuid())
   areaId    String

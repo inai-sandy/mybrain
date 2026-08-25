@@ -39,6 +39,14 @@ const TOOLS = [
   { name: 'save_document', description: "Save a markdown document into the user's Documents library. Set remember:true to also index it into their searchable memory.", inputSchema: { type: 'object', properties: { title: { type: 'string' }, content: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, remember: { type: 'boolean' } }, required: ['title', 'content'] } },
   { name: 'remember', description: "Store a durable fact in the user's long-term memory (RAG + SuperMemory) for later recall.", inputSchema: { type: 'object', properties: { text: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } }, required: ['text'] } },
   { name: 'create_agent', description: "Create a whole agent in the user's My Brain app from one spec: an area (name, icon, description, tools) plus its jobs (each with a plain-English task, optional outcome, schedule and settings). Use ONLY after the user has confirmed the final spec.", inputSchema: { type: 'object', properties: { area: { type: 'object', properties: { name: { type: 'string' }, icon: { type: 'string' }, color: { type: 'string' }, description: { type: 'string' }, tools: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', description: 'skill | api | mcp | cli' }, name: { type: 'string' }, note: { type: 'string' } } } } }, required: ['name'] }, jobs: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, task: { type: 'string' }, outcome: { type: 'string' }, schedule: { type: 'object' }, scheduleText: { type: 'string' }, autonomy: { type: 'string' }, depth: { type: 'string' }, notifyWhatsApp: { type: 'boolean' }, keepDays: { type: 'number' }, evals: { type: 'array', items: { type: 'string' } } }, required: ['name', 'task'] } } }, required: ['area', 'jobs'] } },
+  // THE TOOL DOCUMENTS (BEA-1468). The owner: "Each tool should have a document… Codex should have
+  // full access to all the tools and actions… If the context is not proper, it cannot create the
+  // right agent that we are looking for." So Codex PULLS what it needs, at three levels — what
+  // exists, one tool's whole action list, one action's exact detail — instead of being handed a
+  // selection somebody else made.
+  { name: 'list_tools', description: "Every tool connected to the user's My Brain, with how many actions each has. Start here when you need to know what is available — do not guess a service name, and do not assume something is connected.", inputSchema: { type: 'object', properties: {} } },
+  { name: 'tool_doc', description: "One tool's document: what it is, and EVERY action it has with its exact id. Ask for this before choosing an action, using the service id from list_tools (for example 'gmail', 'notion').", inputSchema: { type: 'object', properties: { service: { type: 'string', description: "the service id, e.g. 'gmail'" } }, required: ['service'] } },
+  { name: 'action_doc', description: "The full detail of ONE action: its exact parameters, the fields real answers have carried, what it has cost, whether it is failing right now, and any trap recorded about it. Ask for this before calling an action you have not called before — guessing a parameter name is the most common way a build produces a program that runs and returns nothing.", inputSchema: { type: 'object', properties: { actionId: { type: 'string', description: "the exact id, e.g. 'svc:gmail.fetch_emails'" } }, required: ['actionId'] } },
   { name: 'ask_user', description: "Ask the user a question mid-task and wait for their reply. Use for a real decision, preference, or fact only the user knows. Pass the runId you were given in your instructions. If the reply says the user is not available, END YOUR TURN immediately with a one-line note — the run is paused safely and you will be resumed with their answer.", inputSchema: { type: 'object', properties: { runId: { type: 'string', description: 'the run id from your instructions' }, question: { type: 'string' }, choices: { type: 'array', items: { type: 'string' }, description: 'optional multiple-choice options' }, defaultValue: { type: 'string', description: 'optional fallback applied if the user never answers' } }, required: ['runId', 'question'] } },
   { name: 'get_answer', description: 'Check whether the user has answered a previously asked question, by its token.', inputSchema: { type: 'object', properties: { token: { type: 'string' } }, required: ['token'] } },
 ];
@@ -50,6 +58,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const args = req.params.arguments || {};
   const text = (t) => ({ content: [{ type: 'text', text: t }] });
   try {
+    // The tool documents (BEA-1468). Read-only, cheap, and the thing to reach for BEFORE choosing
+    // or calling any action — thin context is what made the first real build write a program that
+    // could not find Gmail.
+    if (name === 'list_tools') {
+      const res = await apiGet('/api/tools/docs?as=text');
+      return text(res.text || 'No tools are connected yet.');
+    }
+    if (name === 'tool_doc') {
+      const slug = String(args.service || '').toLowerCase().trim();
+      if (!slug) return text('Give the service id, for example "gmail". Use list_tools to see them.');
+      const res = await apiGet(`/api/tools/docs/${encodeURIComponent(slug)}`);
+      if (!res || res.statusCode === 404 || res.message) return text(`There is no tool called "${slug}". Use list_tools to see what exists.`);
+      return text(res.text || '');
+    }
+    if (name === 'action_doc') {
+      const id = String(args.actionId || '').trim();
+      if (!id) return text('Give the exact action id, for example "svc:gmail.fetch_emails".');
+      const res = await apiGet(`/api/tools/docs/action/${encodeURIComponent(id)}`);
+      if (!res || res.statusCode === 404 || res.message) return text(`Nothing in the catalog is called ${id}. Use tool_doc to see a tool's actions.`);
+      return text(res.text || '');
+    }
+
     if (name === 'search_brain') {
       const res = await api('/api/agent/tools/search-brain', { query: args.query, limit: args.limit });
       const lines = (res.results || []).map((h, i) => `${i + 1}. [${h.source}] ${h.title}: ${h.snippet}`).join('\n');

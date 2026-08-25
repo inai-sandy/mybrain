@@ -118,6 +118,25 @@ rules. \`kit.research()\` runs budgeted deep research.
 **The open web, with no restriction**, both while you build and while the agent runs. Search it, read
 pages, call whatever you need.
 
+## Look the tools up — do not guess
+
+You have three lookups, and they cost nothing:
+
+- **\`list_tools\`** — every tool the owner has connected, with how many actions each has. Start here.
+- **\`tool_doc(service)\`** — one tool's whole document: what it is, and EVERY action it has, with the
+  exact id of each.
+- **\`action_doc(actionId)\`** — one action in full: its exact parameters, the fields real answers have
+  carried, what it has cost, whether it is failing right now, and any trap recorded about it.
+
+**Use them before choosing an action, and again before calling one you have not called before.**
+Guessing a service name or a parameter is the most common way this produces a program that runs and
+returns nothing. It has already happened once: a build was handed no tool information at all, wrote a
+program that could not find Gmail, and the owner lost an hour to it.
+
+If something the work needs is **not connected**, the documents say so. Say that plainly rather than
+working around it — he would rather connect it than receive an agent that quietly does less.
+
+
 ${toolsText(inp.tools)}
 
 ## Green tests are the only way this goes live
