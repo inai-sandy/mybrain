@@ -116,3 +116,29 @@ describe('what a build may try', () => {
     expect((await w.s.run('b1', 'gmail', {})).refused).toContain('starts with "svc:"');
   });
 });
+
+/**
+ * THE DESCRIPTION IS PART OF THE RULE (BEA-1492).
+ *
+ * BEA-1491 removed the read-only refusal from the server, and the very next build made ZERO calls.
+ * The reason was not the server: the MCP tool description Codex actually reads still said
+ * *"Reads only — an action that changes something is refused."* It was told writes were forbidden, so
+ * it did not try one. A rule with a second call site, for the fifth time this week.
+ *
+ * This reads the real MCP server file. If anyone reinstates the old sentence there, this fails.
+ */
+describe('what Codex is TOLD matches what the server does', () => {
+  const mcp = () => require('fs').readFileSync(require('path').join(__dirname, '../../../services/host/mybrain-mcp.server.mjs'), 'utf8');
+
+  it('does not tell Codex that writes are refused', () => {
+    const t = mcp();
+    expect(t).not.toContain('Reads only');
+    expect(t).not.toMatch(/an action that changes something is refused/i);
+  });
+
+  it('tells it plainly that writes are allowed, and asks it to tidy up', () => {
+    const t = mcp();
+    expect(t).toContain('Reads AND writes');
+    expect(t).toMatch(/archive or delete any test item you create/i);
+  });
+});

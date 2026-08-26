@@ -258,10 +258,18 @@ export class ServiceActionsService {
     // Every other road — Chat, the plan runner, a flow — still gates exactly as it did. This is
     // narrowed to `runKind: 'worker'` on purpose so his own taps are unaffected.
     //
-    // What it costs: an irreversible action in a worker now runs without asking him. He was shown
-    // that consequence and chose it. The `ToolCall` row is still written either way, so what
-    // happened stays knowable, and a TRIAL still performs no writes at all.
-    const unguarded = String(ctx?.runKind || '') === 'worker';
+    // What it costs: an irreversible action now runs without asking him. He was shown that
+    // consequence twice and chose it both times. The `ToolCall` row is still written either way, so
+    // what happened stays knowable.
+    //
+    // `build` joined `worker` in BEA-1492. A build could already create and send (BEA-1491) but was
+    // still stopped at this gate for anything that cannot be undone — which meant Codex could make a
+    // test page in his Notion and then not archive it, and could never try a destructive call before
+    // writing it into the program. He was asked, with the wider blast radius spelled out, and chose
+    // to close the hole. Both roads are listed HERE and nowhere else: this line is the only place
+    // that decides, and the recurring bug in this project is a rule with a second call site.
+    const UNGATED_RUN_KINDS = ['worker', 'build'];
+    const unguarded = UNGATED_RUN_KINDS.includes(String(ctx?.runKind || ''));
     const mustAsk = unguarded || p.readOnly === true ? false : await this.gates.mustAsk(actionId, service, action.risky).catch(() => true);
     const approval = mustAsk ? await this.gates.approvalFor(actionId, ctx).catch(() => null) : null;
 

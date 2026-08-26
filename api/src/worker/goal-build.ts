@@ -285,6 +285,9 @@ Nothing will stop you, so the judgement is yours. Two things worth knowing while
 - **A message to a person cannot be taken back.** A trial send really reaches a real phone, and the
   person on the other end did not ask to be part of a build. If you need to prove a send works, prefer
   the owner's own number, send one, and say on the run that you did.
+- **Clean up after yourself.** Deleting and archiving work in a trial too, so a test page you made is
+  yours to remove. Leaving litter in his Notion or his Drive is not a small thing — he has to tidy it
+  by hand, and he cannot tell your test items from his own.
 
 Use it properly and you will not have to guess a shape again.
 

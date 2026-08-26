@@ -87,7 +87,11 @@ export class TryActionService {
 
     this.used.set(buildKey, spent + 1);
     const r: any = await this.actions
-      .runDetailed(id, '', { runKind: 'build', args: args && typeof args === 'object' ? args : {}, argsPinned: true, label: id })
+      // The build key rides as the runId (BEA-1492), so every trial call is attributable to the build
+      // that made it. Before this it was written with an empty runId and the only way to answer "what
+      // did that build touch?" was to query the database by time window and hope two builds had not
+      // overlapped.
+      .runDetailed(id, buildKey, { runKind: 'build', args: args && typeof args === 'object' ? args : {}, argsPinned: true, label: id })
       .catch((e: any) => ({ ok: false, error: String(e?.message || e) }));
 
     const left = TRY_BUDGET - (spent + 1);

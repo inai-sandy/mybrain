@@ -16,6 +16,7 @@ import { tableOf } from '../social/rows';
 import { argsHashOf } from '../tools/tool-sample';
 import { BuildRequest, BuildSample, buildHashOf, buildRequest, planHashOf } from './build-brief';
 import { goalBuildFiles, goalBuildPrompt, goalHash } from './goal-build';
+import { buildActivity, type BuildActivity } from './build-activity';
 import { toolsNamedIn } from '../tools/tool-doc';
 import { ToolDocsService } from '../tools/tool-doc.service';
 import { GoalService } from '../agent/goal.service';
@@ -62,6 +63,11 @@ export type WorkerState = {
   reason?: string;
   building: boolean;
   builds: any[];
+  /**
+   * What the live build's own calls did, in plain words (BEA-1492). Null when the build predates
+   * per-build attribution, or made no calls — never a guess from a time window.
+   */
+  activity?: BuildActivity | null;
 };
 
 /**
@@ -143,7 +149,27 @@ export class WorkerBuildService implements OnModuleInit {
       reason: compilable ? undefined : cannot,
       building,
       builds: rows.map((b: any) => this.shape(b, planHash)),
+      // What the live build actually touched, in plain words (BEA-1492). A build may now do anything
+      // at all, so seeing what it did is the other half of that trade.
+      activity: worker ? await this.activityFor(worker) : null,
     };
+  }
+
+  /**
+   * The calls one build made, summarised (BEA-1492).
+   *
+   * Attributed by the build key, which `TryActionService` writes as the row's runId. A build from
+   * before that change has no attributable rows and honestly answers null rather than guessing from a
+   * time window and risking another build's calls.
+   */
+  private async activityFor(build: any): Promise<BuildActivity | null> {
+    const key = String(build?.sessionId || build?.id || '');
+    if (!key) return null;
+    const rows: any[] = await this.prisma?.toolCall
+      ?.findMany?.({ where: { runKind: 'build', runId: key }, select: { action: true, ok: true, error: true }, take: 200 })
+      .catch(() => []) || [];
+    if (!rows.length) return null;
+    return buildActivity(rows.map((r) => ({ action: String(r.action || ''), ok: !!r.ok, error: r.error })));
   }
 
   /**
