@@ -122,7 +122,7 @@ Almost nothing, and that is deliberate (BEA-1471 — the owner's decision, twice
 - there is **no credit ceiling** on a worker's calls, and **no confirmation gate**. An action that
   cannot be undone just runs. Use the right one;
 - every call is written to his ledger whatever happens, so what a run did stays knowable;
-- a **trial** performs no writes and no sends at all — reads happen, everything else is held back.
+- a **trial call during a BUILD** may now do anything a real run can — reads, writes and sends alike (BEA-1491, his decision). Prefer things that can be taken back, and remember a message to a person cannot be.
 
 ### Nothing is held back
 

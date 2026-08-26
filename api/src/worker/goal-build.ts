@@ -271,7 +271,24 @@ example \`new Intl.DateTimeFormat('en-CA', { timeZone: '${inp.timezone}' }).form
 his date as YYYY-MM-DD. A page titled with the server's date will be wrong for him for part of every
 day, and he will not know why.
 
-` : ''}## Try every call before you write it — this is a step, not an option
+` : ''}## Trying a call now includes writes — his decision, and it is yours to use well
+
+Trials used to be reads only, and that was the reason four builds in a row failed: every one of them
+failed on a **write** whose shape had to be guessed from a description. That restriction is gone. You
+can try **any** call while you build — create the page, add the content, write the sheet — and see the
+vendor's real answer instead of hoping.
+
+Nothing will stop you, so the judgement is yours. Two things worth knowing while you use it:
+
+- **Prefer things that can be taken back.** Create a throwaway page and archive it; write to a scratch
+  row. That way trying costs nothing but the call.
+- **A message to a person cannot be taken back.** A trial send really reaches a real phone, and the
+  person on the other end did not ask to be part of a build. If you need to prove a send works, prefer
+  the owner's own number, send one, and say on the run that you did.
+
+Use it properly and you will not have to guess a shape again.
+
+## Try every call before you write it — this is a step, not an option
 
 For each action you are going to use, call \`try_action\` **once**, with roughly the arguments you
 intend to send, and look at what comes back. Then write the call from what you saw.

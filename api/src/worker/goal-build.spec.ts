@@ -353,3 +353,31 @@ describe('the program is warned that answers are not shaped alike', () => {
     expect(t()).toContain('did not return a page id');
   });
 });
+
+/**
+ * TRIALS CAN WRITE NOW (BEA-1491) — and the judgement comes with the context to use it.
+ *
+ * He was asked directly, with the irreversible-send risk spelled out, and chose "everything, no
+ * exceptions". So no rule here refuses an action for what it does. What the prompt owes Codex instead
+ * is the two facts it needs to choose well — which is the difference between trusting it and hoping.
+ */
+describe('a build may try writes, and is told what that means', () => {
+  const t = () => goalBuildPrompt(inputs() as any);
+
+  it('says plainly that the read-only restriction is gone', () => {
+    expect(t()).toContain('now includes writes');
+    expect(t()).toContain('You\ncan try **any** call while you build');
+  });
+
+  it('names why it changed, so it does not read as a loosening for its own sake', () => {
+    expect(t()).toContain('four builds in a row failed');
+  });
+
+  it('gives the two facts judgement needs, as guidance and not as a rule', () => {
+    const text = t();
+    expect(text).toContain('Prefer things that can be taken back');
+    expect(text).toContain('cannot be taken back');
+    // Guidance, explicitly — the moment this becomes a refusal we are back to guessing shapes.
+    expect(text).toContain('Nothing will stop you');
+  });
+});

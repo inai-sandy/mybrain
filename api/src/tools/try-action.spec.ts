@@ -10,9 +10,9 @@ import { TryActionService, TRY_BUDGET } from './try-action.service';
  * documents about his tools but never to call one — so it guessed from good documentation and found
  * out the truth by failing in production, one fact per rebuild, with me in the middle.
  *
- * This is the console it never had. The tests that matter are the ones about what it may NOT do: a
- * build that created Notion pages or sent WhatsApp messages while it was still designing would be
- * far worse than the problem it solves.
+ * This is the console it never had. It began as reads-only; BEA-1491 opened it to writes as well,
+ * after four builds in a row failed and every one failed on a write. What the tests guard now is the
+ * runaway budget and the ledger — never what an action does.
  */
 
 function svc(opts: { byId?: any; result?: any } = {}) {
@@ -39,27 +39,37 @@ describe('what a build may try', () => {
     expect(w.calls[0].ctx.args).toEqual({ max_results: 5 });
   });
 
-  it('REFUSES anything that changes something, and says how to proceed', async () => {
-    // The whole safety of the feature. A build must never create a page or send a message.
-    const w = svc({ byId: () => ({ method: 'POST', risky: true }) });
-    const r = await w.s.run('b1', 'svc:notion.create_notion_page', { title: 'x' });
+  /**
+   * BEA-1491 — his decision, asked directly with the irreversible-send risk spelled out:
+   * **"everything, no exceptions"**. Reads-only was the last remaining cause of repeated failures:
+   * four builds of his daily-email agent failed in a row and every one failed on a WRITE whose shape
+   * had to be guessed from a description — one of which was itself cut off mid-sentence.
+   *
+   * These three tests replace the three that used to assert the opposite. Do not reinstate those:
+   * an action being a write, being risky, or being unknown is no longer a reason to refuse it.
+   */
+  it('tries a WRITE for real — this is the point of BEA-1491', async () => {
+    const w = svc({ byId: () => ({ method: 'POST', risky: true }), result: { ok: true, data: { id: 'page-1' } } });
+    const r = await w.s.run('b1', 'svc:notion.create_notion_page', { title: 'x', parent_id: 'p' });
 
-    expect(r.ok).toBe(false);
-    expect(r.refused).toContain('changes something');
-    expect(r.refused).toContain('it will run when the agent runs');
-    expect(w.calls).toHaveLength(0); // never reached the vendor
+    expect(r.ok).toBe(true);
+    expect(r.data).toEqual({ id: 'page-1' });
+    expect(w.calls).toHaveLength(1);                       // it really reached the vendor
+    expect(w.calls[0].ctx.runKind).toBe('build');          // and it is in his ledger like any other
   });
 
-  it('fails CLOSED — an action it cannot classify is treated as a write', async () => {
-    const w = svc({ byId: () => null }); // catalog knows nothing, and the verb is not a read verb
-    const r = await w.s.run('b1', 'svc:whatever.frobnicate_thing', {});
-    expect(r.refused).toContain('changes something');
-    expect(w.calls).toHaveLength(0);
-  });
-
-  it('lets a read through on the verb alone when the catalog is silent', async () => {
+  it('tries an action it cannot classify at all, rather than failing closed', async () => {
     const w = svc({ byId: () => null });
-    expect((await w.s.run('b1', 'svc:gmail.fetch_emails', {})).ok).toBe(true);
+    const r = await w.s.run('b1', 'svc:whatever.frobnicate_thing', {});
+    expect(r.ok).toBe(true);
+    expect(w.calls).toHaveLength(1);
+  });
+
+  it('tries a send — the one he was warned about and chose anyway', async () => {
+    const w = svc({ byId: () => ({ method: 'POST', risky: true }), result: { ok: true, data: { status: 'sent' } } });
+    const r = await w.s.run('b1', 'svc:whatsapp.send_text', { to: '+91...', message: 'test' });
+    expect(r.ok).toBe(true);
+    expect(w.calls).toHaveLength(1);
   });
 
   it('stops at the budget, and tells it what to do instead of guessing', async () => {

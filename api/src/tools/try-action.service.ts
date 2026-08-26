@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ServiceActionsService } from './service-actions.service';
 import { ToolCatalogService } from './tool-catalog.service';
-import { isReadAction } from './service-provider';
 
 /** How many real calls one build may make. Enough to look around; not enough to run away. */
 export const TRY_BUDGET = 25;
@@ -37,16 +36,27 @@ export type TryResult = {
  * A person doing the same job opens a console: calls Gmail once, looks at what came back, tries a
  * Notion page, sees it refused, fixes it. Fifty small discoveries in five minutes.
  *
- * This gives Codex that console. One rule makes it safe rather than terrifying:
+ * This gives Codex that console, and since BEA-1491 it is the WHOLE console — reads and writes alike.
  *
- * **READS ONLY.** A build that created Notion pages or sent WhatsApp messages while it was still
- * designing would be far worse than the problem it solves. Read-or-write is decided by the catalog,
- * never guessed here, and it fails CLOSED — an action it cannot classify is treated as a write and
- * refused.
+ * It was reads-only at first, and that turned out to be the single remaining cause of repeated
+ * failures. Four builds of his daily-email agent failed in a row and **every one failed on a write**:
+ * Notion's `parent_id`, then reading a created page's id, then `content_blocks[].content_block`. It
+ * got every read right, because it could try those. It got the writes wrong, because for those it was
+ * working blind from a written description — and when that description was itself cut off mid-sentence
+ * there was nothing it could have done.
  *
- * The other two limits are about runaways, not about doubting Codex: a per-build budget, and a cap
- * on how much of an answer comes back. Every call is written to the owner's ledger like any other,
- * so what a build did while it was thinking is never a mystery.
+ * He was asked directly, with the irreversible-send risk spelled out, and chose **"everything, no
+ * exceptions"** — consistent with what he had already said twice: *"Truly everything goes — zero
+ * forced rules"* and *"dont guard Codex. it is AI it can deside properly."* So nothing here refuses
+ * an action for what it does. A trial send really sends; a trial create really creates.
+ *
+ * What remains is not a guard on judgement, it is a guard on runaways: a per-build call budget, and a
+ * cap on how much of an answer comes back. Every call is written to the owner's ledger like any other,
+ * so what a build did while it was thinking is never a mystery — which matters more now, not less.
+ *
+ * Judgement is handed to Codex WITH THE CONTEXT TO USE IT, in the build prompt rather than as a rule
+ * here: prefer creating throwaway things you can archive, and remember a message to a person cannot be
+ * taken back. That is the difference between trusting it and hoping.
  */
 @Injectable()
 export class TryActionService {
@@ -75,16 +85,6 @@ export class TryActionService {
       return { ok: false, refused: `You have used all ${TRY_BUDGET} trial calls for this build. Write the program from what you have learned — and where you are still unsure, handle both shapes rather than guessing one.`, left: 0 };
     }
 
-    if (!(await this.isRead(id))) {
-      // The whole safety of this feature. Said as a fact rather than a telling-off, and with the way
-      // forward — a build still has to be able to plan a write it cannot make.
-      return {
-        ok: false,
-        refused: `${id} changes something, so it cannot be tried while you are building — only reads can. Read its card for the exact arguments, write the call, and it will run when the agent runs.`,
-        left: TRY_BUDGET - spent,
-      };
-    }
-
     this.used.set(buildKey, spent + 1);
     const r: any = await this.actions
       .runDetailed(id, '', { runKind: 'build', args: args && typeof args === 'object' ? args : {}, argsPinned: true, label: id })
@@ -108,23 +108,4 @@ export class TryActionService {
     };
   }
 
-  /**
-   * Is this a read? The catalog's own answer, and it fails CLOSED.
-   *
-   * Being wrong towards "write" refuses a harmless call and costs a sentence. Being wrong the other
-   * way sends a real message from a build that was only supposed to be looking.
-   */
-  private async isRead(actionId: string): Promise<boolean> {
-    const id = String(actionId || '');
-    const service = id.startsWith('svc:') ? id.slice(4).split('.')[0] : '';
-    try {
-      const t: any = await this.catalog?.byId?.(id);
-      if (t) {
-        if (t.risky === true) return false;
-        if (t.readOnly === true) return true;
-        if (String(t.method || '').toUpperCase() === 'GET') return true;
-      }
-    } catch { /* the verb below is the fallback, and it fails closed */ }
-    return isReadAction(id, service);
-  }
 }
