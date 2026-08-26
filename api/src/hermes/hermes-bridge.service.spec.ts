@@ -590,3 +590,82 @@ describe('draftAgent infers tools (BEA-1100)', () => {
     ]);
   });
 });
+
+/**
+ * REPLAY IS NOT A SECOND DOOR (BEA-1489).
+ *
+ * He re-ran a failed run of a job whose worker was live and current. Instead of running the program,
+ * the replay handed the goal text to the engine as a question — and what reached him was a research
+ * write-up about how to *set up* such an agent, with citations, in place of the daily email brief his
+ * program would have produced.
+ *
+ * The cause is the one CLAUDE.md already names: a rule with two call sites. `startRun()` decides the
+ * worker/engine road and claims the per-job lock one line apart; `replayRun()` called `execute()`
+ * directly and heard about neither.
+ */
+describe('replaying a run takes the same road a fresh run would', () => {
+  function replayWorld() {
+    const agent = fakeAgent();
+    agent.runs['old'] = { id: 'old', status: 'failed', input: 'the goal', title: 'Daily brief', agentId: 'job-1', depth: 'standard', startedAt: '2026-08-26T02:10:33Z' };
+    agent.getRun = jest.fn(async (id: string) => agent.runs[id]);
+    agent.getAgent = jest.fn(async () => ({ id: 'job-1' }));
+    return { agent, svc: build(agent) as any };
+  }
+
+  it('goes through startRun, carrying the link step and a lock reason', async () => {
+    const { svc } = replayWorld();
+    const seen: any[] = [];
+    svc.startRun = async (input: any) => { seen.push(input); return { id: 'run-2' }; };
+
+    await svc.replayRun('old');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ prompt: 'the goal', agentId: 'job-1' });
+    expect(seen[0].firstStep.label).toContain('Replay of an earlier run');
+    expect(seen[0].lockReason).toBe('a replay');
+  });
+
+  it('never calls execute() itself — calling it directly is what skipped the worker', async () => {
+    const { svc } = replayWorld();
+    let executed = 0;
+    svc.execute = async () => { executed++; };
+    svc.startRun = async () => ({ id: 'run-2' });
+
+    await svc.replayRun('old');
+    expect(executed).toBe(0);
+  });
+
+  it('a replay of a job with a live worker goes down the WORKER road, not the engine', async () => {
+    const { agent, svc } = replayWorld();
+    const ran: any[] = [];
+    // The real dispatcher seam, exactly as startOnRoad consults it.
+    svc.workers = { decide: async () => ({ use: true, say: "Running this job's worker (v5)", version: 5 }), run: async (runId: string, agentId: string) => { ran.push({ runId, agentId }); } };
+    let enginePrompts = 0;
+    mockCodex(() => { enginePrompts++; return { text: 'a research write-up' }; });
+
+    await svc.replayRun('old');
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(ran).toHaveLength(1);          // the program ran
+    expect(enginePrompts).toBe(0);        // and the engine was never asked the goal as a question
+    expect(agent.steps.some((x: any) => /Replay of an earlier run/.test(x.label))).toBe(true);
+  });
+});
+
+/** The link step must be on the log before any road fires, or the road's own first step races it. */
+describe('a run can carry one step written before its road is chosen', () => {
+  it('writes firstStep after the run exists and before the road starts', async () => {
+    const agent = fakeAgent();
+    const svc: any = build(agent);
+    const order: string[] = [];
+    const realAppend = agent.appendStep;
+    agent.appendStep = jest.fn(async (id: string, st: any) => { order.push(`step:${st.label}`); return realAppend ? realAppend(id, st) : undefined; });
+    svc.startOnRoad = async () => { order.push('road'); };
+
+    await svc.startRun({ prompt: 'p', title: 'T', agentId: 'job-1', firstStep: { label: 'LINK' } });
+    await new Promise((r) => setTimeout(r, 15));
+
+    expect(order[0]).toBe('step:LINK');
+    expect(order).toContain('road');
+  });
+});

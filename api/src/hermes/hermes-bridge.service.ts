@@ -48,6 +48,14 @@ export type StartRunInput = {
   skill?: string;
   /** Plain words for the job lock: "scheduled run", "manual run", "by voice"… (BEA-1388). */
   lockReason?: string;
+  /**
+   * One step written on the new run BEFORE any road is taken (BEA-1489).
+   *
+   * Replay needs to link back to the run it came from, and that link has to be on the log before the
+   * road fires — appending afterwards races the road's own first step. It exists so replay can come
+   * through this door like everything else instead of keeping a door of its own.
+   */
+  firstStep?: { label: string; status?: string; detail?: string };
 };
 
 /**
@@ -534,15 +542,20 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       saveCollectionId: agentRow?.collectionId ?? null,
       depth,
     };
-    const run = await this.agent.createRun({ agentId: old.agentId ?? null, title: input.title, input: old.input, depth });
-    // The link step goes in BEFORE the engine fires — appending after raced execute()'s own first
-    // step (read-modify-write on the step log) and could lose the write.
-    await this.agent.appendStep(run.id, { label: '↻ Replay of an earlier run', status: 'info', detail: `original: ${old.title || old.id} · ${new Date(old.startedAt).toLocaleString()}` }).catch(() => undefined);
-    this.execute(run.id, input).catch(async (e) => {
-      this.log.error(`replay run ${run.id} crashed: ${e?.message || e}`);
-      await this.agent.finishRun(run.id, { status: 'failed', error: friendlyError(e?.message || String(e)) }).catch(() => undefined);
+    // Through the SAME door as every other start (BEA-1489). This used to create its own run and
+    // call execute() directly, which skipped both things startRun() does one line apart: the
+    // worker/engine decision and the per-job lock. So replaying a job whose worker was live sent the
+    // goal text to the engine as a question instead — and the owner got a research write-up about
+    // how to set his agent up, in place of the daily brief his program would have produced.
+    return this.startRun({
+      ...input,
+      lockReason: 'a replay',
+      firstStep: {
+        label: '↻ Replay of an earlier run',
+        status: 'info',
+        detail: `original: ${old.title || old.id} · ${new Date(old.startedAt).toLocaleString()}`,
+      },
     });
-    return run;
   }
 
   /**
@@ -590,6 +603,13 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     // The lock now points at its run, so a skipped scheduled fire can say WHICH run is still going.
     // From here on the release is `finishRun`'s job — every terminal state goes through it.
     if (holder) await this.locks?.attachRun(holder, run.id).catch(() => undefined);
+    // Before the road, never after — the road's own first step is a read-modify-write on the same
+    // log and would race this one away.
+    if (input.firstStep) {
+      await this.agent
+        .appendStep(run.id, { label: input.firstStep.label, status: input.firstStep.status || 'info', detail: input.firstStep.detail })
+        .catch(() => undefined);
+    }
     // fire-and-forget — the run screen polls GET /api/agent/runs/:id for live progress.
     // execute() awaits appendStep/engineSettings before its own try, so a transient DB error there
     // would leave the run stuck 'running'. Always finalize on any escape. (BEA-799)
