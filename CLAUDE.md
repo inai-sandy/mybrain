@@ -974,7 +974,14 @@ change is additive, so no promoted worker is refused. Traps: `WorkerController`'
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.
-- **A rule with two call sites should be a function with one.** This has now cost three real runs.
+- **A rule with two call sites should be a function with one.** This has now cost FOUR real runs.
+  The fourth was `replayRun()` (BEA-1489): it built its own run and called `execute()` directly, so it
+  never reached `startOnRoad()` or the job lock — both of which sit inside `startRun()`, one line
+  apart. Replaying a job whose worker was live therefore asked the ENGINE the goal as a question, and
+  the owner got a cited research write-up about how to set his agent up instead of his daily brief.
+  It had its own path for one honest reason — a link step that must be written before the road fires —
+  so the fix was to give the shared door that ability (`StartRunInput.firstStep`) rather than to keep
+  a second door. **When a caller needs one thing the shared door lacks, add it to the door.**
   "Can this job have a worker?" lived in the build, in `state()` and in `WorkerDispatchService.decideFor()`;
   BEA-1454 fixed two and the third quietly sent the owner's agent down the engine road on EVERY run
   while its own Settings screen said the worker was live and current. Same story for the hash: the
