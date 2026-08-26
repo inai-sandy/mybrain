@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
 import { WorkerBuildService } from './worker-build.service';
 import { WorkerDispatchService } from './worker-dispatch.service';
@@ -43,6 +43,23 @@ export class WorkerBuildController {
   @Post('build')
   build(@Param('id') id: string, @Body() body: any) {
     return this.builds.build(id, { reason: body?.reason ? String(body.reason).slice(0, 300) : undefined });
+  }
+
+  /**
+   * Put an older version back (BEA-1494).
+   *
+   * v6 worked; rebuilding for an unrelated reason gave him v8, which passed its own tests and failed
+   * the first real run. Getting the working one back was a hand operation until this existed.
+   *
+   * Goes through `WorkerBuildService.rollback()`, which is the only thing allowed to move the disk
+   * and the record together — moving one alone is how the app and the runner end up disagreeing
+   * about what is live.
+   */
+  @Post('rollback')
+  rollback(@Param('id') id: string, @Body() body: any) {
+    const v = Math.floor(Number(body?.version));
+    if (!Number.isFinite(v) || v < 1) throw new BadRequestException('Say which version to put back, for example {"version": 6}.');
+    return this.builds.rollback(id, v);
   }
 
   /**

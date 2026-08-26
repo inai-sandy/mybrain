@@ -173,6 +173,58 @@ export class WorkerBuildService implements OnModuleInit {
   }
 
   /**
+   * PUT AN OLDER VERSION BACK (BEA-1494).
+   *
+   * v6 read his mail, wrote the page and sent the link. Rebuilding for an unrelated reason produced
+   * v8, which passed its own tests and then failed the first real run — and there was no way to put
+   * the working one back except by hand.
+   *
+   * It has to move in TWO places or the app and the disk disagree about what is live: the runner's
+   * `current` symlink decides what actually runs, and the newest promoted row decides what every
+   * screen and the dispatcher believe. Moving one without the other is the exact bug this project
+   * keeps paying for, so this method is the only thing allowed to do either.
+   *
+   * A rollback is recorded as its own build row rather than by editing history: "v6 was put back at
+   * 07:40" is true, and "v6 was built at 07:40" would not be.
+   */
+  async rollback(agentId: string, version: number): Promise<WorkerState & { rolledBack?: { ok: boolean; version: number; error?: string } }> {
+    const target: any = await this.prisma.workerBuild.findFirst({
+      where: { agentId, version, status: { in: ['promoted', 'held'] } },
+      orderBy: { startedAt: 'desc' },
+    });
+    if (!target) throw new BadRequestException(`There is no v${version} for this job that was ever built successfully.`);
+
+    const live: any = await this.prisma.workerBuild.findFirst({ where: { agentId, status: 'promoted' }, orderBy: { startedAt: 'desc' } });
+    if (live && live.version === version) return { ...(await this.state(agentId)), rolledBack: { ok: true, version } };
+
+    const moved = await this.runner.promote({ jobId: agentId, version });
+    if (!moved.ok) {
+      // Nothing is recorded when the symlink did not move — a row claiming v6 is live while disk
+      // still runs v8 is worse than no rollback at all.
+      return { ...(await this.state(agentId)), rolledBack: { ok: false, version, error: moved.error || 'the runner would not move it' } };
+    }
+
+    await this.prisma.workerBuild.create({
+      data: {
+        agentId,
+        version,
+        status: 'promoted',
+        origin: 'rollback',
+        reason: `put v${version} back${live ? ` in place of v${live.version}` : ''}`,
+        planHash: target.planHash,
+        kit: target.kit,
+        kitRev: target.kitRev,
+        sampleIds: target.sampleIds,
+        sessionId: target.sessionId,
+        tests: target.tests,
+        finishedAt: new Date(),
+      },
+    });
+    this.log.log(`rolled job ${agentId} back to worker v${version}`);
+    return { ...(await this.state(agentId)), rolledBack: { ok: true, version } };
+  }
+
+  /**
    * The hash of what this job's worker would be built from, today (BEA-1462).
    *
    * **Every place that asks "is this worker still right?" must call THIS** — `state()` for the
@@ -346,7 +398,17 @@ export class WorkerBuildService implements OnModuleInit {
     // `buildKey` is this build's own row id (BEA-1493): the runner puts it in the Codex child's
     // environment, the MCP server sends it with every try_action, and the trial calls come back
     // attributable to exactly this build.
-    const built = await this.runner.build({ jobId: agentId, brief: req.brief, files: req.files, buildKey: row.id });
+    // START FROM THE VERSION THAT WORKS (BEA-1494).
+    //
+    // Every rebuild used to begin from a blank page, so a job that ran perfectly was one rebuild away
+    // from a brand-new program with a brand-new bug — which is exactly what happened: v6 read his
+    // mail, wrote the page and sent the link; rebuilding twice for an UNRELATED change produced v8,
+    // which passed its own tests and then failed the first real run on a fresh mistake.
+    //
+    // A repair has always copied the version it is repairing. A rebuild had no reason not to, and
+    // every reason to: working logic is the most valuable thing in the folder.
+    const startFrom = before.worker?.version ?? null;
+    const built = await this.runner.build({ jobId: agentId, brief: req.brief, files: req.files, buildKey: row.id, copyFrom: startFrom });
     const tests = built.tests || null;
     const version = Number(built.version) || 0;
     const log = String(built.log || '').slice(-LOG_KEPT);

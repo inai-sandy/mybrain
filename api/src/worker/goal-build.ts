@@ -291,6 +291,21 @@ Nothing will stop you, so the judgement is yours. Two things worth knowing while
 
 Use it properly and you will not have to guess a shape again.
 
+## Do not filter twice and then check the counts match
+
+A real failure of his, worth not repeating: the program chose 6 important emails, handed them to the
+model with the instruction *"do not include newsletters or low-priority items"* — asking it to filter
+what had **already** been filtered — and then failed its own check because 6 selected did not equal 3
+summarised. It filtered, asked for another filter, then asserted nothing had been filtered.
+
+Decide **once** where a judgement happens. If your code has already chosen the items, the model's job
+is to describe every one of them and say so plainly: "write two lines for EACH of these; do not leave
+any out." If the model is the one choosing, then your code must not assert a count it did not decide.
+
+The same goes for anything that drops rows quietly. If you match the model's answers back to your
+items by id, an answer whose id you cannot find must be **reported**, not silently discarded — a
+\`.filter(Boolean)\` that removes three of six is the bug you will spend a day looking for.
+
 ## Try every call before you write it — this is a step, not an option
 
 For each action you are going to use, call \`try_action\` **once**, with roughly the arguments you

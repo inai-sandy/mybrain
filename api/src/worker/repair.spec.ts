@@ -199,3 +199,50 @@ describe('what Codex is told, and what the owner is told (BEA-1393)', () => {
     expect(stop.reason).toMatch(/2 repairs did not fix it/);
   });
 });
+
+/**
+ * A GUARD THAT CAN NEVER PASS IS NOT PROTECTING ANYTHING (BEA-1494).
+ *
+ * His email job failed a real run. Codex repaired it 79 seconds later — and the fix sat held, with
+ * "the repaired worker could not produce rows from the saved answers at all", while the version that
+ * had already failed stayed live.
+ *
+ * The cause: the job reads Gmail, Gmail is never sampled ON PURPOSE (it is his mail), so no saved
+ * answers exist. Neither side could produce rows. `driftOf` checked the repair first, blamed it, and
+ * held. For that job the guard could never pass, so every repair was destined to be held for ever.
+ */
+describe('the guard when there is nothing to measure', () => {
+  const blank = () => ({ ok: false, error: 'no saved answers for these tools' } as any);
+  // `driftOf` compares rowKeys, not the row arrays — a fixture without them measures nothing and
+  // silently passes, which is how the first version of this test fooled itself.
+  const rows = (columns: string[], n: number) => ({ ok: true, columns, rows: n, rowKeys: Array.from({ length: n }, (_, i) => `k${i}`) } as any);
+
+  it('lets a repair through when NEITHER side can produce rows, and says it measured nothing', () => {
+    const d = driftOf(blank(), blank());
+    expect(d.within).toBe(true);
+    expect(d.unmeasurable).toBe(true);
+    expect(d.why).toContain('nothing to compare');
+    // The old message blamed the repair. It must not come back.
+    expect(d.why).not.toContain('the repaired worker could not produce rows');
+  });
+
+  it('still blames the repair when the LIVE worker manages rows and the repair does not', () => {
+    // The case the guard is really for: the live one works, the repair came back empty.
+    const d = driftOf(rows(['a'], 3), blank());
+    expect(d.within).toBe(false);
+    expect(d.why).toContain('the repaired worker could not produce rows');
+  });
+
+  it('still lets a repair through when only the live worker is broken', () => {
+    const d = driftOf(blank(), rows(['a'], 3));
+    expect(d.within).toBe(true);
+    expect(d.noBaseline).toBe(true);
+    expect(d.unmeasurable).toBeUndefined();
+  });
+
+  it('still HOLDS a real change when both sides can be measured', () => {
+    // Nothing above may weaken the case this guard was built for.
+    const d = driftOf(rows(['a'], 10), rows(['a'], 1));
+    expect(d.within).toBe(false);
+  });
+});

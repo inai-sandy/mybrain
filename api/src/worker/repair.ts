@@ -169,6 +169,13 @@ export type Drift = {
   why: string;
   /** No baseline to compare against — the live worker could not produce rows at all. */
   noBaseline?: boolean;
+  /**
+   * NEITHER side could produce rows, so there was nothing to measure (BEA-1494).
+   *
+   * Different from `noBaseline`, where the live worker is broken and the repair works. This is the
+   * case where the ruler itself is missing — no saved answers exist for these tools at all.
+   */
+  unmeasurable?: boolean;
 };
 
 /**
@@ -185,8 +192,33 @@ export type Drift = {
  *  - **beyond it** — a different answer. It is held, and the owner is told what changed.
  */
 export function driftOf(before: ParityResult | null, after: ParityResult | null): Drift {
-  if (!after || !after.ok) return { within: false, changed: 1, why: 'the repaired worker could not produce rows from the saved answers at all' };
-  if (!before || !before.ok) {
+  // NOTHING TO MEASURE IS NOT THE REPAIR'S FAULT (BEA-1494).
+  //
+  // Checking the repair first meant that when NEITHER side could produce rows, the repair got the
+  // blame — "the repaired worker could not produce rows from the saved answers at all" — and the fix
+  // was held while the version that had already failed a real run stayed live.
+  //
+  // That is exactly what happened to his email job, and it was guaranteed to: it reads Gmail, and
+  // Gmail is never sampled ON PURPOSE, because it is his mail. So no saved answers exist, the ruler
+  // measures nothing on either side, and the guard held every repair for ever. A guard that can never
+  // pass is not protecting anything — it just keeps the broken version live.
+  //
+  // When there is nothing to compare, there is also nothing the repair could quietly change, which is
+  // the only thing this guard exists to catch. So it passes, and says plainly that it measured nothing.
+  const afterBlank = !after || !after.ok;
+  const beforeBlank = !before || !before.ok;
+  if (afterBlank && beforeBlank) {
+    return {
+      within: true,
+      changed: 0,
+      unmeasurable: true,
+      noBaseline: true,
+      why: 'neither the live worker nor the repair can produce rows from saved answers — there are none for these tools, so there is nothing to compare and nothing the repair could quietly change',
+    };
+  }
+  // The repair alone came back empty while the live worker manages rows: that IS the repair's fault.
+  if (afterBlank) return { within: false, changed: 1, why: 'the repaired worker could not produce rows from the saved answers at all' };
+  if (beforeBlank) {
     return {
       within: true,
       changed: 0,

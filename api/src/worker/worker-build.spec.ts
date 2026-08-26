@@ -387,3 +387,28 @@ describe('the build and the status ask the SAME question (BEA-1454)', () => {
     expect(why).not.toMatch(/runs on the engine/i);
   });
 });
+
+/**
+ * A REBUILD STANDS ON THE VERSION THAT WORKS (BEA-1494).
+ *
+ * v6 read his mail, wrote the page and sent the link. Rebuilding twice for an UNRELATED change gave
+ * him v8 — a brand-new program with a brand-new bug, which passed its own tests and then failed the
+ * first real run. Every rebuild used to start from a blank page, so a working agent was always one
+ * rebuild away from a fresh mistake.
+ *
+ * A repair has always copied the version it repairs. A rebuild had no reason not to.
+ */
+describe('rebuilding does not throw away working code', () => {
+  it('starts from a blank page when there is no worker yet', async () => {
+    const w = makeWorld();
+    await w.service.build('job-1').catch(() => undefined);
+    expect(w.calls.build[0].copyFrom).toBeNull();
+  });
+
+  it('copies the live worker into the new version on the NEXT rebuild', async () => {
+    const w = makeWorld();
+    await w.service.build('job-1').catch(() => undefined);   // v1 goes live
+    await w.service.build('job-1').catch(() => undefined);   // rebuilding on top of it
+    expect(w.calls.build[1].copyFrom).toBe(1);
+  });
+});

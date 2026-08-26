@@ -327,6 +327,7 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
 
     // Green tests. Now the guard: did the answer move?
     const drift = await this.guard(job.id, live.version, version, req.files);
+
     if (!drift.within) {
       const words = heldWords(job.name || 'Your agent', cause, version, drift);
       await this.finish(row.id, {
