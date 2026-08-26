@@ -6,6 +6,7 @@ import { WorkerBuildService } from './worker-build.service';
 import { WorkerDispatchService } from './worker-dispatch.service';
 import { TrialService } from './trial.service';
 import { OwnerAskService } from './owner-ask.service';
+import { saidKeepIt } from './brief-trial.service';
 
 export const KEEP_IT = 'Keep it';
 export const SEND_BACK = 'Send it back';
@@ -54,6 +55,48 @@ export class GoalTrialService implements OnModuleInit {
     this.goals.setOnApproved((areaId: string) => this.start(areaId).catch((e: any) => {
       this.log.warn(`could not start the first run for ${areaId}: ${e?.message || e}`);
     }));
+    // …and what happens when he answers (BEA-1481). Without this the question reached his phone, he
+    // replied "keep it", and NOTHING happened — the run sat waiting for ever and the agent stayed
+    // switched off. The last step of the road was a dead end.
+    this.owner?.setAnswerWatcher?.((runId: string, answer: string) => this.onAnswer(runId, answer));
+  }
+
+  /**
+   * He said keep it, or he said what was wrong (BEA-1481).
+   *
+   * Keeping it is the ONLY thing that switches the schedule on. Until this moment the agent has run
+   * exactly once, as a rehearsal, writing and sending nothing — so this is the first point at which
+   * it can touch anything for real, and it is his word that moves it.
+   *
+   * Anything that is not a clear yes is treated as a correction: his sentence goes to Codex, which
+   * writes the goal again. `saidKeepIt` deliberately reads "yes but change the timing" as a NO —
+   * a sentence describing what was wrong must never be mistaken for approval.
+   */
+  private async onAnswer(runId: string, answer: string): Promise<void> {
+    const run: any = await this.prisma?.agentRun?.findUnique?.({ where: { id: String(runId) } }).catch(() => null);
+    if (!run?.agentId) return;
+    const job: any = await this.prisma?.agent?.findUnique?.({ where: { id: run.agentId } }).catch(() => null);
+    if (!job?.areaId) return;
+    try {
+      if (saidKeepIt(answer)) {
+        await this.agent.updateAgent(job.id, { enabled: true } as any);
+        await this.agent.appendStep(runId, {
+          label: 'You kept it. It is live now, and runs on its schedule.',
+          status: 'done',
+          kind: 'ask',
+        }).catch(() => undefined);
+        this.log.log(`kept: ${job.id} is enabled`);
+      } else {
+        // His words go back to Codex as a correction to the GOAL — the thing he approved — rather
+        // than as a patch to the program. The goal is what everything else is built from.
+        await this.goals.sendBack(String(job.areaId), String(answer)).catch((e: any) => this.log.warn(`could not send the goal back: ${e?.message || e}`));
+        await this.agent.appendStep(runId, { label: `Sent back: ${String(answer).slice(0, 160)}`, status: 'done', kind: 'ask' }).catch(() => undefined);
+      }
+    } catch (e: any) {
+      this.log.warn(`could not act on his answer for ${runId}: ${e?.message || e}`);
+    } finally {
+      await this.agent.finishRun(runId, { status: 'done' }).catch(() => undefined);
+    }
   }
 
   /**

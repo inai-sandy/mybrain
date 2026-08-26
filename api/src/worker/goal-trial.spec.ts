@@ -198,6 +198,56 @@ describe('what he is asked, and what the app does NOT decide', () => {
   });
 });
 
+/**
+ * "KEEP IT" HAS TO DO SOMETHING (BEA-1481).
+ *
+ * The road ran perfectly to its last step and then stopped dead. The question reached his phone, he
+ * replied "keep it", and nothing happened at all — the run waited for ever and the agent stayed
+ * switched off. Everything before this worked; the last inch did not exist.
+ */
+describe('what his answer does', () => {
+  function answered(reply: string) {
+    const w = world();
+    const enabled: any[] = [];
+    const sentBack: string[] = [];
+    (w as any).svc.agent = undefined;
+    const svc: any = w.svc;
+    svc.prisma = {
+      agentRun: { findUnique: async () => ({ id: 'run-1', agentId: 'job-1' }) },
+      agent: { findUnique: async () => ({ id: 'job-1', areaId: 'ar1' }) },
+    };
+    svc.agent = {
+      updateAgent: async (id: string, input: any) => { enabled.push({ id, ...input }); },
+      appendStep: async () => undefined,
+      finishRun: async () => undefined,
+    };
+    svc.goals = { sendBack: async (_a: string, note: string) => { sentBack.push(note); } };
+    return { svc, enabled, sentBack, run: () => svc.onAnswer('run-1', reply) };
+  }
+
+  it('switches the agent ON — the first moment it may touch anything for real', async () => {
+    const a = answered('keep it');
+    await a.run();
+    expect(a.enabled).toEqual([{ id: 'job-1', enabled: true }]);
+    expect(a.sentBack).toEqual([]);
+  });
+
+  it('treats anything else as a correction to the GOAL, in his words', async () => {
+    const a = answered('the summaries are too long, one line each');
+    await a.run();
+    expect(a.enabled).toEqual([]);           // nothing goes live
+    expect(a.sentBack).toEqual(['the summaries are too long, one line each']);
+  });
+
+  it('does not read "yes but…" as keeping it', async () => {
+    // A sentence describing what was wrong must never be mistaken for approval.
+    const a = answered('yes but change the time to 21:00');
+    await a.run();
+    expect(a.enabled).toEqual([]);
+    expect(a.sentBack.length).toBe(1);
+  });
+});
+
 describe('naming the job', () => {
   it('takes the goal’s first real line, and nothing more', () => {
     expect(titleOf('# Nightly email digest\n\nIt reads Gmail…')).toBe('Nightly email digest');
