@@ -3,7 +3,7 @@
 //
 //   GET  /status                                   -> readiness, same shape as the codex runner's
 //   POST /run   {jobId, runId, token, seed?, timeoutMs?, kit?}  -> ndjson stream, final {type:'result'}
-//   POST /build {jobId, brief, files?, copyFrom?, model?, timeoutMs?} -> {ok, version, dir, tests, sessionId, log}
+//   POST /build {jobId, brief, files?, copyFrom?, model?, timeoutMs?, buildKey?} -> {ok, version, dir, tests, sessionId, log}
 //   POST /promote {jobId, version, meta?}          -> {ok, version, previous} — the `current` symlink move
 //   POST /parity {jobId, version, harness, files?, timeoutMs?} -> {ok, result, log} — measure one version
 //                                                    in a throwaway copy, with no token and no network
@@ -672,6 +672,11 @@ async function handleBuild(req, res) {
   // into the new folder first, and the app's files land on top. Only a version of THIS job may be
   // copied, and `meta.json` is left behind — the new version has not been built yet, let alone
   // promoted, and a stale meta would make the runner's kit check read the wrong worker's number.
+  // This build's own key (BEA-1493). It goes into the Codex child's environment, the MCP server sends
+  // it with every try_action, and the trial calls come back attributable to exactly this build — so
+  // "what did that build touch?" is a lookup instead of a guess from a time window. Sanitised
+  // because it is caller text that becomes an environment variable.
+  const buildKey = String(body.buildKey || '').replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 64);
   const copyFrom = body.copyFrom === undefined || body.copyFrom === null ? null : Math.floor(Number(body.copyFrom));
   if (copyFrom !== null && (!Number.isFinite(copyFrom) || copyFrom < 1)) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad copyFrom' })); return; }
   const fromDir = copyFrom === null ? null : path.join(jobDir, `v${copyFrom}`);
@@ -729,7 +734,7 @@ async function handleBuild(req, res) {
     // is fast and still answers with a real status code; everything below answers 200 with an
     // `ok:false` body, which is what the client already reads.
     stopHolding = holdOpen(res);
-    const built = await runCommand('codex', args, dir, timeoutMs, process.env);
+    const built = await runCommand('codex', args, dir, timeoutMs, buildKey ? { ...process.env, MYBRAIN_BUILD_KEY: buildKey } : process.env);
     const sessionId = sessionIdOf(built.stdout);
     pruneWorkerTrust();
     log.push(built.timedOut ? `codex was stopped after ${Math.round(timeoutMs / 1000)}s` : `codex exited ${built.code}`);

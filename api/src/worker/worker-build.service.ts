@@ -163,7 +163,7 @@ export class WorkerBuildService implements OnModuleInit {
    * time window and risking another build's calls.
    */
   private async activityFor(build: any): Promise<BuildActivity | null> {
-    const key = String(build?.sessionId || build?.id || '');
+    const key = String(build?.id || '');
     if (!key) return null;
     const rows: any[] = await this.prisma?.toolCall
       ?.findMany?.({ where: { runKind: 'build', runId: key }, select: { action: true, ok: true, error: true }, take: 200 })
@@ -343,7 +343,10 @@ export class WorkerBuildService implements OnModuleInit {
       },
     });
 
-    const built = await this.runner.build({ jobId: agentId, brief: req.brief, files: req.files });
+    // `buildKey` is this build's own row id (BEA-1493): the runner puts it in the Codex child's
+    // environment, the MCP server sends it with every try_action, and the trial calls come back
+    // attributable to exactly this build.
+    const built = await this.runner.build({ jobId: agentId, brief: req.brief, files: req.files, buildKey: row.id });
     const tests = built.tests || null;
     const version = Number(built.version) || 0;
     const log = String(built.log || '').slice(-LOG_KEPT);

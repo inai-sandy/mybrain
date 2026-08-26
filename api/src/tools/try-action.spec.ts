@@ -19,7 +19,7 @@ function svc(opts: { byId?: any; result?: any } = {}) {
   const calls: any[] = [];
   const actions: any = {
     runDetailed: async (id: string, _i: string, ctx: any) => {
-      calls.push({ id, ctx });
+      calls.push({ id, input: _i, ctx });
       return opts.result ?? { ok: true, data: { messages: [{ id: 'm1', subject: 'hello' }] } };
     },
   };
@@ -140,5 +140,36 @@ describe('what Codex is TOLD matches what the server does', () => {
     const t = mcp();
     expect(t).toContain('Reads AND writes');
     expect(t).toMatch(/archive or delete any test item you create/i);
+  });
+});
+
+/**
+ * ATTRIBUTION (BEA-1493) — and the test that was missing.
+ *
+ * The first attempt passed the build key as `runDetailed`'s SECOND POSITIONAL argument, which is the
+ * free-text `input`, not the run id. Every test stayed green and the rows still came back with a null
+ * runId — found by reading the database after a real build, which is not a way to find bugs.
+ *
+ * The harness records the whole ctx, so this asserts on the field the row is actually written from.
+ */
+describe('a trial call is attributable to the build that made it', () => {
+  it('puts the build key on the CONTEXT, where the ToolCall row reads its runId from', async () => {
+    const w = svc({ byId: () => ({ method: 'GET' }) });
+    await w.s.run('build-abc123', 'svc:gmail.fetch_emails', {});
+    expect(w.calls[0].ctx.runId).toBe('build-abc123');
+  });
+
+  it('does not smuggle it through the free-text input argument', async () => {
+    const w = svc({ byId: () => ({ method: 'GET' }) });
+    await w.s.run('build-abc123', 'svc:gmail.fetch_emails', {});
+    // `input` is what an unpinned call would be filled from. The key has no business being there.
+    expect(w.calls[0].input).toBe('');
+  });
+
+  it('keeps two builds apart', async () => {
+    const w = svc({ byId: () => ({ method: 'GET' }) });
+    await w.s.run('build-one', 'svc:gmail.fetch_emails', {});
+    await w.s.run('build-two', 'svc:gmail.fetch_emails', {});
+    expect(w.calls.map((c: any) => c.ctx.runId)).toEqual(['build-one', 'build-two']);
   });
 });

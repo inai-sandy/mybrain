@@ -92,12 +92,12 @@ export class WorkerRunnerClient {
    * workspace-write -C vN`, then that version's own tests. It does not promote — that is this app's
    * decision, and it is made on the tests.
    */
-  async build(input: { jobId: string; brief: string; files: Record<string, string>; copyFrom?: number | null; timeoutMs?: number }): Promise<RunnerBuildResult> {
+  async build(input: { jobId: string; brief: string; files: Record<string, string>; copyFrom?: number | null; timeoutMs?: number; buildKey?: string }): Promise<RunnerBuildResult> {
     try {
       const r = await fetch(`${RUNNER}/build`, {
         method: 'POST',
         headers: this.headers(),
-        body: JSON.stringify({ jobId: input.jobId, brief: input.brief, files: input.files, copyFrom: input.copyFrom ?? null, timeoutMs: input.timeoutMs }),
+        body: JSON.stringify({ jobId: input.jobId, brief: input.brief, files: input.files, copyFrom: input.copyFrom ?? null, timeoutMs: input.timeoutMs, buildKey: input.buildKey }),
         signal: AbortSignal.timeout(input.timeoutMs ? input.timeoutMs + 60_000 : BUILD_TIMEOUT_MS),
       });
       const json: any = await r.json().catch(() => null);

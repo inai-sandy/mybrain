@@ -87,11 +87,12 @@ export class TryActionService {
 
     this.used.set(buildKey, spent + 1);
     const r: any = await this.actions
-      // The build key rides as the runId (BEA-1492), so every trial call is attributable to the build
-      // that made it. Before this it was written with an empty runId and the only way to answer "what
-      // did that build touch?" was to query the database by time window and hope two builds had not
-      // overlapped.
-      .runDetailed(id, buildKey, { runKind: 'build', args: args && typeof args === 'object' ? args : {}, argsPinned: true, label: id })
+      // The build key rides as the ROW'S runId (BEA-1493), so every trial call is attributable to the
+      // build that made it — before this it was written with an empty runId and answering "what did
+      // that build touch?" meant querying by time window and hoping two builds had not overlapped.
+      // It goes in the CONTEXT: the second positional argument is the free-text `input`, and putting
+      // it there recorded nothing (found by reading the rows after a real build, not by a test).
+      .runDetailed(id, '', { runKind: 'build', runId: buildKey, args: args && typeof args === 'object' ? args : {}, argsPinned: true, label: id })
       .catch((e: any) => ({ ok: false, error: String(e?.message || e) }));
 
     const left = TRY_BUDGET - (spent + 1);
