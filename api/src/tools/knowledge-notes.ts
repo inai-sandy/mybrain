@@ -24,6 +24,16 @@ export type KnowledgeNote = {
 };
 
 export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
+  // ---- Notion --------------------------------------------------------------------------------
+  {
+    match: 'notion',
+    notes: [
+      'Notion answers are wrapped: the page itself is at `data`, so the id is `answer.data.id`, not `answer.id`. Gmail is NOT wrapped, so a reader that works for one silently finds nothing in the other — read `answer.data ?? answer`.',
+      'create_notion_page needs `parent_id` — an existing page or database id that the integration has been shared with. Nothing else is accepted, and a page the owner has not shared is invisible to it.',
+      'A created page answers with both `id` and `url`; use the `url` for anything you send him.',
+    ],
+  },
+
   // ---- Instagram (ScrapeCreators) ----------------------------------------------------------
   {
     match: 'instagram',

@@ -300,3 +300,56 @@ describe('the program is written against HIS clock', () => {
     expect(t).not.toContain('His clock');
   });
 });
+
+/**
+ * ASK HIM, DO NOT STOP (BEA-1488).
+ *
+ * He ran it and the run died on its last step: *"Notion created a page but did not return a page id,
+ * so I cannot add the report safely."* — reporting failure for a page that had been created
+ * successfully seconds earlier. His instruction: *"It should ask me rather than stop it."*
+ *
+ * Waiting is free (the worker exits and resumes from its journal), so giving up is never the cheap
+ * option it looks like.
+ */
+describe('a surprise mid-run is a question, not a dead end', () => {
+  const t = () => goalBuildPrompt(inputs() as any);
+
+  it('carries his instruction and puts kit.fail last', () => {
+    expect(t()).toContain('It should ask me rather than stop it');
+    expect(t()).toContain('is the last resort');
+  });
+
+  it('says the waiting is free, so stopping is never the cheaper option', () => {
+    expect(t()).toMatch(/two-day wait costs nothing|Waiting is free/);
+  });
+
+  it('still tells it to work things out itself first — this must not become ask-about-everything', () => {
+    // The rule is an escalation ladder. Without this line it would become a program that asks him
+    // things it could have read, which is its own kind of failure.
+    expect(t()).toContain('Never ask him something the program could read');
+  });
+
+  it('names the real failure so the rule is not read as boilerplate', () => {
+    expect(t()).toContain('created his Notion page');
+  });
+});
+
+/**
+ * THE ENVELOPE (BEA-1488) — the actual cause of that run.
+ *
+ * Gmail hands back `{messages:[...]}`; Notion's create-page hands back `{data:{id,url,…}}`. Same
+ * `data` field on the kit, two different conventions underneath. Codex wrote a sound reader for each
+ * shape it was told about and found nothing in the one it was not.
+ */
+describe('the program is warned that answers are not shaped alike', () => {
+  const t = () => goalBuildPrompt(inputs() as any);
+
+  it('names both real shapes and the unwrap', () => {
+    expect(t()).toContain('some actions wrap their answer in an envelope and some do not');
+    expect(t()).toContain('answer?.data ?? answer');
+  });
+
+  it('states the consequence, so it is not trimmed as generic advice', () => {
+    expect(t()).toContain('did not return a page id');
+  });
+});

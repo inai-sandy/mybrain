@@ -129,13 +129,43 @@ Two things learned from his first real message, which was wrong in both ways:
 - **Never promise a link you do not have.** A line ending "Read it here:" with nothing after it is
   worse than saying nothing about links.
 
-If the program needs a decision from him mid-run, \`kit.ask\` stops and asks — it costs nothing to
-wait, the question reaches his phone, and the run resumes where it stopped when he answers.
+## When something surprises you, ASK him — do not stop
+
+His instruction, after a run died on its last step: *"It should ask me rather than stop it."*
+
+\`kit.ask\` reaches his phone, **the worker exits while it waits** (a two-day wait costs nothing),
+and when he answers the run starts again from the top with every earlier call returning its recorded
+answer — no repeated fetch, no repeated write, no repeated message. Waiting is free. Giving up is not.
+
+So the order to try is always:
+
+1. **Work it out yourself first.** If the answer is somewhere in what you already have, or one
+   \`kit.facts()\` lookup away, find it. Never ask him something the program could read.
+2. **If you cannot, ask him** — especially once the run has already changed something in the world.
+   A run that creates his page and then dies leaves him with a half-finished thing and no idea what
+   happened. Ask what to do with it.
+3. **\`kit.fail\` is the last resort**, for when there is genuinely nothing he could say that would
+   help. If you can think of a question worth asking, it was not the last resort.
+
+This really happened, and it is the shape to avoid: the program created his Notion page, could not
+find the page id in the answer, and stopped — reporting failure for a page that existed. The right
+move was either to read the answer properly, or to ask him: *"I made the page but cannot find its
+link. Shall I send you the title, or do you want to paste the link?"*
+
+Ask in his words, offer real choices, and give \`ifNoAnswer\` when a sensible default exists.
 
 ## What you can reach
 
 **Any action he has connected**, through \`kit.call(actionId, args)\`, which hands back \`data\` —
-the answer the vendor really sent — for you to read in your own code. \`kit.facts()\` looks up
+the answer the vendor really sent — for you to read in your own code.
+
+**Read \`data\` defensively: some actions wrap their answer in an envelope and some do not**, and it
+is not consistent between services. Gmail answers \`{ messages: [...] }\` with the payload at the top
+level; Notion's create-page answers \`{ data: { id, url, ... } }\` with everything one level down. A
+reader written for one shape silently finds nothing in the other — that exact mismatch made a run
+report "Notion did not return a page id" about a page it had just created successfully. So unwrap
+before you read (\`const body = answer?.data ?? answer;\`), look under both, and when a field you
+need is genuinely missing, say which shape you actually got. \`kit.facts()\` looks up
 anything you do not know. \`kit.think()\` is a real model call for judgement you cannot write as
 rules. \`kit.research()\` runs budgeted deep research.
 
