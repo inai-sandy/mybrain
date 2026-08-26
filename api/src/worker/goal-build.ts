@@ -222,6 +222,20 @@ So get it right rather than safe: check your own result against the goal before 
 does not meet the goal, say so and write nothing. Nothing in the app will stop you — the judgement is
 yours, and it is the only one there is.
 
+## Try every call before you write it — this is a step, not an option
+
+For each action you are going to use, call \`try_action\` **once**, with roughly the arguments you
+intend to send, and look at what comes back. Then write the call from what you saw.
+
+This is not caution, it is the difference between working and not. A build with this exact ability
+skipped it and guessed three spellings of one Notion argument — \`parent_page_id\`, \`parent page id\`,
+\`parent\` — when the real name was \`parent_id\`. All three were dropped, the call failed, and the
+owner lost another round. One try_action would have shown it in ten seconds.
+
+**Never send several spellings of the same argument hoping one lands.** An argument this system does
+not recognise is silently dropped, so a shotgun is indistinguishable from sending nothing. Try it,
+read \`droppedArgs\` in the answer, and use the name that actually survived.
+
 ## Green tests are the only way this goes live
 
 Run \`node --test worker.test.mjs\` yourself and fix what fails. If they cannot pass, leave them
