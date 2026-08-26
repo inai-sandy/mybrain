@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Check, Loader2, MessageCircleQuestion, Send, Sparkles } from 'lucide-react';
 
 /**
- * THE GOAL (BEA-1463) — what Codex is going to build, in its own words, for him to approve.
+ * THE GOAL (BEA-1487) — what Codex is going to build, in its own words, for him to approve.
  *
  * His design, 2026-08-25: *"We should ask codex to create a goal and send it for approval. when i
  * approve the goal it has to create an agent and run a sample task to match the goal."*

@@ -178,7 +178,7 @@ export class BriefTrialService {
     const reopened = await this.agent.reopenForDecision(runId, 'Waiting for you to say whether to keep it.');
     if (!reopened) return;
 
-    // WHAT HAPPENED, IN THE WORKER'S OWN WORDS (BEA-1463).
+    // WHAT HAPPENED, IN THE WORKER'S OWN WORDS (BEA-1487).
     //
     // This line used to be assembled here from counters the app keeps, and it was wrong on the
     // owner's first real trial: it read *"It 1 row, cost nothing"* — no verb, and "1 row" for a run

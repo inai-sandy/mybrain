@@ -37,7 +37,7 @@ export type GoalView = {
 };
 
 /**
- * THE GOAL (BEA-1463) — Codex says what it is going to build, and the owner approves it.
+ * THE GOAL (BEA-1487) — Codex says what it is going to build, and the owner approves it.
  *
  * His design, 2026-08-25: *"We should ask codex to create a goal and send it for approval. when i
  * approve the goal it has to create an agent and run a sample task to match the goal. verify the

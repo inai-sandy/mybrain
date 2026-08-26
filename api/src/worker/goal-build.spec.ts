@@ -273,3 +273,30 @@ describe('every door asks the goal-aware question', () => {
     expect(src.split('this.whyNotBuildable(job)').length - 1).toBeGreaterThanOrEqual(2);
   });
 });
+
+/**
+ * WHOSE CLOCK? (BEA-1486)
+ *
+ * He said it plainly: *"Server is using wrong time. i am in IST timezone."*
+ *
+ * His timezone was set in the app all along — `tasks.tz = Asia/Kolkata` — and the build prompt
+ * mentioned time zones exactly zero times. So every program was written against the server's UTC
+ * clock and was five and a half hours out of step with his day. "Every day at 22:00" means nothing
+ * until somebody says whose 22:00.
+ */
+describe('the program is written against HIS clock', () => {
+  it('names his timezone and warns that new Date() is not his time', () => {
+    const t = goalBuildPrompt(inputs({ timezone: 'Asia/Kolkata' }) as any);
+    expect(t).toContain('He is in **Asia/Kolkata**');
+    expect(t).toContain('is NOT his time');
+    // With a way to actually do it, not just a warning.
+    expect(t).toContain("timeZone: 'Asia/Kolkata'");
+    // And the consequence, so it is not trimmed as boilerplate.
+    expect(t).toContain('will be wrong for him for part of every');
+  });
+
+  it('says nothing at all when no timezone has been set — never assumes one', () => {
+    const t = goalBuildPrompt(inputs() as any);
+    expect(t).not.toContain('His clock');
+  });
+});

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { GoalView, Goal } from './GoalView';
 
 /**
- * THE GOAL screen (BEA-1463).
+ * THE GOAL screen (BEA-1487).
  *
  * The owner deleted the brief because the app was reading his conversation and writing structure
  * from it, and every structure it invented reached him as a defect. So the strongest tests here

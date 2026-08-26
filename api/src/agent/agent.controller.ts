@@ -23,7 +23,7 @@ export class AgentController {
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly samples?: BuilderSampleService,
     private readonly briefs?: BriefService,
-    private readonly goals?: GoalService, // the goal Codex writes and he approves (BEA-1463)
+    private readonly goals?: GoalService, // the goal Codex writes and he approves (BEA-1487)
   ) {}
 
   // ---- agent AREAS (BEA-1095): agent = area, job = the real unit ----
@@ -244,7 +244,7 @@ export class AgentController {
     return { ok: out.ok, brief: out.brief || current, refusals: out.refusals || [] };
   }
 
-  // ---- the goal (BEA-1463) --------------------------------------------------------------------
+  // ---- the goal (BEA-1487) --------------------------------------------------------------------
   //
   // The owner's design: the chat only talks; when he says "ok" the whole conversation goes to Codex,
   // Codex writes the goal, and nothing is built until he approves it. These four routes are that,

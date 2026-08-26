@@ -21,7 +21,7 @@ export const SEND_BACK = 'Send it back';
  *   *"We should ask codex to create a goal and send it for approval. when i approve the goal it has
  *   to create an agent and run a sample task to match the goal. verify the goal and the output."*
  *
- * The goal (BEA-1463) and the goal-driven build (BEA-1464) were the first two thirds. This is the
+ * The goal (BEA-1487) and the goal-driven build (BEA-1464) were the first two thirds. This is the
  * last: approving is not a bookmark, it is the trigger. An agent is created, Codex compiles it from
  * the conversation and the goal, and it runs ONCE for real with everything held back — nothing
  * written, nothing sent — so he can hold the result next to the goal and judge it himself.

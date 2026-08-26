@@ -199,6 +199,13 @@ export class WorkerBuildService implements OnModuleInit {
    * misspelt key, then a falsy flag — and in both cases the code looked right and the call did not.
    * The `ToolCall` ledger is the only place that difference is visible.
    */
+  /** His timezone, from his own setting. Null when it has never been set — then nothing is claimed. */
+  private async timezone(): Promise<string | null> {
+    const row: any = await this.prisma?.setting?.findUnique?.({ where: { key: 'tasks.tz' } }).catch(() => null);
+    const tz = String(row?.value || '').trim();
+    return tz || null;
+  }
+
   private async lastFailureFor(agentId: string): Promise<any | null> {
     const run: any = await this.prisma?.agentRun?.findFirst?.({ where: { agentId, status: 'failed' }, orderBy: { startedAt: 'desc' } }).catch(() => null);
     if (!run?.error) return null;
@@ -252,6 +259,9 @@ export class WorkerBuildService implements OnModuleInit {
       goal: String(goal.text || ''),
       toolDocs,
       lastFailure,
+      // Whose clock the goal's times are on (BEA-1486). Read from his own setting, never assumed —
+      // the server is UTC and every program written without this was five and a half hours out.
+      timezone: await this.timezone(),
       transcript,
       tools,
       kit,

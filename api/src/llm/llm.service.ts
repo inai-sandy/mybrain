@@ -229,7 +229,7 @@ export class LlmService {
     'flow-merge': LlmService.FOLLOW_ENGINE,
     // Kept so an existing saved setting still resolves.
     'deep-research': { provider: 'codex', model: 'codex' },
-    // THE GOAL TURN (BEA-1463). Codex reads the whole conversation and writes what it is going to
+    // THE GOAL TURN (BEA-1487). Codex reads the whole conversation and writes what it is going to
     // build, for the owner to approve. On Codex on purpose and not on a chat model: the same engine
     // that will write the agent has to be the one that decided what the agent is for, or the goal he
     // approves is one thing and the thing built from it is another.

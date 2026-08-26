@@ -1,5 +1,5 @@
 /**
- * THE GOAL (BEA-1463) — pure functions, no Nest, no database.
+ * THE GOAL (BEA-1487) — pure functions, no Nest, no database.
  *
  * The owner's design, 2026-08-25, in his words:
  *

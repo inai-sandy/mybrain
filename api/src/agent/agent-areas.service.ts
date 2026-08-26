@@ -374,7 +374,7 @@ export class AgentAreasService {
         // what makes it true whatever the model sends, because this builder has talked its way past
         // a prompt more than once. A brief that arrives now is DROPPED, silently and on purpose —
         // it is not an error he needs to see, it is a habit being unlearned. What he wants goes to
-        // Codex as the conversation itself, and Codex writes the goal (BEA-1463).
+        // Codex as the conversation itself, and Codex writes the goal (BEA-1487).
         const rawBrief = CHAT_ONLY ? null : briefRequestOf(g);
         if (rawBrief) {
           const proposed = readProposedBrief(rawBrief);

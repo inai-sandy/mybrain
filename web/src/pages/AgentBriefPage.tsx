@@ -31,7 +31,7 @@ export default function AgentBriefPage() {
   const [proof, setProof] = useState<any | null>(null);
   // The second gate (BEA-1408): the real run he judges before anything can be created.
   const [trial, setTrial] = useState<TrialState | null>(null);
-  // THE GOAL (BEA-1463) — what Codex says it is going to build, for him to approve. This is what
+  // THE GOAL (BEA-1487) — what Codex says it is going to build, for him to approve. This is what
   // replaces the brief below it: the brief is the app's reading of his conversation, and he asked
   // for that to stop. Both are shown while the new road is being finished, so nothing he already
   // relies on disappears underneath him mid-build.

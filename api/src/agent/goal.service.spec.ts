@@ -1,7 +1,7 @@
 import { GoalService } from './goal.service';
 
 /**
- * THE GOAL, end to end on the app's side (BEA-1463).
+ * THE GOAL, end to end on the app's side (BEA-1487).
  *
  * The owner: *"We should ask codex to create a goal and send it for approval. when i approve the
  * goal it has to create an agent…"*

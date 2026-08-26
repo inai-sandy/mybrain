@@ -45,6 +45,14 @@ export type GoalBuildInputs = {
    * something true; it cannot see a bug in the code it is about to replace. This can.
    */
   lastFailure?: { error: string; steps: string[]; calls: { action: string; args: string; error?: string }[] } | null;
+  /**
+   * The owner's own timezone (BEA-1486) — `Asia/Kolkata` for him.
+   *
+   * The server runs on UTC and the prompt never mentioned time zones at all, so every program was
+   * written against UTC and was five and a half hours out of step with his day. "Every day at 22:00"
+   * meant nothing until somebody said whose 22:00.
+   */
+  timezone?: string | null;
   version: number;
   previousVersion?: number | null;
   reason?: string | null;
@@ -222,7 +230,18 @@ So get it right rather than safe: check your own result against the goal before 
 does not meet the goal, say so and write nothing. Nothing in the app will stop you — the judgement is
 yours, and it is the only one there is.
 
-## Try every call before you write it — this is a step, not an option
+${inp.timezone ? `## His clock
+
+He is in **${inp.timezone}**. This server runs on UTC, which is a different time — so \`new Date()\`
+in your program is NOT his time.
+
+Every time in the goal is HIS time: "22:00" is 22:00 where he is, "today" is today where he is, and
+"the last 24 hours" ends now, where he is. Compute dates and windows in \`${inp.timezone}\` — for
+example \`new Intl.DateTimeFormat('en-CA', { timeZone: '${inp.timezone}' }).format(new Date())\` gives
+his date as YYYY-MM-DD. A page titled with the server's date will be wrong for him for part of every
+day, and he will not know why.
+
+` : ''}## Try every call before you write it — this is a step, not an option
 
 For each action you are going to use, call \`try_action\` **once**, with roughly the arguments you
 intend to send, and look at what comes back. Then write the call from what you saw.

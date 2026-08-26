@@ -1,7 +1,7 @@
 import { goalPrompt, transcriptText, toolsText, isQuestion, nothingCameBack, speaker } from './goal';
 
 /**
- * THE GOAL (BEA-1463).
+ * THE GOAL (BEA-1487).
  *
  * These tests exist to stop the app quietly becoming an interpreter again. That is not a
  * hypothetical worry — it is what the previous three designs did, and each one put a defect in front
