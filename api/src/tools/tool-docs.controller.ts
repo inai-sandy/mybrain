@@ -1,5 +1,6 @@
-import { Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ToolDocsService } from './tool-doc.service';
+import { TryActionService } from './try-action.service';
 
 /**
  * THE TOOL DOCUMENTS (BEA-1468) — what Codex reads before it builds anything.
@@ -15,7 +16,23 @@ import { ToolDocsService } from './tool-doc.service';
  */
 @Controller('tools/docs')
 export class ToolDocsController {
-  constructor(private readonly docs: ToolDocsService) {}
+  constructor(
+    private readonly docs: ToolDocsService,
+    // Optional + LAST — spec harnesses build this controller with the documents alone.
+    private readonly tries?: TryActionService,
+  ) {}
+
+  /**
+   * Try one action for real, while building (BEA-1484).
+   *
+   * Reads only, budgeted per build, and every call lands in his ledger. This is what stops Codex
+   * writing a program blind and finding out what is true by failing in production.
+   */
+  @Post('try')
+  async try(@Body() body: any) {
+    if (!this.tries) return { ok: false, refused: 'Trying actions is not available on this server.' };
+    return this.tries.run(String(body?.build || 'build'), String(body?.actionId || ''), body?.args || {});
+  }
 
   /** Every tool, with how many actions it has. The "what do I even have?" answer. */
   @Get()

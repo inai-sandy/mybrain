@@ -47,6 +47,9 @@ const TOOLS = [
   { name: 'list_tools', description: "Every tool connected to the user's My Brain, with how many actions each has. Start here when you need to know what is available — do not guess a service name, and do not assume something is connected.", inputSchema: { type: 'object', properties: {} } },
   { name: 'tool_doc', description: "One tool's document: what it is, and EVERY action it has with its exact id. Ask for this before choosing an action, using the service id from list_tools (for example 'gmail', 'notion').", inputSchema: { type: 'object', properties: { service: { type: 'string', description: "the service id, e.g. 'gmail'" } }, required: ['service'] } },
   { name: 'action_doc', description: "The full detail of ONE action: its exact parameters, the fields real answers have carried, what it has cost, whether it is failing right now, and any trap recorded about it. Ask for this before calling an action you have not called before — guessing a parameter name is the most common way a build produces a program that runs and returns nothing.", inputSchema: { type: 'object', properties: { actionId: { type: 'string', description: "the exact id, e.g. 'svc:gmail.fetch_emails'" } }, required: ['actionId'] } },
+  // TRY IT WHILE YOU BUILD (BEA-1484). The console Codex never had: a real call against his real
+  // account, so it writes the program from what it SAW instead of from what the docs implied.
+  { name: 'try_action', description: "Make a REAL read against the user's actual connected account and see the real answer. Use this while designing, before you write the call into the program: check the shape of what comes back, the field names, how big it is, and whether the account is even set up for it. Reads only — an action that changes something is refused, and you write that call from its card instead. Limited to 25 tries per build.", inputSchema: { type: 'object', properties: { actionId: { type: 'string', description: "the exact id, e.g. 'svc:gmail.fetch_emails'" }, args: { type: 'object', description: 'the arguments to send, exactly as the action names them' } }, required: ['actionId'] } },
   { name: 'ask_user', description: "Ask the user a question mid-task and wait for their reply. Use for a real decision, preference, or fact only the user knows. Pass the runId you were given in your instructions. If the reply says the user is not available, END YOUR TURN immediately with a one-line note — the run is paused safely and you will be resumed with their answer.", inputSchema: { type: 'object', properties: { runId: { type: 'string', description: 'the run id from your instructions' }, question: { type: 'string' }, choices: { type: 'array', items: { type: 'string' }, description: 'optional multiple-choice options' }, defaultValue: { type: 'string', description: 'optional fallback applied if the user never answers' } }, required: ['runId', 'question'] } },
   { name: 'get_answer', description: 'Check whether the user has answered a previously asked question, by its token.', inputSchema: { type: 'object', properties: { token: { type: 'string' } }, required: ['token'] } },
 ];
@@ -78,6 +81,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       const res = await apiGet(`/api/tools/docs/action/${encodeURIComponent(id)}`);
       if (!res || res.statusCode === 404 || res.message) return text(`Nothing in the catalog is called ${id}. Use tool_doc to see a tool's actions.`);
       return text(res.text || '');
+    }
+
+    if (name === 'try_action') {
+      const id = String(args.actionId || '').trim();
+      if (!id) return text('Give the exact action id, for example "svc:gmail.fetch_emails".');
+      const res = await api('/api/tools/docs/try', { actionId: id, args: args.args || {}, build: process.env.MYBRAIN_BUILD_KEY || 'build' });
+      if (res && res.refused) return text(`Refused: ${res.refused}`);
+      if (res && res.ok === false) return text(`${id} answered an error: ${res.error || 'unknown'}${res.droppedArgs && res.droppedArgs.length ? `\n\nNote: ${res.droppedArgs.join(', ')} — this action does not take those, so they were never sent. Check the spelling against its card.` : ''}${typeof res.left === 'number' ? `\n\n(${res.left} tries left)` : ''}`);
+      const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2);
+      return text(`${id} really answered:\n\n${body}${res.droppedArgs && res.droppedArgs.length ? `\n\nNote: ${res.droppedArgs.join(', ')} were NOT sent — this action does not take them.` : ''}${typeof res.left === 'number' ? `\n\n(${res.left} tries left)` : ''}`);
     }
 
     if (name === 'search_brain') {
