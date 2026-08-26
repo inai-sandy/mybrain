@@ -207,3 +207,47 @@ export function isQuestion(reply: string): boolean {
 export function nothingCameBack(reply: string): string | null {
   return String(reply || '').trim() ? null : 'Codex did not answer when asked to write the goal. Nothing has been built. Try again, or tell me what changed.';
 }
+
+/**
+ * When should this agent run? (BEA-1482)
+ *
+ * Asked of CODEX, not worked out here. The goal is free text by the owner's own design — "It will
+ * not create any rough idea based on my discussion" — so the app parsing "every day at 22:00" out of
+ * a paragraph would be exactly the interpreting he removed. Codex wrote the goal; Codex says what
+ * the timing in it means.
+ *
+ * It matters because without it an agent is kept, switched on, and never fires. That happened: his
+ * first working agent had to have its schedule set by hand after the fact.
+ */
+export function schedulePrompt(goal: string): string {
+  return `Below is the goal you wrote for an agent. Say WHEN it should run.
+
+Reply with ONLY a JSON object, no prose:
+
+{"every":"day"|"weekday"|"week"|"hour"|"none","at":"HH:MM","dow":0-6,"text":"every day at 22:00"}
+
+- \`at\` is 24-hour local time. \`dow\` only for "week" (0 = Sunday).
+- \`"none"\` means the goal does not say when — he will run it himself. Do NOT invent a time.
+- \`text\` is the plain sentence he will read on the screen.
+
+THE GOAL:
+
+${goal}
+`;
+}
+
+/** Read the schedule reply. Anything unreadable means "he never said", never a guessed time. */
+export function readSchedule(reply: string): { schedule: string | null; text: string } {
+  const t = String(reply || '').replace(/^\s*\`\`\`(?:json)?\s*|\s*\`\`\`\s*$/g, '').trim();
+  let j: any = null;
+  try { j = JSON.parse(t); } catch { return { schedule: null, text: '' }; }
+  const every = String(j?.every || '').toLowerCase();
+  if (!['day', 'weekday', 'week', 'hour'].includes(every)) return { schedule: null, text: '' };
+  const at = /^\d{1,2}:\d{2}$/.test(String(j?.at || '')) ? String(j.at).padStart(5, '0') : undefined;
+  if (every !== 'hour' && !at) return { schedule: null, text: '' }; // a daily schedule with no time is not a schedule
+  const dow = Number.isInteger(j?.dow) && j.dow >= 0 && j.dow <= 6 ? j.dow : undefined;
+  return {
+    schedule: JSON.stringify({ every, ...(at ? { at } : {}), ...(every === 'week' && dow !== undefined ? { dow } : {}) }),
+    text: String(j?.text || '').trim().slice(0, 120),
+  };
+}

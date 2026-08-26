@@ -7,6 +7,8 @@ import { WorkerDispatchService } from './worker-dispatch.service';
 import { TrialService } from './trial.service';
 import { OwnerAskService } from './owner-ask.service';
 import { saidKeepIt } from './brief-trial.service';
+import { LlmService } from '../llm/llm.service';
+import { readSchedule, schedulePrompt } from '../agent/goal';
 
 export const KEEP_IT = 'Keep it';
 export const SEND_BACK = 'Send it back';
@@ -47,6 +49,7 @@ export class GoalTrialService implements OnModuleInit {
     private readonly trials: TrialService,
     // Optional + LAST — spec harnesses build this positionally with fewer arguments.
     private readonly owner?: OwnerAskService,
+    private readonly llm?: LlmService, // asks Codex when this should run (BEA-1482)
   ) {}
 
   onModuleInit() {
@@ -77,9 +80,15 @@ export class GoalTrialService implements OnModuleInit {
     if (!run?.agentId) return;
     const job: any = await this.prisma?.agent?.findUnique?.({ where: { id: run.agentId } }).catch(() => null);
     if (!job?.areaId) return;
+    const approved = await this.goals.approved(String(job.areaId)).catch(() => null);
+    const goalText = approved?.text || job.prompt || '';
     try {
       if (saidKeepIt(answer)) {
-        await this.agent.updateAgent(job.id, { enabled: true } as any);
+        // WHEN it runs comes from Codex, not from this file reading his paragraph (BEA-1482). A goal
+        // that names no time leaves the schedule empty and the agent stays manual — an invented time
+        // is worse than none, because he would never know it was invented.
+        const when = await this.scheduleFor(String(goalText || ''));
+        await this.agent.updateAgent(job.id, { enabled: true, ...(when.schedule ? { schedule: when.schedule, scheduleText: when.text } : {}) } as any);
         await this.agent.appendStep(runId, {
           label: 'You kept it. It is live now, and runs on its schedule.',
           status: 'done',
@@ -146,6 +155,24 @@ export class GoalTrialService implements OnModuleInit {
       else this.log.warn(`first run of ${agentId} failed: ${String(finished?.error || '')}`);
     } catch (e: any) {
       this.log.warn(`goal trial for ${areaId} failed: ${e?.message || e}`);
+    }
+  }
+
+  /**
+   * Ask Codex when this should run (BEA-1482).
+   *
+   * One small call, and a failure here never blocks keeping the agent — it just leaves it manual,
+   * which is honest. Codex wrote the goal, so Codex says what the timing in it means; this file
+   * reading "every day at 22:00" out of a paragraph would be the interpreting he asked me to stop.
+   */
+  private async scheduleFor(goalText: string): Promise<{ schedule: string | null; text: string }> {
+    if (!goalText.trim()) return { schedule: null, text: '' };
+    try {
+      const reply = await this.llm?.completeHelper?.('agent-goal' as any, schedulePrompt(goalText), 300, 'agent-goal');
+      return readSchedule(String(reply || ''));
+    } catch (e: any) {
+      this.log.warn(`could not work out the schedule: ${e?.message || e}`);
+      return { schedule: null, text: '' };
     }
   }
 

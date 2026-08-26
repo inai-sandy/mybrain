@@ -221,14 +221,23 @@ describe('what his answer does', () => {
       appendStep: async () => undefined,
       finishRun: async () => undefined,
     };
-    svc.goals = { sendBack: async (_a: string, note: string) => { sentBack.push(note); } };
+    // `approved()` for the goal text the schedule is asked about (BEA-1482), and an llm that names a
+    // real time — so the test proves the schedule is SET, not just that keeping it does not crash.
+    svc.goals = {
+      sendBack: async (_a: string, note: string) => { sentBack.push(note); },
+      approved: async () => ({ text: 'Runs every day at 22:00 and reads his Gmail.' }),
+    };
+    svc.llm = { completeHelper: async () => '{"every":"day","at":"22:00","text":"every day at 22:00"}' };
     return { svc, enabled, sentBack, run: () => svc.onAnswer('run-1', reply) };
   }
 
   it('switches the agent ON — the first moment it may touch anything for real', async () => {
     const a = answered('keep it');
     await a.run();
-    expect(a.enabled).toEqual([{ id: 'job-1', enabled: true }]);
+    // Live AND scheduled. Keeping an agent that never fires is the gap this closed.
+    expect(a.enabled).toHaveLength(1);
+    expect(a.enabled[0]).toMatchObject({ id: 'job-1', enabled: true, scheduleText: 'every day at 22:00' });
+    expect(JSON.parse(a.enabled[0].schedule)).toEqual({ every: 'day', at: '22:00' });
     expect(a.sentBack).toEqual([]);
   });
 

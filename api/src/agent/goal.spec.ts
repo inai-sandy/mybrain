@@ -168,3 +168,49 @@ describe('when nothing comes back', () => {
     expect(nothingCameBack('the goal')).toBeNull();
   });
 });
+
+/**
+ * WHEN IT RUNS (BEA-1482).
+ *
+ * His first working agent was kept, switched on, and had no schedule — so it would never have fired.
+ * I set "every day at 22:00" by hand after the fact, which is not a system, it is me remembering.
+ *
+ * Codex wrote the goal, so Codex says what the timing in it means. The app reading a time out of his
+ * paragraph would be exactly the interpreting he removed: *"It will not create any rough idea based
+ * on my discussion."*
+ */
+describe('when the agent should run', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { schedulePrompt, readSchedule } = require('./goal');
+
+  it('asks Codex, and shows it the goal', () => {
+    const p = schedulePrompt('Runs every day at 22:00 and reads his Gmail.');
+    expect(p).toContain('Say WHEN it should run');
+    expect(p).toContain('Runs every day at 22:00');
+    // The one instruction that matters: silence is not a licence to pick a time.
+    expect(p).toContain('Do NOT invent a time');
+  });
+
+  it('reads a daily time', () => {
+    const got = readSchedule('{"every":"day","at":"22:00","text":"every day at 22:00"}');
+    expect(JSON.parse(got.schedule!)).toEqual({ every: 'day', at: '22:00' });
+    expect(got.text).toBe('every day at 22:00');
+  });
+
+  it('reads a weekly one with its day', () => {
+    const got = readSchedule('{"every":"week","at":"08:00","dow":1,"text":"every Monday at 08:00"}');
+    expect(JSON.parse(got.schedule!)).toEqual({ every: 'week', at: '08:00', dow: 1 });
+  });
+
+  it('survives a fenced reply, which models keep sending', () => {
+    expect(readSchedule('```json\n{"every":"day","at":"07:30"}\n```').schedule).toBeTruthy();
+  });
+
+  it('leaves it MANUAL when the goal never said when', () => {
+    // An invented time is worse than none: he would never know it was invented, and it would run.
+    expect(readSchedule('{"every":"none"}').schedule).toBeNull();
+    expect(readSchedule('{"every":"day"}').schedule).toBeNull();   // daily with no time is not a schedule
+    expect(readSchedule('sorry, the goal does not say').schedule).toBeNull();
+    expect(readSchedule('').schedule).toBeNull();
+  });
+});
