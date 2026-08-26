@@ -112,28 +112,7 @@ describe('what a held call tells the program', () => {
     expect(r.why).toContain('not really called');
   });
 
-  it('KIT.md tells Codex what to do with one', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { readFileSync } = require('fs');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { join } = require('path');
-    const doc = readFileSync(join(__dirname, 'kit/KIT.md'), 'utf8');
-    expect(doc).toContain('Trials: what a held call gives you back');
-    expect(doc).toContain('`ok: true` means "nothing went wrong", **not** "it happened"');
-    expect(doc).toContain('Check `held` before you use a result');
-    expect(doc).toContain('Do not fail the run');
-    // …and the real failure, so nobody trims the section as padding.
-    expect(doc).toContain('did not return its id');
-  });
+  // GONE (BEA-1483) — the rehearsal itself was removed; the first run is real.
 
-  it('the build prompt says it too — one place is not enough', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { readFileSync } = require('fs');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { join } = require('path');
-    const src = readFileSync(join(__dirname, 'goal-build.ts'), 'utf8');
-    expect(src).toContain('The first run is a rehearsal');
-    expect(src).toContain('Check');
-    expect(src).toContain('what you WOULD have written and sent');
-  });
+  // GONE (BEA-1483) — the rehearsal itself was removed; the first run is real.
 });

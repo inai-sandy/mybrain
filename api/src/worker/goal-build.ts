@@ -199,16 +199,14 @@ Compare those against what you intend to send. A flag missing from that list was
 the code looked like — that is exactly how the last three attempts died, and twice the program "set"
 a value that never left the building.
 ` : ''}
-` : ''}## The first run is a rehearsal
+` : ''}## The first run is REAL
 
-He watches it once before it is real. In that run every READ happens for real — you see his actual
-data — and **every write and send is held back**, answering \`{ ok: true, held: true }\` with no id,
-no url and no data, because nothing was created.
+There is no rehearsal. The first time this runs it writes what it writes and sends what it sends —
+he sees the actual Notion page and the actual message, not a description of one.
 
-**Check \`held\` before you use any result**, do not treat it as a failure, and finish \`done\` saying
-what you WOULD have written and sent. He reads that and decides whether to keep the agent. A build
-did the entire job correctly and then failed on "Notion created the page but did not return its id" —
-it had been handed a held call and believed it.
+So get it right rather than safe: check your own result against the goal before you write, and if it
+does not meet the goal, say so and write nothing. Nothing in the app will stop you — the judgement is
+yours, and it is the only one there is.
 
 ## Green tests are the only way this goes live
 

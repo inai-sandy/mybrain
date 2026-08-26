@@ -196,70 +196,15 @@ describe('contracts: a worker knows what "it worked" means (BEA-1391)', () => {
    * checked one table and wrote another, is the same failure wearing a hat — so the kit remembers the
    * last PASSING check and the rows it passed.
    */
-  it('a swallowed ContractError, or checking one table and writing another, is still refused', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { makeKit } = require('./kit/kit.js');
-    const reached: string[] = [];
-    const kit = makeKit({
-      runId: 'run-6', seed: { now: Date.now(), random: 1 },
-      contract: { minRows: 2, maxRows: 5000, columns: [], mustHave: [], freshnessDays: null, allowEmptyWhen: 'every source returned an empty answer' },
-      fetchImpl: async (route: string) => { reached.push(route); return { ok: true }; },
-    });
-
-    // The check fails; the worker swallows it and tries to write anyway.
-    try { kit.expect({ columns: ['id'], rows: [['p1']] }); } catch { /* swallowed on purpose */ }
-    await expect(kit.writeSheet({ columns: ['id'], rows: [['p1']] }, { title: 'x' })).rejects.toThrow(/did not pass it/i);
-
-    // A passing check does not license writing some OTHER table.
-    kit.expect({ columns: ['id'], rows: [['p1'], ['p2']] });
-    await expect(kit.writeSheet({ columns: ['id'], rows: [['q9'], ['q8']] }, { title: 'x' })).rejects.toThrow(/not the rows kit.expect\(\) checked/i);
-    expect(reached).toEqual([]);
-  });
+  // GONE (BEA-1483) — this asserted a forced check the owner removed.
 
   /**
    * A `contract.json` that exists and cannot be read is NOT "no contract" — running unchecked is the
    * hole this piece closes, so it fails loudly instead.
    */
-  it('a contract.json that cannot be read stops the run instead of running unchecked', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require('fs');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const os = require('os');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const path = require('path');
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-contract-'));
-    fs.mkdirSync(path.join(dir, 'kit'));
-    fs.copyFileSync(path.join(__dirname, 'kit', 'kit.js'), path.join(dir, 'kit', 'kit.js'));
-    fs.writeFileSync(path.join(dir, 'contract.json'), '{ "minRows": 1, ');   // half-written
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const broken = require(path.join(dir, 'kit', 'kit.js')).makeKit({ runId: 'run-7', seed: { now: Date.now(), random: 1 }, fetchImpl: async () => ({ ok: true }) });
-    expect(() => broken.expect({ columns: ['id'], rows: [['p1']] })).toThrow(/contract.json is not readable JSON/i);
-    await expect(broken.writeSheet({ columns: ['id'], rows: [['p1']] }, { title: 'x' })).rejects.toThrow(/contract.json is not readable JSON/i);
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
+  // GONE (BEA-1483) — this asserted a forced check the owner removed.
 
-  it('a worker that skips the check cannot write at all — the kit refuses it', async () => {
-    // A kit built WITH a contract, as it is in a real worker folder where `contract.json` sits beside
-    // it. Nothing may reach the app: the refusal happens before the call is made.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { makeKit } = require('./kit/kit.js');
-    const reached: string[] = [];
-    const kit = makeKit({
-      runId: 'run-4',
-      seed: { now: Date.now(), random: 1 },
-      contract: contractFromPlan(planFromAgent(creatorsJob())),
-      fetchImpl: async (route: string) => { reached.push(route); return {}; },
-    });
-    await expect(kit.writeSheet({ columns: ['id'], rows: [['p1']] }, { title: 'x' })).rejects.toThrow(/call kit.expect\(table\) before writing/i);
-    await expect(kit.writeDocument({ title: 'x', markdown: '# x' })).rejects.toThrow(/did not pass it/i);
-    // …and a message is an output too: the owner is never told about rows nobody checked.
-    await expect(kit.notify({ whatsapp: true }, { headline: '2 rows' })).rejects.toThrow(/did not pass it/i);
-    expect(reached).toEqual([]);
-    // …and once they have passed, the same write goes through.
-    kit.expect({ columns: ['id'], rows: [['p1']] });
-    await kit.writeSheet({ columns: ['id'], rows: [['p1']] }, { title: 'x' }).catch(() => undefined);
-    expect(reached).toEqual(['output']);
-  });
+  // GONE (BEA-1483) — this asserted a forced check the owner removed.
 });
 
 /**

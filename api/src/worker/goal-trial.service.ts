@@ -143,7 +143,17 @@ export class GoalTrialService implements OnModuleInit {
       // 2. Run it once for real, with everything held back. The trial token is what makes that true
       //    — it rides on the token, never on the body, so the program cannot argue its way out.
       const run = await this.agent.createRun({ agentId, title: `First run — ${goal.text.slice(0, 60)}` });
-      const out = await this.dispatch.run(run.id, agentId, { trial: true });
+      // FOR REAL, FIRST TIME (BEA-1483). His words: "Nothing Passed. i havent seen anything working…
+      // dont guard Codex. it is AI it can deside properly."
+      //
+      // The first run used to be a rehearsal: it read his mail, then held every write and send. Even
+      // when it worked perfectly he saw nothing happen — no Notion page, no message — which is a
+      // strange way to prove something works. So the first run is the real one. It writes the page
+      // and sends the message, and he judges the thing itself instead of a description of it.
+      //
+      // What that costs, said plainly: a wrong agent does something real on his accounts before he
+      // has seen it. He was shown that and chose it, twice.
+      const out = await this.dispatch.run(run.id, agentId, {});
       if (out.fallback) throw new Error(out.fallback);
 
       const finished = await this.prisma.agentRun.findUnique({ where: { id: run.id } }).catch(() => null);

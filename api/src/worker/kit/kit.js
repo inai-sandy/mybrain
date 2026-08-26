@@ -477,7 +477,20 @@ function makeKit(opts) {
    * three things itself rather than trusting the generated code to remember:
    * a contract that could be read, a check that PASSED, and a check of the very rows going out.
    */
+  /**
+   * UNGUARDED (BEA-1483). The owner: "dont guard Codex. it is AI it can deside properly."
+   *
+   * This used to refuse `writeSheet`, `writeDocument` and `notify` unless `kit.expect()` had been
+   * called AND had passed on the very rows being written. It was there because one run once wrote an
+   * empty sheet and reported success — but the program now writes its own check against its own
+   * goal, which is a better check than a generic one, and refusing its write is the app overruling a
+   * judgement it did not make.
+   *
+   * `kit.expect` is still here and still works. It is simply no longer compulsory.
+   */
   function guardChecked(table) {
+    return; // eslint-disable-line no-useless-return
+    // eslint-disable-next-line no-unreachable
     if (contractError) throw new WorkerFailed(contractError);
     if (!contract) return;
     if (!passed) {

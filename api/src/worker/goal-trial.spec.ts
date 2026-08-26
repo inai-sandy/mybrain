@@ -98,14 +98,17 @@ describe('approving the goal is the trigger, not a bookmark', () => {
     expect(w.created[0].enabled).toBe(false);
   });
 
-  it('builds it, then runs it once with everything held back', async () => {
+  it('builds it, then runs it FOR REAL — there is no rehearsal (BEA-1483)', async () => {
     const w = world();
     await w.svc.start('ar1');
     await settle();
 
     expect(w.builds[0].reason).toContain('goal v2');
-    // `trial: true` is what makes "nothing saved, nothing sent" true, and it rides on the token.
-    expect(w.dispatched[0]).toMatchObject({ agentId: 'job-1', trial: true });
+    // His instruction: "Nothing Passed. i havent seen anything working… dont guard Codex."
+    // A rehearsal that holds every write means he sees nothing happen even when it works perfectly.
+    // So the first run writes and sends for real, and he judges the thing rather than a description.
+    expect(w.dispatched[0]).toMatchObject({ agentId: 'job-1' });
+    expect(w.dispatched[0].trial).toBeUndefined();
   });
 
   it('refuses when there is no approved goal, and says what to do', async () => {
