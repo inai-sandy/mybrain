@@ -28,7 +28,23 @@ import { isServiceToolId, parseServiceToolId, ServiceAction } from './service-pr
  * Cards are cached 10 minutes. Nothing here is on the catalog's path — the catalog never waits on a card.
  */
 
-export type KnowledgeParam = { name: string; required: boolean; type?: string; enum?: string[]; description?: string; example?: any };
+export type KnowledgeParam = {
+  name: string;
+  required: boolean;
+  type?: string;
+  enum?: string[];
+  description?: string;
+  example?: any;
+  /**
+   * What ONE item of an array parameter has to look like (BEA-1490), required keys marked `*`.
+   *
+   * A run created his Notion page and then could not write into it: `content_blocks` was sent as a
+   * list of plain blocks, and the vendor wanted each item wrapped — `content_blocks.0.content_block`.
+   * The card named the array and said nothing about its items, so the one fact needed to call it
+   * correctly was the one fact missing. An array whose items are objects now carries their keys.
+   */
+  itemKeys?: string[];
+};
 export type FieldKind = 'date' | 'number' | 'text' | 'id' | 'url' | 'list' | 'bool' | 'object';
 export type KnowledgeField = {
   /** Dotted path from the answer's data root; `posts[].caption` for an item inside a list. */
@@ -422,6 +438,44 @@ export function mergeFields(spec: KnowledgeField[], observed: KnowledgeField[]):
   return [...byPath.values()];
 }
 
+/** Cut, and SAY it was cut — a silent truncation reads as the whole truth (BEA-1490). */
+function clip(v: string, max: number): string {
+  const t = String(v ?? '');
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+/**
+ * The keys one item of an array parameter must carry (BEA-1490).
+ *
+ * Handles the plain case (`items.properties`) and the either/or case (`items.anyOf|oneOf`), which is
+ * how a vendor spells "a flattened block or a full one" — the very shape that broke his run. Keys
+ * from every variant are merged, because the point is to show that a key like `content_block` exists
+ * at all; which variant it belongs to is the description's job.
+ */
+export function keysOfItems(s: any): string[] {
+  if (!s) return [];
+  const type = Array.isArray(s?.type) ? s.type.find((t: string) => t !== 'null') : s?.type;
+  if (type !== 'array') return [];
+  const variants: any[] = [];
+  const items = s.items;
+  if (items && typeof items === 'object') {
+    if (Array.isArray(items.anyOf)) variants.push(...items.anyOf);
+    if (Array.isArray(items.oneOf)) variants.push(...items.oneOf);
+    if (items.properties) variants.push(items);
+  }
+  const out: string[] = [];
+  for (const v of variants) {
+    const props = v?.properties && typeof v.properties === 'object' ? v.properties : null;
+    if (!props) continue;
+    const req: string[] = Array.isArray(v?.required) ? v.required : [];
+    for (const k of Object.keys(props)) {
+      const marked = req.includes(k) ? `${k}*` : k;
+      if (!out.includes(marked)) out.push(marked);
+    }
+  }
+  return out.slice(0, 24);
+}
+
 /** The params of an action, from its argument schema. */
 export function paramsOf(schema: any): KnowledgeParam[] {
   const props = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
@@ -432,7 +486,12 @@ export function paramsOf(schema: any): KnowledgeParam[] {
     if (type) p.type = String(type);
     if (Array.isArray(s?.enum) && s.enum.length) p.enum = s.enum.slice(0, 40).map((e: any) => String(e));
     const desc = String(s?.description || s?.title || '').replace(/\s+/g, ' ').trim();
-    if (desc) p.description = desc.slice(0, 240);
+    // A REQUIRED parameter's description is where the shape is explained, so it gets real room. The
+    // 240 that used to apply to everything cut Notion's mid-sentence, exactly where it was about to
+    // say what the full form was.
+    if (desc) p.description = clip(desc, required.includes(name) ? 900 : 240);
+    const itemKeys = keysOfItems(s);
+    if (itemKeys.length) p.itemKeys = itemKeys;
     const ex = Array.isArray(s?.examples) ? s.examples[0] : s?.example ?? s?.default;
     const safe = safeExample(name, ex);
     if (safe !== undefined) p.example = safe;

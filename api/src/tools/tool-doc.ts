@@ -63,7 +63,9 @@ export type DocInputs = {
  */
 function line(a: DocAction): string {
   const tags = [a.risky ? '**he confirms it** — usable' : '', a.retired ? '_retired_' : ''].filter(Boolean).join(' · ');
-  const what = String(a.description || a.name || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+  const raw = String(a.description || a.name || '').replace(/\s+/g, ' ').trim();
+  // Say when it was cut (BEA-1490) — a silent cut reads as the whole sentence.
+  const what = raw.length > 220 ? `${raw.slice(0, 219)}…` : raw;
   const head = `- \`${a.id}\` — ${what || a.name}${tags ? ` (${tags})` : ''}`;
   // Traps go directly under the action they are about, indented, so choosing the action and reading
   // its warning are the same glance (BEA-1480).

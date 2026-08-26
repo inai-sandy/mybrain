@@ -202,7 +202,15 @@ export function writeCard(card: any): string {
   const out: string[] = [];
   out.push(`### ${card.actionId} — ${card.name || ''}`.trim());
   if (card.description) out.push(`what: ${one(card.description, 400)}`);
-  const params = (card.params || []).map((p: any) => `${p.name}${p.required ? '*' : ''} (${p.type || 'string'})${p.description ? ` — ${one(p.description, 120)}` : ''}`);
+  // A required parameter gets room to explain itself, and an array says what ONE item looks like
+  // (BEA-1490). Both caps used to be small and silent: Notion's `content_blocks` description was cut
+  // mid-sentence at 120 characters and its item shape was never shown at all, so a program that had
+  // just created his page could not write into it.
+  const params = (card.params || []).map((p: any) => {
+    const desc = p.description ? ` — ${one(p.description, p.required ? 700 : 200)}` : '';
+    const items = Array.isArray(p.itemKeys) && p.itemKeys.length ? ` — each item: { ${p.itemKeys.join(', ')} }` : '';
+    return `${p.name}${p.required ? '*' : ''} (${p.type || 'string'})${desc}${items}`;
+  });
   if (params.length) out.push(`params: ${params.join(' · ')}`);
   const fields = (card.fields || []).map((f: any) => `${f.path} (${f.kind})`);
   if (fields.length) out.push(`fields: ${fields.slice(0, 40).join(', ')}`);
@@ -214,6 +222,14 @@ export function writeCard(card: any): string {
   return out.join('\n');
 }
 
+/**
+ * Cut, and SAY it was cut (BEA-1490).
+ *
+ * This used to truncate silently, which is worse than truncating: a sentence that stops mid-clause
+ * reads as a complete sentence, so a program calls the action confident it knows the shape. The `…`
+ * is the difference between "that is all there is" and "there is more I am not being shown".
+ */
 function one(v: any, max: number): string {
-  return String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const t = String(v ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

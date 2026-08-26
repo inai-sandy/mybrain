@@ -1,4 +1,6 @@
 import { toolDocText, toolIndexText, docHash } from './tool-doc';
+import { writeCard } from './tool-doc.service';
+import { keysOfItems } from './tool-knowledge.service';
 
 /**
  * ONE DOCUMENT PER TOOL (BEA-1468).
@@ -380,5 +382,72 @@ describe('traps sit under their own action', () => {
     const without = toolDocText({ service: 'g', name: 'G', connected: true, actions: [{ id: 'svc:g.a', name: 'A' }] });
     const with_ = toolDocText({ service: 'g', name: 'G', connected: true, actions: [{ id: 'svc:g.a', name: 'A', notes: ['careful'] }] });
     expect(docHash(without)).not.toBe(docHash(with_));
+  });
+});
+
+/**
+ * WHAT ONE ITEM LOOKS LIKE (BEA-1490).
+ *
+ * His run created the Notion page and then could not write into it:
+ *
+ *   Following fields are missing: {'content_blocks.0.content_block', …}
+ *
+ * The card named `content_blocks` as an array and said nothing whatever about its items, and its
+ * description — the one place the shape was explained — was cut at 120 characters, mid-sentence,
+ * exactly where it was about to say what the full form was. Both are fixed here.
+ */
+describe('an array parameter says what one item must carry', () => {
+  const card = {
+    actionId: 'svc:notion.add_multiple_page_content',
+    name: 'Add multiple content blocks',
+    params: [
+      {
+        name: 'content_blocks',
+        required: true,
+        type: 'array',
+        description: 'A list of content blocks to be added to the page.',
+        itemKeys: ['content_block*', 'block_property'],
+      },
+      { name: 'parent_block_id', required: true, type: 'string', description: 'Identifier of the parent page or block.' },
+    ],
+  };
+
+  it('names the item keys, marking the required ones', () => {
+    const t = writeCard(card as any);
+    expect(t).toContain('each item: { content_block*, block_property }');
+  });
+
+  it('gives a REQUIRED parameter room to explain itself', () => {
+    const long = 'x'.repeat(600);
+    const t = writeCard({ ...card, params: [{ name: 'a', required: true, type: 'array', description: long }] } as any);
+    // The old cap was 120 and this is where Notion's sentence died.
+    expect(t).toContain('x'.repeat(500));
+  });
+
+  it('marks a description it did cut, instead of cutting silently', () => {
+    const t = writeCard({ ...card, params: [{ name: 'a', required: true, type: 'string', description: 'y'.repeat(2000) }] } as any);
+    expect(t).toContain('…');
+  });
+});
+
+describe('keysOfItems reads the shapes a vendor really writes', () => {
+  it('reads a plain object item', () => {
+    expect(keysOfItems({ type: 'array', items: { properties: { content_block: {}, after: {} }, required: ['content_block'] } }))
+      .toEqual(['content_block*', 'after']);
+  });
+
+  it('merges an either/or item — "a flattened block OR a full one"', () => {
+    // This is how the vendor spells the choice that broke his run; showing the key exists at all is
+    // the whole point, so both variants are merged.
+    const keys = keysOfItems({
+      type: 'array',
+      items: { anyOf: [{ properties: { content: {} }, required: ['content'] }, { properties: { content_block: {} }, required: ['content_block'] }] },
+    });
+    expect(keys).toEqual(['content*', 'content_block*']);
+  });
+
+  it('says nothing about a plain list of strings, or a non-array', () => {
+    expect(keysOfItems({ type: 'array', items: { type: 'string' } })).toEqual([]);
+    expect(keysOfItems({ type: 'string' })).toEqual([]);
   });
 });
