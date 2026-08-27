@@ -728,7 +728,26 @@ async function handleBuild(req, res) {
 
     const args = ['exec', '--json', '--skip-git-repo-check', '--color', 'never', '-s', 'workspace-write', '-C', dir];
     if (body.model) args.push('-m', String(body.model));
-    args.push(brief);
+    // THE BRIEF GOES BY FILE WHEN IT IS BIG (BEA-1503).
+    //
+    // It used to be pushed as one argv, always. Linux caps a SINGLE argument at 128KB
+    // (MAX_ARG_STRLEN), and a brief carries the FULL document of every tool the owner named — and
+    // GitHub's document lists 833 actions. The first agent ever built against GitHub produced a
+    // 179KB brief and died with `spawn E2BIG`: codex never started, no worker.mjs was written, and
+    // the build failed with an error that said nothing whatever about size. Any agent using a large
+    // service was simply unbuildable, and nothing said so.
+    //
+    // BRIEF.md is already written into the build folder on the line above, and `-C dir` makes that
+    // the working directory, so a pointer costs nothing. Small briefs still go inline — that is the
+    // path every working build so far has taken, and there is no reason to move them off it.
+    const ARG_LIMIT = 96_000; // under MAX_ARG_STRLEN, with room for the rest of the command line
+    const briefBytes = Buffer.byteLength(brief, 'utf8');
+    if (briefBytes > ARG_LIMIT) {
+      args.push('Read BRIEF.md in this folder. It is your whole instruction — follow it exactly.');
+      log.push(`brief is ${Math.round(briefBytes / 1024)}KB — passed as BRIEF.md rather than on the command line`);
+    } else {
+      args.push(brief);
+    }
     const timeoutMs = Math.min(3_600_000, Math.max(30_000, Number(body.timeoutMs) > 0 ? Number(body.timeoutMs) : BUILD_TIMEOUT));
     // From here on the caller waits minutes, so start talking to it NOW (BEA-1469). Everything above
     // is fast and still answers with a real status code; everything below answers 200 with an
@@ -755,7 +774,16 @@ async function handleBuild(req, res) {
     } else if (wrote) {
       log.push('the build wrote no worker.test.mjs');
     } else {
-      log.push('the build wrote no worker.mjs');
+      // SAY WHY, not just what (BEA-1503). "Codex did not write a worker.mjs" was the whole error for
+      // a build that never started at all — `spawn E2BIG`, because the brief was too big for one
+      // command-line argument. The real cause was in the log and not in the error, which is what made
+      // it look like a Codex failure rather than an OS limit.
+      const spawnFailed = /spawn \w+|ENOENT|E2BIG|EACCES/.test(String(built.stderr || '') + String(built.error || ''));
+      log.push(
+        spawnFailed
+          ? `codex could not be started at all (${String(built.stderr || built.error || '').trim().slice(0, 200)}) — nothing was built`
+          : 'the build wrote no worker.mjs',
+      );
     }
 
     const ok = wrote && !!tests && tests.failed === 0 && tests.passed > 0;
