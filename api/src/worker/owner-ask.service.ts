@@ -59,10 +59,25 @@ export class OwnerAskService implements OnModuleInit {
     // resumed worker would park and message him again every twelve hours.
     this.agent.setAnswerHook?.(async (runId: string, answer: string) => {
       await Promise.resolve(this.gates?.settlePending?.(runId, answer)).catch(() => undefined);
-      // A second listener, for decisions that are not gates (BEA-1418: keep it / send it back).
-      // The hook itself is single-slot, and it belongs to this service — so anyone else who needs to
-      // hear an answer registers here rather than fighting over it.
-      await Promise.resolve(this.watcher?.(runId, answer)).catch(() => undefined);
+      // EVERY listener hears it, not just the last one to register (BEA-1505).
+      //
+      // This used to be one slot, and two services claimed it: the old brief road and the new goal
+      // road. Whichever booted last silently erased the other. The goal road lost — so when he
+      // replied "Keep it" on WhatsApp the agent was never switched on, its schedule was never set,
+      // and the run was never finished. Twenty minutes later the stall watchdog marked a run that had
+      // already saved his document as failed. He had kept two agents; both stayed switched off.
+      //
+      // One listener throwing must never stop the others hearing it, so each is called on its own.
+      for (const w of this.watchers) {
+        // try/catch around the CALL, not `.catch()` on its result: a listener that throws
+        // synchronously never returns a promise to attach a catch to, and would take the whole
+        // answer down with it — including the listeners after it in the list.
+        try {
+          await w(runId, answer);
+        } catch (e: any) {
+          this.log?.warn?.(`a listener could not act on his answer: ${e?.message || e}`);
+        }
+      }
     });
   }
 
@@ -103,10 +118,18 @@ export class OwnerAskService implements OnModuleInit {
    * `answered: false` means nothing here was his to answer, and the caller carries on down its
    * normal road as if this method did not exist. That is the whole safety rule of this piece.
    */
-  /** Also tell me when a run's question is answered — whichever road answered it (BEA-1418). */
-  private watcher?: (runId: string, answer: string) => Promise<void> | void;
+  /**
+   * Everyone who wants to hear a run's question being answered — whichever road answered it
+   * (BEA-1418), and now ALL of them rather than only the last to ask (BEA-1505).
+   *
+   * A list, never one slot. Two services register here and a single slot silently dropped one of
+   * them, which is how "Keep it" stopped keeping anything.
+   */
+  private readonly watchers: ((runId: string, answer: string) => Promise<void> | void)[] = [];
+
   setAnswerWatcher(fn: (runId: string, answer: string) => Promise<void> | void) {
-    this.watcher = fn;
+    if (typeof fn !== 'function') return;
+    if (!this.watchers.includes(fn)) this.watchers.push(fn);
   }
 
   async onOwnerReply(text: string, meta?: { wamid?: string | null }): Promise<{ answered: boolean; waitpointId?: string }> {
