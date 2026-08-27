@@ -84,3 +84,49 @@ describe('a failed run leaves evidence even without a plan', () => {
     expect(svc()).toContain('answer.table?.rows?.length ?? answer.count ?? 0');
   });
 });
+
+/**
+ * fetchSource IS FOR PLANS, AND A GOAL AGENT HAS NONE (BEA-1498).
+ *
+ * A repair rewrote a working `kit.callAll` into `kit.fetchSource` and broke the agent outright:
+ * a goal-built job has no plan and therefore no sources, so that call can only ever answer
+ * "This job has no source called …". Nothing in the parts box, the prompt, or the error itself said
+ * so — the repair had no way to learn, and would have made the same choice again.
+ */
+describe('a goal-built program is told not to reach for fetchSource', () => {
+  const flatten = (t: string) => t.replace(/\s+/g, ' ');
+  const doc = () => flatten(readFileSync(join(__dirname, 'kit/KIT.md'), 'utf8'));
+  const ctl = () => flatten(readFileSync(join(__dirname, 'worker.controller.ts'), 'utf8'));
+
+  it('the parts box says it plainly, next to the call itself', () => {
+    const t = doc();
+    expect(t).toContain('only for a job that has a PLAN');
+    // Asserted in fragments: the source is hand-wrapped markdown, so a blockquote marker can land
+    // in the middle of a phrase once whitespace is flattened.
+    expect(t).toContain('kit.callAll(actionId, args,');
+    expect(t).toContain('instead: same paging, same de-duping');
+  });
+
+  it('the build prompt tells a goal-built program it has no plan', () => {
+    const t = flatten(goalBuildPrompt({
+      job: { id: 'j1', name: 'ESP32 weekly top posts' },
+      goal: 'Top 100 posts from r/esp32 each week into a Sheet.',
+      transcript: [{ who: 'you', text: 'top 100 of the week' }],
+      tools: [{ actionId: 'svc:reddit.subreddit', name: 'Subreddit posts', card: '# Subreddit posts' }],
+      kit: { version: '1', js: '// kit', doc: '# KIT' },
+      version: 1,
+    } as any));
+    expect(t).toContain('never call `kit.fetchSource`');
+    expect(t).toContain('no sources');
+  });
+
+  it('the error tells a plan-less job what to use instead', () => {
+    // The old message just said "no source called X" — true, useless, and unlearnable.
+    expect(ctl()).toContain('This job has no plan and no sources');
+    expect(ctl()).toContain('kit.callAll(');
+  });
+
+  it('a job that DOES have sources still gets the list of them', () => {
+    expect(ctl()).toContain('Its sources are:');
+  });
+});

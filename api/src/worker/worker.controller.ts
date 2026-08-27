@@ -164,7 +164,19 @@ export class WorkerController {
     if (body?.sourceId) {
       const plan = planFromAgent(job);
       const src = plan.sources.find((s) => s.id === String(body.sourceId));
-      if (!src) throw new BadRequestException(`This job has no source called "${body.sourceId}".`);
+      if (!src) {
+        // An error that says what to do instead (BEA-1498). A repair of his ESP32 agent rewrote a
+        // working `kit.callAll` into `kit.fetchSource`, which can NEVER work for a goal-built job —
+        // it has no plan and therefore no sources — and the old message did not say so, so the next
+        // repair had no way to learn.
+        const plan = planFromAgent(job);
+        const has = plan.sources.length;
+        throw new BadRequestException(
+          has
+            ? `This job has no source called "${body.sourceId}". Its sources are: ${plan.sources.map((x) => x.id).join(', ')}.`
+            : `This job has no plan and no sources, so kit.fetchSource cannot be used here. Fetch by action id instead: kit.callAll('${String(body.sourceId)}', args, { pages }) — same paging, same de-duping, same credit checks.`,
+        );
+      }
       // Pages are the plan's unless the worker asks for fewer/more, and always inside the cap.
       if (src.kind === 'source' && body.pages !== undefined && body.pages !== null) src.pages = clampPages(body.pages);
       const args = { sourceId: src.id, pages: src.kind === 'source' ? src.pages : 0 };

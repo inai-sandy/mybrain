@@ -291,6 +291,14 @@ Nothing will stop you, so the judgement is yours. Two things worth knowing while
 
 Use it properly and you will not have to guess a shape again.
 
+## You have no plan — never call \`kit.fetchSource\`
+
+This job is built from a goal, not a plan, so it has **no sources**. \`kit.fetchSource(sourceId)\` can
+only ever answer *"This job has no source called …"* and fail the run. A real repair reached for it
+and broke a working agent that way.
+
+Everything you fetch is by ACTION ID: \`kit.call\` for one call, \`kit.callAll\` for a list.
+
 ## A list is never one call
 
 If the goal asks for a NUMBER of things — 100 posts, every message this week, all the rows — one call

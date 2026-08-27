@@ -11,6 +11,12 @@ import { makeKit, installDeterminism } from './kit/kit.js';
 
 ## Fetching
 
+> **`fetchSource` is only for a job that has a PLAN.** If your job was built from a GOAL — a
+> conversation and a goal file, with no plan.json in this folder — there are no sources and this call
+> can only ever answer *"This job has no source called …"*. Use **`kit.callAll(actionId, args,
+> { pages })`** instead: same paging, same de-duping, same credit checks, addressed by action id.
+> A real repair reached for `fetchSource` here and broke a working agent.
+
 ```js
 await kit.fetchSource(sourceId, { pages })   // one source of the job's plan, fetched WHOLE
 await kit.tool(actionId, args)               // one pinned call the plan has no source for
