@@ -53,6 +53,35 @@ export function subtitleOf(description?: string | null): string {
   return useful.replace(/^when\s+it\s+runs,?\s*/i, '').trim();
 }
 
+/**
+ * WHAT AN AGENT HAS MADE (BEA-1507).
+ *
+ * His results scattered — a Google Sheet here, a Notion page there, a My Brain document somewhere
+ * else — and no screen showed one agent's output over time. Every run already records what it wrote,
+ * so this is derived rather than stored: it can never drift from the history it came from.
+ *
+ * A run that finished without writing anything is not a thing it made, and is left out.
+ */
+export type MadeItem = { id: string; title: string; href: string; icon: string; at: string };
+
+export function madeFromRuns(runs: any[] | null): MadeItem[] {
+  return (runs || [])
+    .filter((r: any) => r && (r.outputUrl || r.outputDocId))
+    .map((r: any) => {
+      const url = String(r.outputUrl || '');
+      const sheet = url.includes('docs.google.com/spreadsheets');
+      const notion = url.includes('notion.');
+      return {
+        id: String(r.id),
+        title: String(r.resultText || r.title || 'Result').replace(/\s+/g, ' ').slice(0, 90),
+        href: url || `/documents/${r.outputDocId}`,
+        icon: sheet ? '\u{1F4CA}' : notion ? '\u{1F5D2}\uFE0F' : '\u{1F4C4}',
+        at: String(r.endedAt || r.startedAt || ''),
+      };
+    })
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+}
+
 export function AgentApp() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -65,6 +94,7 @@ export function AgentApp() {
   const [running, setRunning] = useState(false);
   const [liveRun, setLiveRun] = useState<any>(null);
   const [runs, setRuns] = useState<any[] | null>(null);
+  const [madeAll, setMadeAll] = useState(false);
   const [redesigning, setRedesigning] = useState(false);
   const [flow, setFlow] = useState<any>(null);
   const [pickingTools, setPickingTools] = useState(false); // this job's own toolbox (BEA-1168)
@@ -280,6 +310,9 @@ export function AgentApp() {
   if (!a || !spec) return <div className="space-y-3"><div className="h-16 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" /><div className="h-40 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" /></div>;
 
   const latest = (runs || []).find((r: any) => r.status === 'done' && r.resultText);
+  // Everything this agent has produced, newest first (BEA-1507) — read off the runs, which already
+  // record what each one wrote. A run that finished without writing anything is not a thing it made.
+  const made = madeFromRuns(runs);
   const color = a.color || '#818cf8';
   const inp = 'w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900';
   const cfgInp = 'w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
@@ -667,6 +700,39 @@ export function AgentApp() {
                    agent has. So the panel holding the version, the checks, Rebuild and the road the
                    next run takes was hidden on exactly the agents that have a program: his goal-built
                    ones. For three days the only way to rebuild them was a terminal. */}
+              {/* WHAT IT HAS MADE (BEA-1507).
+                  An agent's results scattered: some are documents in My Brain, some are Google
+                  Sheets, some are Notion pages, and there was no one place to see what a single agent
+                  has produced over time. Built from the runs themselves — every run already records
+                  what it wrote — so this needs no new table and can never disagree with the history. */}
+              {made.length > 0 && (
+                <SettingsRow k="made" icon="📄" title="What it has made"
+                  summary={`${made.length} thing${made.length === 1 ? '' : 's'} · newest ${timeAgo(made[0].at)}`}
+                  open={openRow === 'made'} onToggle={toggleRow}>
+                  <ul className="space-y-1.5" data-testid="made-list">
+                    {made.slice(0, madeAll ? made.length : 8).map((m) => (
+                      <li key={m.id}>
+                        <a
+                          href={m.href}
+                          target={m.href.startsWith('http') ? '_blank' : undefined}
+                          rel="noreferrer"
+                          className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:border-emerald-400 dark:border-zinc-800"
+                        >
+                          <span aria-hidden>{m.icon}</span>
+                          <span className="min-w-0 flex-1 truncate">{m.title}</span>
+                          <span className="shrink-0 text-[11px] text-zinc-400">{timeAgo(m.at)}</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                  {made.length > 8 && (
+                    <button type="button" onClick={() => setMadeAll((v) => !v)} className="mt-1.5 text-[11px] font-medium text-emerald-600 hover:underline">
+                      {madeAll ? 'Show fewer' : `Show all ${made.length}`}
+                    </button>
+                  )}
+                </SettingsRow>
+              )}
+
               {hasProgram(a) && (
                 <SettingsRow k="worker" icon="🛠" title="The program"
                   summary={workerSummary(worker)}
