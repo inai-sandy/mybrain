@@ -123,7 +123,7 @@ export class SourceFetchService {
         if (!paging) { stopNote = 'this endpoint does not page'; break; }
       }
       if (paging.how === 'cursor') {
-        const next = nextCursorOf(r.data);
+        const next = nextCursorOf(r.data, paging.param);
         if (!next) { stopNote = `that was everything after ${p} page${p === 1 ? '' : 's'}`; break; }
         cursor = next.value;
       } else {

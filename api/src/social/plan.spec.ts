@@ -254,3 +254,42 @@ describe('GET /social/plan/:agentId (the job page\'s "≈ N credits per run")', 
     await expect(c.plan('nope')).rejects.toThrow(/No such agent/);
   });
 });
+
+/**
+ * THE CURSOR THE CARD NAMES (BEA-1497).
+ *
+ * His ESP32 agent asked for 100 posts, fetched page 1, and stopped at 19 — reporting "that was
+ * everything after 1 page". It was not. The answer carried `after: "t3_1vwwa3b"`, and the action's
+ * own know-how card said **"paging: cursor via after"** in plain words.
+ *
+ * The cause: `nextCursorOf` matched against a hardcoded list of names vendors might use for a
+ * cursor, and `after` was not on it. That list is a guess, and every new vendor makes it more wrong.
+ * When the card names the field, the card wins.
+ */
+describe('finding the next page', () => {
+  it('uses the field the action’s card names, even when the list has never heard of it', () => {
+    const answer = { posts: [], after: 't3_1vwwa3b' };
+    expect(nextCursorOf(answer, 'after')).toEqual({ key: 'after', value: 't3_1vwwa3b' });
+  });
+
+  it('knows `after` now even with no card — the exact miss that cost the run', () => {
+    expect(nextCursorOf({ posts: [], after: 't3_1vwwa3b' })).toEqual({ key: 'after', value: 't3_1vwwa3b' });
+  });
+
+  it('prefers the card’s field over a different one that happens to be present', () => {
+    // A vendor carrying both must page the way its card says, not the way the list guesses.
+    const answer = { cursor: 'guess-me', paging_id: 'x', after: 'the-real-one' };
+    expect(nextCursorOf(answer, 'after')?.value).toBe('the-real-one');
+  });
+
+  it('falls back to the list when the card says nothing', () => {
+    expect(nextCursorOf({ next_max_id: 'abc' })?.key).toBe('next_max_id');
+  });
+
+  it('treats an absent or empty cursor as the end, however it is named', () => {
+    expect(nextCursorOf({ posts: [], after: null }, 'after')).toBeNull();
+    expect(nextCursorOf({ posts: [], after: '' }, 'after')).toBeNull();
+    expect(nextCursorOf({ posts: [] }, 'after')).toBeNull();
+    expect(nextCursorOf(null, 'after')).toBeNull();
+  });
+});

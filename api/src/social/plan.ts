@@ -495,9 +495,23 @@ export function thresholdOf(raw: any): Threshold | null {
 }
 
 /** The next cursor out of an answer, wherever the vendor put it (the Social page's rule, BEA-1356). */
-export function nextCursorOf(data: any): { key: string; value: any } | null {
+export function nextCursorOf(data: any, preferredKey?: string | null): { key: string; value: any } | null {
   if (!data || typeof data !== 'object') return null;
-  for (const k of ['cursor', 'next_cursor', 'nextCursor', 'next_max_id', 'end_cursor', 'endCursor', 'next_page_token', 'nextPageToken', 'max_cursor', 'next_page_id']) {
+  // THE CARD'S OWN FIELD FIRST (BEA-1497).
+  //
+  // The list below is a guess at what vendors call their cursor, and it will always be incomplete —
+  // it did not know Reddit calls it `after`, so a run asking for 100 posts fetched page 1, found no
+  // cursor it recognised, and stopped at 19. The answer had `after: "t3_1vwwa3b"` in it the whole
+  // time, and the action's own know-how card said "paging: cursor via after" in plain words.
+  //
+  // When the card names the field, believe the card. The list is only for actions we know nothing
+  // about, and every new vendor makes it more wrong.
+  const named = String(preferredKey || '').trim();
+  if (named) {
+    const v = (data as any)[named];
+    if (v !== undefined && v !== null && v !== '' && v !== false) return { key: named, value: v };
+  }
+  for (const k of ['cursor', 'next_cursor', 'nextCursor', 'after', 'next_max_id', 'end_cursor', 'endCursor', 'next_page_token', 'nextPageToken', 'max_cursor', 'next_page_id', 'continuation']) {
     const v = (data as any)[k];
     if (v !== undefined && v !== null && v !== '' && v !== false) return { key: k, value: v };
   }
