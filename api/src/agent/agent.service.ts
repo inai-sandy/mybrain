@@ -370,6 +370,10 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       whatsappOutputs: whatsappOutputs == null ? true : whatsappOutputs === 'true',
       // The daily Social credit ceiling (BEA-1358): default 500; 0 = no limit. Enforced before every job's call.
       socialDailyCreditCeiling: socialCeiling == null || socialCeiling === '' ? 500 : Math.max(0, Math.floor(Number(socialCeiling) || 0)),
+      // HIS timezone (BEA-1508), so a screen can say WHEN "every day at 22:00" next happens and whose
+      // 22:00 it is. The server runs UTC, five and a half hours behind him, and reading a schedule on
+      // the wrong clock has already cost one real bug (BEA-1486).
+      timezone: (await this.getSetting('tasks.tz')) || 'Asia/Kolkata',
     };
   }
 

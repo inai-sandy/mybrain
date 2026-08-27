@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { scheduleLine } from '../ui/nextRun';
 import { agentKind, hasProgram } from '../ui/agentKind';
 import { AgentKindBadge } from '../ui/AgentKindBadge';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -44,6 +45,35 @@ type Mode = 'flow' | 'chat' | 'evals' | 'runs';
  * an agent that you run manually whenever you want." The sentence that says what the thing DOES is
  * the one after it, so a description that opens with preamble gives up its first sentence.
  */
+/** The schedule column is JSON text; a broken one is simply no schedule, never a crash. */
+/**
+ * WHAT DELETING TAKES, AND WHAT IT DOES NOT (BEA-1508).
+ *
+ * His agents have written Google Sheets, Notion pages and documents. The old confirm said only
+ * "saved documents are kept", which does not answer the question he would actually be asking: does
+ * this remove the sheet I use every Monday? It does not — that lives in his own Google account and
+ * nothing here can reach it — and saying so is the difference between a confident yes and a guess.
+ */
+export function deleteWarning(name: string, runCount: number, madeCount: number): string {
+  const runs = `${runCount} run${runCount === 1 ? '' : 's'}`;
+  const made =
+    madeCount > 0
+      ? `\n\nKEPT: the ${madeCount} thing${madeCount === 1 ? '' : 's'} it made. Sheets and Notion pages live in your own accounts and are not touched.`
+      : '\n\nIt has not made anything yet.';
+  return `Delete "${name}"?\n\nGONE: the agent, its goal, its program and its ${runs}.${made}`;
+}
+
+export function parseSchedule(raw: any): { every?: string; at?: string; dow?: number } | null {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try {
+    const p = JSON.parse(String(raw));
+    return p && typeof p === 'object' ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 export function subtitleOf(description?: string | null): string {
   const text = String(description || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -95,6 +125,16 @@ export function AgentApp() {
   const [liveRun, setLiveRun] = useState<any>(null);
   const [runs, setRuns] = useState<any[] | null>(null);
   const [madeAll, setMadeAll] = useState(false);
+  // HIS zone (BEA-1508) — so the schedule line can say when it next runs, and whose clock that is.
+  const [tz, setTz] = useState('Asia/Kolkata');
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/agent/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d?.timezone) setTz(String(d.timezone)); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
   const [redesigning, setRedesigning] = useState(false);
   const [flow, setFlow] = useState<any>(null);
   const [pickingTools, setPickingTools] = useState(false); // this job's own toolbox (BEA-1168)
@@ -362,7 +402,9 @@ export function AgentApp() {
               line read "I will build an agent that you run manually whenever you want. When it
               runs…" and told him nothing. The schedule is the more useful fact when there is one;
               the whole goal is one tap away under "What it does". */}
-          <p className="truncate text-sm text-zinc-500" title={a.description || undefined}>{a.scheduleText || subtitleOf(a.description) || 'Your agent'}</p>
+          <p className="truncate text-sm text-zinc-500" title={a.description || undefined}>
+            {scheduleLine(a.scheduleText, parseSchedule(a.schedule), tz) || subtitleOf(a.description) || 'Your agent'}
+          </p>
           {planCost && (
             <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>{creditsText(planCost)} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>
           )}
@@ -871,7 +913,7 @@ export function AgentApp() {
 
               {/* 8 · Delete 🗑 — the danger row, apart in red (BEA-1109) */}
               <SettingsRow k="delete" icon="🗑" title="Delete this job" danger
-                summary="Run history goes with it · documents are kept"
+                summary={`${(runs || []).length} run${(runs || []).length === 1 ? '' : 's'} go with it · everything it made is kept`}
                 open={openRow === 'delete'} onToggle={toggleRow}>
                 <button onClick={async () => {
                   if (!window.confirm(`Delete "${a.name}" and its run history? Saved documents are kept.`)) return;

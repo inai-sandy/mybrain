@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { madeFromRuns } from './AgentApp';
+import { deleteWarning, madeFromRuns } from './AgentApp';
 
 /**
  * WHAT AN AGENT HAS MADE (BEA-1507).
@@ -39,5 +39,33 @@ describe('the things an agent has produced', () => {
   it('is quiet when there are no runs at all', () => {
     expect(madeFromRuns(null)).toEqual([]);
     expect(madeFromRuns([])).toEqual([]);
+  });
+});
+
+/**
+ * WHAT DELETING TAKES (BEA-1508).
+ *
+ * His agents have written Google Sheets and Notion pages that live in HIS accounts. The old confirm
+ * said only "saved documents are kept", which does not answer the question he would actually ask:
+ * does this delete the sheet I use every Monday?
+ */
+describe('the delete confirmation', () => {
+  it('separates what goes from what stays, and names the outside accounts', () => {
+    const w = deleteWarning('ESP32 weekly top posts', 9, 4);
+    expect(w).toContain('GONE: the agent, its goal, its program and its 9 runs');
+    expect(w).toContain('KEPT: the 4 things it made');
+    expect(w).toContain('live in your own accounts and are not touched');
+  });
+
+  it('does not promise things kept when there are none', () => {
+    const w = deleteWarning('New agent', 0, 0);
+    expect(w).toContain('0 runs');
+    expect(w).toContain('has not made anything yet');
+    expect(w).not.toContain('KEPT:');
+  });
+
+  it('counts one properly', () => {
+    expect(deleteWarning('X', 1, 1)).toContain('its 1 run.');
+    expect(deleteWarning('X', 1, 1)).toContain('the 1 thing it made');
   });
 });
