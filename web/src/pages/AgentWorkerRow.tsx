@@ -79,6 +79,30 @@ export function costLine(cost?: RunCost | null): string {
   return credits + tokens + calls;
 }
 
+/**
+ * WHICH BUILDS FOLLOWED A CHANGED GOAL (BEA-1509).
+ *
+ * A goal-built agent stamps every build with the goal it was compiled from (`planHash` is
+ * `goal:<hash>`), and editing a goal rebuilds. So the build list is already the goal's history — this
+ * only finds the points where that stamp changed. No new table, and it cannot drift from the builds
+ * it is derived from.
+ *
+ * The FIRST build is never marked: there was no previous goal for it to differ from.
+ */
+export function goalChangePoints(builds: { id: string; planHash?: string | null; startedAt?: string | null }[] | undefined): Set<string> {
+  const out = new Set<string>();
+  const inOrder = [...(builds || [])].sort(
+    (a, b) => new Date(a.startedAt || 0).getTime() - new Date(b.startedAt || 0).getTime(),
+  );
+  let prev: string | null = null;
+  for (const b of inOrder) {
+    const hash = String(b.planHash || '');
+    if (prev !== null && hash && hash !== prev) out.add(b.id);
+    if (hash) prev = hash;
+  }
+  return out;
+}
+
 export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: {
   agentId: string;
   /** The job's worker state, owned by the page so the CLOSED row can summarise it too. */
@@ -181,6 +205,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
 
   const repairs = (w.builds || []).filter((b) => b.origin === 'repair');
   const shown = showAll ? w.builds : (w.builds || []).slice(0, 3);
+  const goalChangedAt = goalChangePoints(w.builds);
 
   return (
     <div className="flex flex-col gap-3" data-testid="worker-row">
@@ -299,6 +324,13 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
                   {' · '}{dt(b.finishedAt || b.startedAt)}
                   {b.error && <span className="block text-[11px] text-zinc-400">{b.error}</span>}
                   {b.cause && b.origin === 'repair' && <span className="block text-[11px] text-zinc-400">what broke: {b.cause}</span>}
+                  {/* WHEN THE GOAL CHANGED (BEA-1509). Editing a goal rebuilds the program, so the
+                      build history is also the goal's history — every build stamps the goal it was
+                      compiled from (`planHash`). Marking where that stamp changed answers "did it get
+                      worse because I changed what I asked for, or on its own?" with no new table. */}
+                  {goalChangedAt.has(b.id) && (
+                    <span className="mt-0.5 block text-[11px] font-medium text-sky-600 dark:text-sky-400">&#9998; built from a changed goal</span>
+                  )}
                   {/* PUT AN OLDER VERSION BACK (BEA-1506). The route existed (BEA-1494) and nothing
                       called it, so restoring a working version meant a terminal. Offered only on a
                       version that really was built and is not the one already live — putting the live

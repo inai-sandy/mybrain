@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { csvName, downloadCsv } from '../ui/csv';
 import { scheduleLine } from '../ui/nextRun';
 import { agentKind, hasProgram } from '../ui/agentKind';
 import { AgentKindBadge } from '../ui/AgentKindBadge';
@@ -767,6 +768,13 @@ export function AgentApp() {
                       </li>
                     ))}
                   </ul>
+                  {/* EXPORT (BEA-1509) — his CRUD standard asks for it and nothing had it. */}
+                  <button
+                    type="button"
+                    data-testid="export-made"
+                    onClick={() => downloadCsv(csvName(`${a.name} outputs`), ['What', 'Kind', 'Link', 'When'], made.map((m) => [m.title, m.icon === '\u{1F4CA}' ? 'Google Sheet' : m.icon === '\u{1F5D2}\uFE0F' ? 'Notion page' : 'Document', m.href, m.at]))}
+                    className="mt-2 rounded-lg border border-zinc-200 px-2.5 py-1 text-[11px] font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300"
+                  >Export CSV</button>
                   {made.length > 8 && (
                     <button type="button" onClick={() => setMadeAll((v) => !v)} className="mt-1.5 text-[11px] font-medium text-emerald-600 hover:underline">
                       {madeAll ? 'Show fewer' : `Show all ${made.length}`}

@@ -853,6 +853,57 @@ export function Agents() {
       loadAreas(); loadFolders();
     } catch (e: any) { toast('error', e?.message || 'Could not move'); }
   }
+  /**
+   * PAUSE OR RESUME SEVERAL AGENTS AT ONCE (BEA-1509).
+   *
+   * The selection holds AREAS, and it is the jobs inside them that have a schedule — so this walks
+   * the jobs rather than the tiles. Deliberately sequential: these are writes to his own jobs and a
+   * burst of parallel PATCHes buys nothing but a harder failure to read.
+   */
+  async function bulkEnabled(on: boolean) {
+    const ids = [...selected];
+    const jobs = (areasList || []).filter((ar: any) => ids.includes(ar.id)).flatMap((ar: any) => ar.jobs || []);
+    if (!jobs.length) { toast('error', 'Those agents have no jobs to change'); return; }
+    let done = 0;
+    for (const j of jobs) {
+      const r = await fetch(`/api/agent/agents/${j.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: on }),
+      }).catch(() => null);
+      if (r?.ok) done++;
+    }
+    toast(done === jobs.length ? 'success' : 'error', `${on ? 'Resumed' : 'Paused'} ${done} of ${jobs.length}`);
+    setSelected(new Set());
+    loadAreas();
+  }
+
+  /**
+   * Delete several agents at once (BEA-1509).
+   *
+   * Says what goes and what stays before it does anything — his sheets and Notion pages live in his
+   * own accounts and nothing here can reach them, which is the fact he would actually want.
+   */
+  async function bulkDelete() {
+    const ids = [...selected];
+    const areas = (areasList || []).filter((ar: any) => ids.includes(ar.id));
+    const jobs = areas.reduce((n: number, ar: any) => n + (ar.jobs?.length || 0), 0);
+    const msg =
+      `Delete ${areas.length} agent${areas.length === 1 ? '' : 's'}?\n\n` +
+      `GONE: ${jobs} job${jobs === 1 ? '' : 's'} and all their run history.\n\n` +
+      'KEPT: everything they made. Sheets and Notion pages live in your own accounts and are not touched.';
+    if (!window.confirm(msg)) return;
+    let done = 0;
+    for (const ar of areas) {
+      const n = ar.jobs?.length || 0;
+      const r = await fetch(`/api/agent/areas/${ar.id}${n > 0 ? '?withJobs=1' : ''}`, { method: 'DELETE' }).catch(() => null);
+      if (r?.ok) done++;
+    }
+    toast(done === areas.length ? 'success' : 'error', `Deleted ${done} of ${areas.length}`);
+    setSelected(new Set());
+    loadAreas(); loadFolders();
+  }
+
   function toggleSelected(id: string) {
     setSelected((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
@@ -1160,6 +1211,25 @@ export function Agents() {
           <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white py-1.5 pl-4 pr-1.5 text-sm shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
             <span className="whitespace-nowrap font-medium">{selected.size} selected</span>
             <button onClick={() => setPickerFor({ kind: 'bulk' })} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"><FolderInput className="h-3.5 w-3.5" />Move to…</button>
+              {/* PAUSE, RESUME AND DELETE IN BULK (BEA-1509). Moving to a folder was the only thing
+                  you could do to several agents at once. Deliberately NOT "run" — running several
+                  agents at once spends real credits and messages real people, and should stay a
+                  decision you make one at a time. */}
+              <button
+                data-testid="bulk-pause"
+                onClick={() => bulkEnabled(false)}
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold hover:border-amber-400 hover:text-amber-700 dark:border-zinc-700 dark:hover:text-amber-300"
+              >Pause</button>
+              <button
+                data-testid="bulk-resume"
+                onClick={() => bulkEnabled(true)}
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:text-emerald-300"
+              >Resume</button>
+              <button
+                data-testid="bulk-delete"
+                onClick={bulkDelete}
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:border-rose-400 dark:border-zinc-700"
+              >Delete</button>
             <button onClick={() => setSelected(new Set())} aria-label="Clear selection" className="rounded-full p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
           </div>
         </div>
