@@ -118,6 +118,34 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
     }
   }
 
+  /**
+   * Put an older version back (BEA-1506).
+   *
+   * The server moves the disk and the record together — that is the whole point of the route, and why
+   * nothing here touches either itself. Moving one without the other is how the app and the runner
+   * end up disagreeing about which version is live.
+   */
+  async function rollback(version: number) {
+    if (busy) return;
+    if (!confirm(`Put v${version} back? Every run from now on uses it.`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/agent/agents/${agentId}/worker/rollback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d?.rolledBack?.ok === false) throw new Error(d?.rolledBack?.error || d?.message || 'Could not put it back');
+      toast('success', `v${version} is live again`);
+    } catch (e: any) {
+      toast('error', e?.message || 'Could not put it back');
+    } finally {
+      setBusy(false);
+      load();
+    }
+  }
+
   async function setUseWorker(on: boolean) {
     if (busy) return;
     setBusy(true);
@@ -271,6 +299,19 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
                   {' · '}{dt(b.finishedAt || b.startedAt)}
                   {b.error && <span className="block text-[11px] text-zinc-400">{b.error}</span>}
                   {b.cause && b.origin === 'repair' && <span className="block text-[11px] text-zinc-400">what broke: {b.cause}</span>}
+                  {/* PUT AN OLDER VERSION BACK (BEA-1506). The route existed (BEA-1494) and nothing
+                      called it, so restoring a working version meant a terminal. Offered only on a
+                      version that really was built and is not the one already live — putting the live
+                      version "back" is a no-op dressed up as a choice. */}
+                  {b.version && b.version !== w.worker?.version && (b.status === 'promoted' || b.status === 'held') && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      data-testid={`rollback-v${b.version}`}
+                      onClick={() => rollback(b.version!)}
+                      className="mt-1 rounded-lg border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-emerald-300"
+                    >Put v{b.version} back</button>
+                  )}
                 </span>
               </li>
             ))}

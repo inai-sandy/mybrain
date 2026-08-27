@@ -163,3 +163,43 @@ describe('the open row', () => {
     expect(screen.queryByTestId('worker-build')).toBeNull();
   });
 });
+
+/**
+ * PUT AN OLDER VERSION BACK (BEA-1506).
+ *
+ * The rollback route has existed since BEA-1494 and nothing called it, so when his email agent
+ * regressed from v6 to v8 the only way to restore the working version was a terminal — twice.
+ */
+describe('rolling back to a version that worked', () => {
+  const state = (over: any = {}): any => ({
+    agentId: 'job-1',
+    worker: { id: 'b8', version: 8, status: 'promoted', tests: { passed: 8, failed: 0 } },
+    held: null,
+    builds: [
+      { id: 'b8', version: 8, status: 'promoted', origin: 'rebuild' },
+      { id: 'b6', version: 6, status: 'promoted', origin: 'build' },
+      { id: 'b7', version: 7, status: 'failed', origin: 'rebuild' },
+    ],
+    building: false,
+    repairing: false,
+    // Without this the panel short-circuits to "this job runs on the engine" and renders no history.
+    compilable: true,
+    ...over,
+  });
+
+  it('offers an earlier version that really was built', () => {
+    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={() => {}} toast={() => {}} />);
+    expect(screen.getByTestId('rollback-v6')).toBeTruthy();
+  });
+
+  it('does NOT offer the version that is already live', () => {
+    // "Put v8 back" when v8 is live is a no-op dressed up as a choice.
+    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={() => {}} toast={() => {}} />);
+    expect(screen.queryByTestId('rollback-v8')).toBeNull();
+  });
+
+  it('does NOT offer a version that never passed', () => {
+    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={() => {}} toast={() => {}} />);
+    expect(screen.queryByTestId('rollback-v7')).toBeNull();
+  });
+});
