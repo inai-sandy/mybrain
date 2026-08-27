@@ -910,12 +910,16 @@ the app repairs and re-promotes itself with **zero vendor calls**; a question re
 and the answer resumes the run from where it stopped, repeating no fetch, no write and no message.
 Three things a fresh session must know: **(1) it is OFF everywhere.** `Agent.useWorker` is false on
 every job, including his; nothing converts automatically and turning it on is his tap in the Worker
-row. **(2) The runner is not installed as a service.** `services/host/worker-runner.server.js` needs a
-systemd unit and that needs root; until then it is started by hand
-(`WORKER_API=https://mybrain.1site.ai WORKER_ROOT=/home/sandy/worker-root
-WORKER_RUNNER_TOKEN=<the shared secret> node …/worker-runner.server.js`,
-port 8769) and dies with the box — and while it is down every run simply goes the old way and says so,
-which is what the BEA-1394 fallback is for. **(3) A worker only repairs what is IN the worker.** The
+row. **(2) The runner IS a systemd service — this note used to say it was not, and that was out of date
+(corrected 27 Aug 2026, BEA-1510).** `mybrain-worker-runner.service` is installed in
+`/etc/systemd/system/`, **enabled** (so it starts at boot) with `Restart=always` and `RestartSec=3`.
+`systemctl status mybrain-worker-runner` is the truth; `systemctl stop` is how you hold it down,
+because killing the process just means it is back three seconds later. **Never add a second
+supervisor** — a crontab keepalive was written against this stale note and then removed, and two
+things restarting one process fight over port 8769 with the loser dying on `EADDRINUSE`. When the
+runner really is down, every run goes the old way and says so, which is what the BEA-1394 fallback is
+for. Also worth knowing: `NRestarts` read **17,276** on 27 Aug, so it has crash-looped hard at some
+point — probably before BEA-1401 made an unusable `WORKER_ROOT` a refusal instead of a crash. **(3) A worker only repairs what is IN the worker.** The
 acceptance break (a vendor answer the row reader could not read) was repaired with a new test and no
 code change, because the reading lives in the app — `tableOf`/`itemsOf` — not in the worker. Do not
 expect self-heal to fix an app-side shape bug.
