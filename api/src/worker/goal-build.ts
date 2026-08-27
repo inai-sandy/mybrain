@@ -291,6 +291,25 @@ Nothing will stop you, so the judgement is yours. Two things worth knowing while
 
 Use it properly and you will not have to guess a shape again.
 
+## A list is never one call
+
+If the goal asks for a NUMBER of things — 100 posts, every message this week, all the rows — one call
+will not get them, and no amount of arguments will change that. Vendors hand back one page and a
+cursor to the next.
+
+Use \`kit.callAll(actionId, args, { pages })\`. That is the app's own paging: it follows the vendor's
+cursor, de-dupes on the item's own id, stops early on a repeat or an empty page, and reports
+\`count\`, \`pages\` and \`credits\` back to you. **Never write a paging loop yourself** — the app can
+see the know-how card that says how this particular vendor pages, and your program cannot.
+
+This is not hypothetical. A real agent asked Reddit for the top 100 posts of the week with
+\`{ subreddit, sort }\` — no time filter, one call — got 6 posts, and stopped. The answer it received
+contained \`after: "t3_1vz262m"\`, the cursor to the next page, and the action's own card said
+"paging: cursor via after". Every fact was in front of it. One call was still the wrong shape.
+
+And check the count against the goal BEFORE you write anything: 6 of 100 is not a small sheet, it is
+a fetch that did not finish.
+
 ## Do not filter twice and then check the counts match
 
 A real failure of his, worth not repeating: the program chose 6 important emails, handed them to the

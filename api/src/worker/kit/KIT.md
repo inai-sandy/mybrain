@@ -59,6 +59,24 @@ if (!r.ok) throw new Error(r.error);
 const mails = (r.data?.messages || []).map((m) => ({ from: m.sender, subject: m.subject }));
 ```
 
+### When the answer is a LIST, do not call once
+
+```js
+const r = await kit.callAll('svc:reddit.subreddit', { subreddit: 'esp32', sort: 'top', timeframe: 'week' }, { pages: 6 });
+// -> { ok, count, credits, pages, table, data, empty, unrecognised }
+```
+
+`kit.call` makes exactly ONE call. For anything that comes back as a list — posts, messages, rows,
+search results — that is almost never what the goal asks for. A real run asked Reddit for the top 100
+posts of the week, got 6, and stopped: the answer carried `after: "t3_1vz262m"`, the cursor to the
+next page, and the program never looked at it.
+
+**`kit.callAll` is the app's own paging** — the same code that has fetched his Instagram sources for
+months. It follows the vendor's cursor, de-dupes on the item's own id, stops early on a repeat or an
+empty page, checks the credit ceiling before every page, and reports `count`, `pages` and `credits`
+so you can check what you got against the goal BEFORE you write anything. Never write your own paging
+loop; you cannot see the know-how cards that say how each vendor pages, and this can.
+
 `kit.call(actionId, args)` reaches **any action the owner has connected** — there is no per-job
 allow-list. It answers:
 

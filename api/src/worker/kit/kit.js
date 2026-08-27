@@ -175,6 +175,33 @@ function makeKit(opts) {
       return r;
     },
 
+    /**
+     * KEEP FETCHING UNTIL YOU HAVE ENOUGH (BEA-1495).
+     *
+     * `kit.call` makes exactly ONE call. That is the right tool for "create this page" and the wrong
+     * one for "the top 100 posts this week" — his ESP32 agent asked Reddit once, got 6 posts back
+     * with `after: "t3_1vz262m"` sitting in the answer, and stopped. It had the cursor and the
+     * document that explained it, and still made one call.
+     *
+     * This is the app's OWN paging — the same code his Instagram agents have used for months: follow
+     * the vendor's cursor, de-dupe on the item's own id, stop early on a repeat or an empty page,
+     * check the credit ceiling before each page, and stamp progress so a slow fetch never looks like
+     * a hang. Nothing about it is re-implemented here, which is the only way the two roads stay in
+     * step.
+     *
+     * Use it for anything that comes back as a list. `pages` is how many pages to allow (capped at
+     * the vendor's own limit); the answer carries `count`, `credits` and `pages` so the program can
+     * say honestly what it got — and check it against the goal before writing anything.
+     */
+    async callAll(actionId, args, o2) {
+      const body = { seq: seq++, actionId: String(actionId), args: args || {}, pages: (o2 && o2.pages) || 11 };
+      if (o2 && o2.recipe) body.recipe = o2.recipe;
+      const r = await post('tool', body);
+      if (r.stop) throw new WorkerFailed(r.stop);
+      remember(String(actionId), r);
+      return r;
+    },
+
     /** One pinned call the plan has no source for. Same recorder, same gate, same ceiling. */
     async tool(actionId, args) {
       const r = await post('tool', { seq: seq++, actionId: String(actionId), args: args || {} });

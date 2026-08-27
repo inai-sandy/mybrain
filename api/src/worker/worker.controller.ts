@@ -119,6 +119,48 @@ export class WorkerController {
     const step = this.stepper(runId);
     const progress = (label: string) => this.agent.stampProgress?.(runId, label);
 
+    // PAGING FOR A GOAL-BUILT PROGRAM (BEA-1495).
+    //
+    // His ESP32 agent asked Reddit for the top 100 posts of the week, got 6, and stopped. The answer
+    // it received carried `after: "t3_1vz262m"` — the cursor to the next page — and the tool document
+    // said "paging: cursor via after" in plain words. It had every fact and made one call anyway.
+    //
+    // The cause is not judgement. The Social road has done paging for this exact tool for months —
+    // follow the cursor, de-dupe on the item id, stop early on a repeat or an empty page, count the
+    // credits — and a goal-built program could not reach a line of it, because that code is only
+    // reachable through a PLAN SOURCE and a goal agent has no plan. So every agent was left to
+    // re-derive paging from scratch, per service, and this one did not.
+    //
+    // A synthetic source carries the arbitrary action into the SAME fetcher. No second paging
+    // implementation exists, which is the only way these two roads can keep agreeing.
+    if (body?.actionId && (body?.pages !== undefined || body?.until !== undefined)) {
+      const actionId = String(body.actionId);
+      const src: any = {
+        kind: 'source',
+        id: actionId,
+        actionId,
+        args: body?.args && typeof body.args === 'object' ? body.args : {},
+        pages: clampPages(body.pages ?? 11),
+      };
+      const args = { actionId, args: src.args, pages: src.pages };
+      const hit = await this.journal.once(runId, seq, 'fetchPaged', args, async () => {
+        const out = await this.sources.fetchBlock(src, this.guard(runId, job, seq), this.ctx(runId, job, seq), step, { progress });
+        return {
+          ok: !out.stop,
+          actionId,
+          credits: out.credits,
+          empty: !!out.empty,
+          unrecognised: !!out.unrecognised,
+          why: out.why || null,
+          stop: out.stop || null,
+          ...this.readWith(out.r ? out.r.data : undefined, body?.recipe, step),
+          ...rawAnswer(out.r ? out.r.data : undefined),
+        };
+      });
+      return { ...(hit.value as any), replayed: hit.replayed };
+      return hit;
+    }
+
     if (body?.sourceId) {
       const plan = planFromAgent(job);
       const src = plan.sources.find((s) => s.id === String(body.sourceId));
@@ -198,6 +240,13 @@ export class WorkerController {
       const r = await this.actions.runDetailed(actionId, '', this.ctx(runId, job, seq)(actionId, args));
       return {
         ok: !!r.ok,
+        // WHICH action this was (BEA-1495). The journal records a call's position and its answer, not
+        // the arguments that went out — so a repair reading a failed run had to look the action up on
+        // the job's PLAN. A goal-built job has no plan, `actionOf()` came back empty, and every piece
+        // of evidence was dropped by `keepEvidence`'s `if (!f.actionId) continue`. The repair of his
+        // ESP32 agent therefore ran with no evidence at all, and deleted an ask-the-owner path
+        // instead of fixing the fetch. Carrying the id in the answer costs nothing and ends that.
+        actionId,
         credits: Number(r.credits) || 0,
         error: r.error || null,
         notFound: !!r.notFound,

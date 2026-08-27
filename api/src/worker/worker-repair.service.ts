@@ -170,12 +170,17 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.journal.entries(runId).catch(() => [] as any[]);
     const out: FetchEvidence[] = [];
     for (const e of rows || []) {
-      if (e.fn !== 'fetchSource' && e.fn !== 'tool') continue;
+      // `fetchPaged` is the paged fetch a goal-built program uses (BEA-1495). Leaving it out here
+      // would make the very calls that matter most invisible to the repair.
+      if (e.fn !== 'fetchSource' && e.fn !== 'tool' && e.fn !== 'fetchPaged') continue;
       const answer = e.value || {};
-      const sourceId = String(answer.sourceId || answer.label || `call ${e.seq}`);
+      const sourceId = String(answer.sourceId || answer.label || answer.actionId || `call ${e.seq}`);
       out.push({
         sourceId,
-        actionId: actionOf(job, sourceId),
+        // The answer's OWN action id first (BEA-1495). `actionOf` reads the job's plan, and a
+        // goal-built job has no plan — so this used to be empty for exactly the agents that fail
+        // most, and `keepEvidence` silently dropped all of their evidence.
+        actionId: answer.actionId || actionOf(job, sourceId),
         // The call's REAL arguments, off the job's own plan — the journal records the call's position
         // and its answer, not what went out. Without this the evidence would be filed under an empty
         // argument set, and "which hashtag broke" is exactly what a repair wants to know.
@@ -185,7 +190,7 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
         unrecognised: !!answer.unrecognised,
         why: answer.why || null,
         stop: answer.stop || null,
-        rows: answer.table?.rows?.length ?? 0,
+        rows: answer.table?.rows?.length ?? answer.count ?? 0,
         columns: answer.table?.columns || [],
         answer,
       });
