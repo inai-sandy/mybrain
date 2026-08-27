@@ -1,4 +1,29 @@
 import 'reflect-metadata';
+import { setDefaultAutoSelectFamily } from 'net';
+
+/**
+ * IPv6 TO AWS BLACKHOLES ON THIS BOX — TURN OFF HAPPY EYEBALLS (BEA-1511).
+ *
+ * His ESP32 agent died on `Reddit could not do that: fetch failed (ETIMEDOUT)`, and every retry died
+ * the same way. Measured from inside the container:
+ *
+ *   forced IPv4  -> HTTP 404 in 959ms   (reaches it)
+ *   by IP + SNI  -> HTTP 403 in 851ms   (reaches it)
+ *   default      -> ETIMEDOUT in 528ms  (does not)
+ *
+ * Raw TCP to the same addresses connects in ~290ms, so it is not routing and it is not the vendor.
+ * ScrapeCreators is AWS us-west-2 and dual-stack; IPv6 egress from this container goes nowhere.
+ *
+ * `NODE_OPTIONS=--dns-result-order=ipv4first` was already set and is NOT enough: since Node 20,
+ * `autoSelectFamily` (Happy Eyeballs) is on by default and races BOTH families whatever order the
+ * lookup returned, giving up after two 250ms attempts — which is exactly the 528ms seen above.
+ *
+ * Set here rather than in the deploy environment on purpose: an env var is one edit away from being
+ * lost, and losing it costs a silent outage of every agent that talks to a dual-stack vendor. GitHub
+ * and Google were unaffected throughout, which is what made this look like a vendor problem.
+ */
+setDefaultAutoSelectFamily(false);
+
 import { NestFactory } from '@nestjs/core';
 import { json, urlencoded } from 'express';
 import { BODY_LIMIT } from './common/body-limit';
