@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { agentKind } from '../ui/agentKind';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X, Send, Pencil, MoreHorizontal, Copy, Check, CheckSquare, Square, FolderInput } from 'lucide-react';
 import { useToast } from '../ui/Toast';
@@ -625,6 +626,18 @@ function StarterCard({ s, onPick }: { s: Starter; onPick: (s: Starter) => void }
   );
 }
 
+/**
+ * An area's kind, from the jobs inside it (BEA-1506).
+ *
+ * Any tools job makes the whole area a tools area — what it can touch in his accounts matters more
+ * than what it also happens to read. An area with no jobs yet has nothing to act on, so it reads as
+ * research until it does.
+ */
+function areaKind(ar: any): 'tools' | 'research' {
+  const jobs = ar?.jobs || [];
+  return jobs.some((j: any) => agentKind(j) === 'tools') ? 'tools' : 'research';
+}
+
 export function Agents() {
   const nav = useNavigate();
   const toast = useToast();
@@ -655,6 +668,10 @@ export function Agents() {
   const [q, setQ] = useState('');
   // Agents list standards (BEA-1183) — always on, 12 per page.
   const [agentFilter, setAgentFilter] = useState<'all' | 'waiting' | 'ran' | 'never'>('all');
+  // TOOLS OR RESEARCH (BEA-1506) — his segregation, as tabs above the list. Deliberately separate
+  // from `agentFilter`: "show me the research ones that need me" is a real thing to want, and folding
+  // kind into the same dropdown would make the two mutually exclusive.
+  const [kindTab, setKindTab] = useState<'all' | 'tools' | 'research'>('all');
   const [agentSort, setAgentSort] = useState<'recent' | 'name' | 'jobs'>('recent');
   const [agentPage, setAgentPage] = useState(1);
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
@@ -983,6 +1000,9 @@ export function Agents() {
           const matched = scope.filter((ar) => {
             if (needle && !(ar.name + ' ' + (ar.description || '') + ' ' + ar.jobs.map((j: any) => j.name).join(' ')).toLowerCase().includes(needle)) return false;
             const jobs = ar.jobs || [];
+            // TOOLS OR RESEARCH (BEA-1506). An area holding any tools job is a tools area: what it
+            // can touch in his accounts matters more than what it also happens to read.
+            if (kindTab !== 'all' && areaKind(ar) !== kindTab) return false;
             if (agentFilter === 'waiting') return jobs.some((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
             if (agentFilter === 'ran') return jobs.some((j: any) => j.lastRun);
             if (agentFilter === 'never') return jobs.every((j: any) => !j.lastRun);
@@ -1001,6 +1021,36 @@ export function Agents() {
           const narrowed = needle || agentFilter !== 'all';
           return (
             <div className="space-y-3">
+              {/* TOOLS OR RESEARCH (BEA-1506). Tabs rather than another dropdown: which kind am I
+                  looking for is the first question you ask of a list of agents, and it should cost no
+                  clicks. Counts come from the SAME scope the list is drawn from, so a tab never
+                  promises rows a folder has already filtered out. */}
+              <div className="flex flex-wrap items-center gap-1 border-b border-zinc-200 pb-1 dark:border-zinc-800">
+                {([
+                  { k: 'all' as const, label: 'All' },
+                  { k: 'tools' as const, label: '\u{1F527} Tools' },
+                  { k: 'research' as const, label: '\u{1F50E} Research' },
+                ]).map((t) => {
+                  const n = t.k === 'all' ? scope.length : scope.filter((ar: any) => areaKind(ar) === t.k).length;
+                  const on = kindTab === t.k;
+                  return (
+                    <button
+                      key={t.k}
+                      data-testid={`kind-tab-${t.k}`}
+                      aria-pressed={on}
+                      onClick={() => { setKindTab(t.k); setAgentPage(1); }}
+                      className={
+                        'shrink-0 rounded-t-lg px-3 py-1.5 text-xs font-semibold transition-colors ' +
+                        (on
+                          ? 'border-b-2 border-emerald-500 text-emerald-700 dark:text-emerald-300'
+                          : 'border-b-2 border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
+                      }
+                    >
+                      {t.label}<span className="ml-1.5 text-[10px] font-bold text-zinc-400">{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative min-w-0 flex-1 basis-48">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -1048,7 +1098,21 @@ export function Agents() {
                       <div className="flex items-start gap-2.5">
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: color + '22' }}>{ar.icon || '🤖'}</span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium group-hover:text-emerald-600">{ar.name}</span>
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="min-w-0 truncate font-medium group-hover:text-emerald-600">{ar.name}</span>
+                            {/* Which kind, on the tile itself (BEA-1506) — so the two are told apart
+                                without reaching for a tab. */}
+                            <span
+                              data-testid={`area-kind-${areaKind(ar)}`}
+                              title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}
+                              className={
+                                'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' +
+                                (areaKind(ar) === 'tools'
+                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                                  : 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300')
+                              }
+                            >{areaKind(ar) === 'tools' ? '\u{1F527}' : '\u{1F50E}'}</span>
+                          </span>
                           <span className="mt-0.5 line-clamp-2 block text-xs text-zinc-500">{ar.description || (ar.jobCount === 1 && ar.jobs[0]?.name && ar.jobs[0].name !== ar.name ? ar.jobs[0].name : 'Your agent')}</span>
                         </span>
                       </div>
