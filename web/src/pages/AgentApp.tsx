@@ -324,7 +324,12 @@ export function AgentApp() {
             <h1 className="min-w-0 truncate text-xl font-bold">{a.name}</h1>
             <AgentKindBadge agent={a} />
           </div>
-          <p className="truncate text-sm text-zinc-500">{a.description || a.scheduleText || 'Your agent'}</p>
+          {/* WHAT IT DOES AND WHEN, not Codex's opening sentence (BEA-1505). A goal-built agent's
+              description IS the whole goal, and Codex writes goals like a person talking — so this
+              line read "I will build an agent that you run manually whenever you want. When it
+              runs…" and told him nothing. The schedule is the more useful fact when there is one;
+              the whole goal is one tap away under "What it does". */}
+          <p className="truncate text-sm text-zinc-500" title={a.description || undefined}>{a.scheduleText || subtitleOf(a.description) || 'Your agent'}</p>
           {planCost && (
             <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>{creditsText(planCost)} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>
           )}
