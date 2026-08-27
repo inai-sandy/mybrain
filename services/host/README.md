@@ -168,3 +168,40 @@ by their own folders (`current` is a symlink, so a worker rollback is a symlink 
 as they happen, a hung worker is killed at the timeout, a kit-too-new worker is refused unstarted,
 and the child's environment is checked from inside the child. It was also driven by hand on the VPS
 on 172.18.0.1:8769 with `curl -N` before it shipped.
+
+
+## Keeping the worker runner alive (BEA-1510)
+
+The runner is the host process that executes agent workers. Started by hand it dies with the box, and
+every agent then quietly falls back to the engine road — the fallback working as designed, but not
+something to leave running for days.
+
+**The proper way** is the systemd unit beside this file:
+
+```
+sudo cp services/host/mybrain-worker-runner.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now mybrain-worker-runner
+```
+
+That needs root. On a box where this account has no passwordless root, `ensure-running.sh` does the
+same job from the user's own crontab:
+
+```
+@reboot sleep 20 && /home/sandy/worker-runner/ensure-running.sh
+*/3 * * * *      /home/sandy/worker-runner/ensure-running.sh
+```
+
+`@reboot` covers a restart; the three-minute line covers a crash **and a wedge** — it checks the
+PORT, not a process name, because a process that is alive but no longer listening is exactly the case
+a `pgrep` would call healthy. If something stale is holding the port it is stopped first, or the new
+one dies on `EADDRINUSE` (which happened twice doing this by hand).
+
+It is idempotent: while the runner answers `/status` it does nothing at all, so running it every three
+minutes costs one curl. Every start and every failure is written to `run.log` with a timestamp —
+a start script that reports nothing is how you end up believing something is running for a week.
+
+**Proved before shipping**: no-op while healthy (same pid before and after), recovers a killed
+runner, and clears a wedged process that held the port without answering.
+
+If you later install the systemd unit, remove the two crontab lines — two things restarting one
+process would fight over the port.
