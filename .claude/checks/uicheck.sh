@@ -61,6 +61,12 @@ AUTH_MARKER=""
 # gate run after the first hits the login wall. Loaded before the first page; re-saved after a
 # clean pass because the app's session cookie is a sliding token and a stale file expires.
 STATE=".claude/checks/ui-state.json"
+# Mint a fresh session before looking (BEA-1510). The saved cookie lasts a few hours, so it expires
+# during any long working day — and an expired one makes this gate photograph a login page and fail
+# the ship. That happened three times in one day, each fixed by hand. One API call removes the whole
+# class of failure. If it cannot log in (no secrets, app down) the old state is left alone and the
+# login-wall check below still catches it honestly.
+[ -x .claude/checks/refresh-ui-session.sh ] && .claude/checks/refresh-ui-session.sh >/dev/null 2>&1
 [ -f "$STATE" ] && agent-browser state load "$STATE" >/dev/null 2>&1 || true
 
 echo "== UI CHECK: ${BASE} =="
