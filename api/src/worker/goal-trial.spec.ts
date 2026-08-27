@@ -261,6 +261,38 @@ describe('what his answer does', () => {
 });
 
 describe('naming the job', () => {
+  /**
+   * A NAME, NOT CODEX'S OPENING SENTENCE (BEA-1505).
+   *
+   * Codex writes its goals conversationally, so taking the first line gave him four agents called
+   * things like "I will build an agent that you run manually whenever you…" — filling the header and
+   * saying nothing. Seen on his own screen before this was written.
+   */
+  it('uses the name he gave the area, when he gave one', () => {
+    expect(titleOf('I will build an agent that fetches things.', 'GitHub top 5')).toBe('GitHub top 5');
+  });
+
+  it('ignores a default area name and falls back to the goal', () => {
+    expect(titleOf('Read his Gmail at 22:00.', 'New agent')).toBe('Read his Gmail at 22:00.');
+    expect(titleOf('Read his Gmail at 22:00.', '   ')).toBe('Read his Gmail at 22:00.');
+  });
+
+  it('strips the preamble Codex actually writes', () => {
+    // All four of these are real first lines from his agents.
+    expect(titleOf('I will build an agent you run by hand that uses GitHub to fetch your repositories.'))
+      .toBe('Uses GitHub to fetch your repositories.');
+    expect(titleOf('Build a hand-run agent that uses GitHub to fetch the 20 most recent repos.'))
+      .toBe('Uses GitHub to fetch the 20 most recent repos.');
+    expect(titleOf('The agent will run every day at 22:00 and read my email.'))
+      .toBe('Run every day at 22:00 and read my email.');
+  });
+
+  it('keeps the original line when stripping would leave nothing useful', () => {
+    // A blank name is worse than a bad one.
+    const all = 'I will build an agent that you run manually.';
+    expect(titleOf(all).length).toBeGreaterThan(8);
+  });
+
   it('takes the goal’s first real line, and nothing more', () => {
     expect(titleOf('# Nightly email digest\n\nIt reads Gmail…')).toBe('Nightly email digest');
     expect(titleOf('\n\n   Read his Gmail at 22:00.\nAnd more.')).toBe('Read his Gmail at 22:00.');

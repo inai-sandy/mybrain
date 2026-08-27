@@ -268,10 +268,15 @@ export function AgentApp() {
   const inp = 'w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900';
   const cfgInp = 'w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
 
+  // ONLY THE TABS THAT MEAN SOMETHING FOR THIS AGENT (BEA-1505).
+  //
+  // A tools agent runs a compiled program: it has no flow picture on purpose (BEA-1470) and no
+  // evals. Showing both anyway is half of why the screen reads as confusing — the Flow tab even
+  // opens on "No picture of the steps yet · Draw the flow", inviting him to make something that will
+  // never be used, for an agent that was working perfectly.
   const MODES: { k: Mode; label: string; icon: any }[] = [
     { k: 'chat', label: 'Chat', icon: MessageSquare },
-    { k: 'flow', label: 'Flow', icon: Workflow },
-    { k: 'evals', label: 'Checks', icon: ListChecks },
+    ...(hasProgram(a) ? [] : [{ k: 'flow' as Mode, label: 'Flow', icon: Workflow }, { k: 'evals' as Mode, label: 'Checks', icon: ListChecks }]),
     { k: 'runs', label: 'Runs', icon: HistoryIcon },
   ];
 
@@ -291,7 +296,10 @@ export function AgentApp() {
       <header className="flex items-center gap-3">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-2xl" style={{ background: color + '22' }}>{a.icon || '🤖'}</span>
         <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 truncate text-xl font-bold"><span className="truncate">{a.name}</span><AgentKindBadge agent={a} /></h1>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="min-w-0 truncate text-xl font-bold">{a.name}</h1>
+            <AgentKindBadge agent={a} />
+          </div>
           <p className="truncate text-sm text-zinc-500">{a.description || a.scheduleText || 'Your agent'}</p>
           {planCost && (
             <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>{creditsText(planCost)} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>

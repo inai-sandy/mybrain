@@ -193,8 +193,11 @@ export class GoalTrialService implements OnModuleInit {
    * Everything about HOW the work happens lives in the program Codex wrote, which is the point.
    */
   private async jobFor(areaId: string, goal: any): Promise<{ id: string }> {
+    // The area's own name wins when he gave it one (BEA-1505) — he called it "GitHub top 5" because
+    // that is what it is, and no sentence Codex writes will beat that.
+    const area: any = await this.prisma?.agentArea?.findUnique?.({ where: { id: areaId }, select: { name: true } }).catch(() => null);
     const input: any = {
-      name: titleOf(goal.text),
+      name: titleOf(goal.text, area?.name),
       description: String(goal.text || '').slice(0, 2000),
       prompt: String(goal.text || ''),
       tools: goal.tools || [],
@@ -257,10 +260,46 @@ export class GoalTrialService implements OnModuleInit {
  * The shortest possible reading of Codex's text, and the only one anywhere: a job row needs a name
  * for lists and notifications. It is a label, never used to decide anything.
  */
-export function titleOf(goal: string): string {
-  const first = String(goal || '')
-    .split('\n')
-    .map((l) => l.replace(/^#+\s*/, '').trim())
-    .find((l) => l.length > 0) || 'New agent';
-  return first.length > 60 ? `${first.slice(0, 57)}…` : first;
+/**
+ * A NAME, NOT CODEX'S OPENING SENTENCE (BEA-1505).
+ *
+ * This took the goal's first line, and Codex writes its goals conversationally — so four of his
+ * agents ended up called things like **"I will build an agent that you run manually whenever you…"**,
+ * filling the header and telling him nothing. The useful words are always after the preamble.
+ *
+ * The area's own name wins when he gave it one: he called it "GitHub top 5" because that is what it
+ * is. Otherwise the preamble is stripped and what remains is used, which turns
+ * "I will build an agent you run by hand that uses GitHub to fetch your 5 most recent repositories"
+ * into "Uses GitHub to fetch your 5 most recent repositories".
+ */
+const PREAMBLE = new RegExp(
+  '^(?:i\\s+will\\s+)?build\\s+(?:a|an)\\s+[^.]*?agent\\b[^.]*?\\bthat\\s+' +
+    '|^i\\s+will\\s+build\\s+[^.]*?\\bthat\\s+' +
+    '|^the\\s+agent\\s+will\\s+' +
+    '|^this\\s+agent\\s+(?:will\\s+)?',
+  'i',
+);
+
+/** A name the area was given by hand. "New agent"-style defaults are not names. */
+const DEFAULT_AREA_NAMES = new Set(['new agent', 'new area', 'untitled', 'agent', '']);
+
+export function titleOf(goal: string, areaName?: string | null): string {
+  const given = String(areaName || '').trim();
+  if (given && !DEFAULT_AREA_NAMES.has(given.toLowerCase())) return clip(given);
+
+  const first =
+    String(goal || '')
+      .split('\n')
+      .map((l) => l.replace(/^#+\s*/, '').trim())
+      .find((l) => l.length > 0) || 'New agent';
+
+  const trimmed = first.replace(PREAMBLE, '').trim();
+  // Only take the stripped version if something real is left — a goal that is ALL preamble keeps its
+  // original line, because a blank name is worse than a bad one.
+  const use = trimmed.length >= 8 ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : first;
+  return clip(use);
+}
+
+function clip(s: string): string {
+  return s.length > 60 ? `${s.slice(0, 57)}…` : s;
 }
