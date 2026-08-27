@@ -4,7 +4,8 @@ import { LlmService } from '../llm/llm.service';
 import { ComposioProvider } from './composio.provider';
 import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { WhatsAppProvider } from './whatsapp.provider';
-import { ExecuteResult, parseServiceToolId, ServiceAccount, ServiceAction, ServiceProvider } from './service-provider';
+import { ExecuteResult, isReadAction, parseServiceToolId, ServiceAccount, ServiceAction, ServiceProvider } from './service-provider';
+import { BACKOFF_MS, RETRIES, isTransient, retriedLine } from './transient';
 import { GatePause, PendingGate, ServiceGatesService } from './service-gates.service';
 import { ToolLessonService } from './tool-lesson.service';
 import { ToolSampleService } from './tool-sample.service';
@@ -313,9 +314,30 @@ export class ServiceActionsService {
     const started = Date.now();
     // Typed as one shape on both arms: this repo compiles with `strict: false`, so a union of two
     // object literals does not narrow and every field read after it fails to compile.
-    const res: ExecuteResult = await p
+    // A FLAKY VENDOR IS NOT A FAILED RUN (BEA-1496).
+    //
+    // His ESP32 agent died on "Reddit could not do that: Internal Server Error" — and the identical
+    // call worked seconds later by hand. One bad moment at the vendor threw away a run. Every agent
+    // meets this eventually, so it is handled here, at the one call site, rather than asked of every
+    // program Codex writes.
+    //
+    // READS ONLY, and that is the whole safety of it: a read repeats harmlessly, while a write that
+    // answers 500 may have actually worked and would create the page twice. A failed write stays
+    // failed and is reported honestly.
+    const repeatable = p.readOnly === true || String(action.method || '').toUpperCase() === 'GET' || isReadAction(actionId, service);
+    let res: ExecuteResult = await p
       .execute(actionId, args, chosen ? { connectionId: chosen.id } : {})
       .catch((e: any): ExecuteResult => ({ ok: false, error: String(e?.message || e) }));
+    for (let attempt = 1; attempt <= RETRIES; attempt++) {
+      if (res?.ok || !repeatable || !isTransient(res?.error, (res as any)?.status)) break;
+      const line = retriedLine(actionId, attempt, String(res?.error || ''));
+      say(`   ↻ ${line}`);
+      this.log.warn(line);
+      await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt - 1] ?? 3500));
+      res = await p
+        .execute(actionId, args, chosen ? { connectionId: chosen.id } : {})
+        .catch((e: any): ExecuteResult => ({ ok: false, error: String(e?.message || e) }));
+    }
     const ms = (res as any)?.ms ?? Date.now() - started;
 
     // The honest cost, when the provider meters calls (BEA-1355): read off ITS answer, never
