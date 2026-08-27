@@ -188,18 +188,18 @@ describe('rolling back to a version that worked', () => {
   });
 
   it('offers an earlier version that really was built', () => {
-    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={() => {}} toast={() => {}} />);
+    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={async () => {}} toast={() => {}} />);
     expect(screen.getByTestId('rollback-v6')).toBeTruthy();
   });
 
   it('does NOT offer the version that is already live', () => {
     // "Put v8 back" when v8 is live is a no-op dressed up as a choice.
-    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={() => {}} toast={() => {}} />);
+    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={async () => {}} toast={() => {}} />);
     expect(screen.queryByTestId('rollback-v8')).toBeNull();
   });
 
   it('does NOT offer a version that never passed', () => {
-    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={() => {}} toast={() => {}} />);
+    render(<WorkerRow agentId="job-1" worker={state()} contractWords={[]} reload={async () => {}} toast={() => {}} />);
     expect(screen.queryByTestId('rollback-v7')).toBeNull();
   });
 });
