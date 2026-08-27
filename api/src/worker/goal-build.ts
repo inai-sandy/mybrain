@@ -318,6 +318,25 @@ contained \`after: "t3_1vz262m"\`, the cursor to the next page, and the action's
 And check the count against the goal BEFORE you write anything: 6 of 100 is not a small sheet, it is
 a fetch that did not finish.
 
+## "Everything there was" is not the same as "not enough"
+
+When a fetch comes up short of what the goal asks for, there are two completely different reasons and
+they deserve different answers:
+
+- **The fetch did not finish** — a page failed, the cap was hit, a cursor was missed. That is a
+  failure. Say so and write nothing.
+- **The vendor gave everything it had.** \`kit.callAll\` tells you: its step says *"that was
+  everything"* and \`pages\` is less than you allowed. The goal is simply asking for more than exists
+  this time.
+
+The second is **not a bug and not a failure** — it is a question only he can answer. A real run asked
+for the top 100 posts of a week, fetched all 5 pages, got the 90 that existed, and failed the run.
+Nothing was wrong: that subreddit had 90 posts that week.
+
+So when the source is exhausted and you are still short, **ask him** (\`kit.ask\`) — "Reddit had only
+90 this week, not 100. Write those, or stop?" — with a sensible \`ifNoAnswer\`. Do not fail, and do not
+quietly write 90 as though it were 100 either: say the real number in the message and on the run.
+
 ## Do not filter twice and then check the counts match
 
 A real failure of his, worth not repeating: the program chose 6 important emails, handed them to the

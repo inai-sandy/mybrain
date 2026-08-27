@@ -130,3 +130,46 @@ describe('a goal-built program is told not to reach for fetchSource', () => {
     expect(ctl()).toContain('Its sources are:');
   });
 });
+
+/**
+ * EXHAUSTED IS NOT SHORT (BEA-1502).
+ *
+ * His ESP32 agent finally paged properly: 5 pages, 90 posts, and the fetcher said "that was
+ * everything". r/esp32 had 90 top posts that week — 100 did not exist. The program failed the run
+ * anyway, because a shortfall was the only thing it knew how to see.
+ *
+ * A fetch that did not finish is a failure. A vendor that gave everything it had is a question.
+ */
+describe('a short fetch is not always a failed one', () => {
+  const flatten = (t: string) => t.replace(/\s+/g, ' ');
+  const prompt = () => flatten(goalBuildPrompt({
+    job: { id: 'j1', name: 'ESP32 weekly top posts' },
+    goal: 'Top 100 posts from r/esp32 each week into a Sheet.',
+    transcript: [{ who: 'you', text: 'top 100 of the week' }],
+    tools: [{ actionId: 'svc:reddit.subreddit', name: 'Subreddit posts', card: '# Subreddit posts' }],
+    kit: { version: '1', js: '// kit', doc: '# KIT' },
+    version: 1,
+  } as any));
+
+  it('names both reasons and separates them', () => {
+    const t = prompt();
+    expect(t).toContain('The fetch did not finish');
+    expect(t).toContain('The vendor gave everything it had');
+  });
+
+  it('says which signal to read, so it is decidable rather than a guess', () => {
+    expect(prompt()).toContain('that was everything');
+  });
+
+  it('asks him rather than failing, and rather than passing 90 off as 100', () => {
+    const t = prompt();
+    expect(t).toContain('ask him');
+    expect(t).toContain('Do not fail');
+    // The other half: a quiet 90-for-100 would be the "never invent a result" failure in disguise.
+    expect(t).toContain('say the real number');
+  });
+
+  it('carries the real run, so the rule does not read as invented caution', () => {
+    expect(prompt()).toContain('that subreddit had 90 posts that week');
+  });
+});
