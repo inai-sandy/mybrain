@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { agentKind, hasProgram } from '../ui/agentKind';
+import { AgentKindBadge } from '../ui/AgentKindBadge';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ChevronRight, Loader2, Play, Sparkles, FileText, CheckCircle2, RotateCcw, MessageSquare, Save, Check, X, Settings as GearIcon, Workflow, Clock, ListChecks, History as HistoryIcon } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
@@ -289,7 +291,7 @@ export function AgentApp() {
       <header className="flex items-center gap-3">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-2xl" style={{ background: color + '22' }}>{a.icon || '🤖'}</span>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold">{a.name}</h1>
+          <h1 className="flex items-center gap-2 truncate text-xl font-bold"><span className="truncate">{a.name}</span><AgentKindBadge agent={a} /></h1>
           <p className="truncate text-sm text-zinc-500">{a.description || a.scheduleText || 'Your agent'}</p>
           {planCost && (
             <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>{creditsText(planCost)} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>
@@ -513,7 +515,21 @@ export function AgentApp() {
               <SettingsRow k="what" icon="🎯" title="What it does" full
                 summary={whatSummary(a) + (cfgDirty ? UNSAVED : '')}
                 open={openRow === 'what'} onToggle={toggleRow}>
-                {goalOf(a.description) && (
+                {/* THE GOAL, REACHABLE FROM THE AGENT IT BUILT (BEA-1504).
+                   The goal IS a tools agent — it is what Codex compiles. It lived on a page keyed to
+                   the chat area with no link from the agent, so reading or correcting it meant going
+                   the long way round, and most of the time he did not know it was there at all. */}
+              {hasProgram(a) && a.areaId && (
+                <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 dark:border-emerald-500/20 dark:bg-emerald-500/5">
+                  <span className="text-xs text-zinc-600 dark:text-zinc-300">This agent is built from a goal you approved.</span>
+                  <button
+                    data-testid="open-goal"
+                    onClick={() => nav(`/agent/ar/${a.areaId}/brief`)}
+                    className="shrink-0 rounded-lg border border-emerald-300 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                  >Read or change it</button>
+                </div>
+              )}
+              {goalOf(a.description) && (
                   <div>
                     <span className="block text-xs font-medium text-zinc-500">For (the goal)</span>
                     <p className="mt-1 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-800/50 dark:text-zinc-300" data-testid="goal-line">{goalOf(a.description)}</p>
@@ -607,8 +623,13 @@ export function AgentApp() {
               {/* 3c · Worker 🛠 — the compiled version, its tests, staleness, repairs, and the switch
                    that decides which road a run takes (BEA-1394). Direct-fetch jobs only: an engine
                    job has no plan to compile, and the row says so rather than offering a dead button. */}
-              {isDirectFetch && (
-                <SettingsRow k="worker" icon="🛠" title="Worker"
+              {/* THE PROGRAM PANEL, FOR EVERY TOOLS AGENT (BEA-1504).
+                   It used to be `isDirectFetch` — "has pinned tool arguments" — which only a Social
+                   agent has. So the panel holding the version, the checks, Rebuild and the road the
+                   next run takes was hidden on exactly the agents that have a program: his goal-built
+                   ones. For three days the only way to rebuild them was a terminal. */}
+              {hasProgram(a) && (
+                <SettingsRow k="worker" icon="🛠" title="The program"
                   summary={workerSummary(worker)}
                   open={openRow === 'worker'} onToggle={toggleRow}>
                   <WorkerRow agentId={String(id)} worker={worker} contractWords={contractWords} reload={loadWorker} toast={toast} />

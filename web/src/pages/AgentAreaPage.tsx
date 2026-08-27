@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AgentKindBadge } from '../ui/AgentKindBadge';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Loader2, CheckCircle2, XCircle, PauseCircle, CalendarClock, ChevronRight, Wrench, Trash2, Pencil, Check, X, Search } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
@@ -270,7 +271,7 @@ export function AgentAreaPage() {
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                   <span className="min-w-0 truncate text-sm font-semibold">{j.name}</span>
-                  <span title={originOf(j.origin).title} className={'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' + originOf(j.origin).cls}>{originOf(j.origin).label}</span>
+                  <AgentKindBadge agent={j} />
                 </span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
                   {j.lastRun ? (
