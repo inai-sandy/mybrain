@@ -37,6 +37,22 @@ type Mode = 'flow' | 'chat' | 'evals' | 'runs';
  * Settings (task, outcome, skills, schedule, tools, move, delete) is a sheet off the header gear,
  * so the four tabs stay about the work rather than the plumbing.
  */
+/**
+ * The one line under an agent's name (BEA-1505).
+ *
+ * A goal reads like a person talking, so its first sentence is nearly always preamble — "I will build
+ * an agent that you run manually whenever you want." The sentence that says what the thing DOES is
+ * the one after it, so a description that opens with preamble gives up its first sentence.
+ */
+export function subtitleOf(description?: string | null): string {
+  const text = String(description || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const sentences = text.split(/(?<=\.)\s+/).filter(Boolean);
+  const preamble = /^(?:i\s+will\s+build|build\s+(?:a|an)\b|this\s+agent\b|the\s+agent\s+will\b)/i;
+  const useful = sentences.find((x, i) => !(i === 0 && preamble.test(x))) || sentences[0] || text;
+  return useful.replace(/^when\s+it\s+runs,?\s*/i, '').trim();
+}
+
 export function AgentApp() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -274,9 +290,17 @@ export function AgentApp() {
   // evals. Showing both anyway is half of why the screen reads as confusing — the Flow tab even
   // opens on "No picture of the steps yet · Draw the flow", inviting him to make something that will
   // never be used, for an agent that was working perfectly.
+  // ONLY WHAT MEANS SOMETHING FOR THIS AGENT (BEA-1505).
+  //
+  // The 'flow' mode is the MAIN screen — the run button, the latest result, the history — so it stays
+  // for both kinds. What changes is its name and what it contains: a tools agent runs a compiled
+  // program and has no flow picture on purpose (BEA-1470), so calling its main screen "Flow" and
+  // offering "Draw the flow" invites him to make something that will never be used. It is "Run" for
+  // a tools agent, and Checks (evals) is dropped entirely — that is an engine-road idea.
   const MODES: { k: Mode; label: string; icon: any }[] = [
     { k: 'chat', label: 'Chat', icon: MessageSquare },
-    ...(hasProgram(a) ? [] : [{ k: 'flow' as Mode, label: 'Flow', icon: Workflow }, { k: 'evals' as Mode, label: 'Checks', icon: ListChecks }]),
+    { k: 'flow', label: hasProgram(a) ? 'Run' : 'Flow', icon: Workflow },
+    ...(hasProgram(a) ? [] : [{ k: 'evals' as Mode, label: 'Checks', icon: ListChecks }]),
     { k: 'runs', label: 'Runs', icon: HistoryIcon },
   ];
 
@@ -388,7 +412,9 @@ export function AgentApp() {
         </section>
 
         {/* The picture of the steps — right under the run screen, so the flow is the first thing seen (BEA-1366). */}
-        <FlowPanel id={id!} flow={flow} onChanged={loadFlow} goChat={() => setMode('chat')} lastRun={runs?.[0]} />
+        {/* A tools agent has no flow picture by design, so the empty "Draw the flow" panel is not
+            shown to it — it was offering to build something that would never run (BEA-1505). */}
+        {!hasProgram(a) && <FlowPanel id={id!} flow={flow} onChanged={loadFlow} goChat={() => setMode('chat')} lastRun={runs?.[0]} />}
 
         {latest && (
           <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
