@@ -60,9 +60,17 @@ describe('the agents home matches the approved design', () => {
     expect(lastWaiting).toBeLessThan(grid);
   });
 
+  // A job that ran four times overnight filled the strip with four identical lines and pushed the
+  // rest off the screen. The design shows what DIFFERENT agents did.
+  it('shows one landed row per agent, not every run', () => {
+    const s = src();
+    expect(s).toMatch(/const seen = new Set<string>\(\)/);
+    expect(s).toMatch(/if \(seen\.has\(key\)\) continue/);
+  });
+
   it('reads running and landed from the home payload the API already serves', () => {
     const s = src();
     expect(s).toMatch(/const running = home\?\.running/);
-    expect(s).toMatch(/const landed = home\?\.landed/);
+    expect(s).toMatch(/home\?\.landed/);   // read inside the per-agent dedupe
   });
 });

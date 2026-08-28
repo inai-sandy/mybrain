@@ -879,7 +879,21 @@ export function Agents() {
   const waiting = home?.waiting || [];
   // Mission Control's other two strips (BEA-1533). The API has served these the whole time.
   const running = home?.running || [];
-  const landed = home?.landed || [];
+  // ONE ROW PER AGENT, newest first (BEA-1533). The raw list is every finished run, so a job that ran
+  // four times overnight filled this strip with four identical lines and pushed everything else off
+  // the screen. The design shows what DIFFERENT agents did — the latest outcome per agent is the
+  // useful fact; the rest is in History.
+  const landed = (() => {
+    const seen = new Set<string>();
+    const out: LandedItem[] = [];
+    for (const l of home?.landed || []) {
+      const key = String(l.title || l.id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(l);
+    }
+    return out;
+  })();
   // running / landed are no longer shown here (BEA-1181) — History owns them.
   const agents = home?.agents || null;
   // Areas (BEA-1098): the home now shows agents-as-areas; jobs live inside each area's page.
