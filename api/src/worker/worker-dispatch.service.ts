@@ -11,7 +11,26 @@ import { WorkerTokenService } from './worker-token.service';
 import { kitVersion } from './kit-version';
 
 /** What `decide()` answers: which road this run takes, and the one line the owner reads about it. */
+/**
+ * A job whose whole capability is its compiled worker (BEA-1541).
+ *
+ * Created from an approved goal: no tools of its own, and its `prompt` is the instruction Codex was
+ * given to WRITE the worker, not a task the engine can carry out. Running one without its worker is
+ * guaranteed waste, so the road refuses instead of falling back.
+ */
+export function isGoalBuilt(job: any): boolean {
+  return String(job?.origin || '') === 'goal';
+}
+
 export type RoadDecision = {
+  /**
+   * Do not run this at all (BEA-1541) — distinct from `use:false`, which means "run it the OLD way".
+   *
+   * The old way is only an answer when there is something to fall back TO. A goal-built job's whole
+   * capability is its compiled worker; handing its build instruction to the engine produced three
+   * minutes of nothing and an empty result the first time it happened.
+   */
+  refuse?: boolean;
   /** true = the worker road. Anything else runs exactly as it does today. */
   use: boolean;
   /** A visible step to write on the run when the switch is ON but the worker road is not available. */
@@ -66,6 +85,18 @@ export class WorkerDispatchService implements OnModuleInit {
     // The worker's own `/finish` is only one of four; the other three are the sweeper's, and by then
     // the worker process is already gone and can never call anything.
     this.agent.setJournalCleanup?.((runId: string) => this.journal.forget(runId));
+    // WHAT "STOP" ACTUALLY MEANS (BEA-1541). Cancelling used to change only this app's record of a
+    // run: the row went `cancelled` and the worker carried on to the end, still holding a working
+    // token — so a cancelled run could still spend credits, write to his sheet and send WhatsApp.
+    //
+    // Keys first, then the process. Revoking is instant and local, so even if the host is unreachable
+    // the worker is left unable to fetch, write or send anything. Killing is best effort on top.
+    this.agent.setRunStopper?.(async (runId: string) => {
+      const revoked = this.tokens.revokeRun(runId);
+      const killed = await this.runner.stop(runId).catch(() => ({ ok: false, stopped: false }));
+      this.log?.log?.(`stop ${runId}: ${revoked} token(s) revoked, worker ${killed?.stopped ? 'killed' : 'not running here'}`);
+      return { revoked, killed: !!killed?.stopped };
+    });
   }
 
   // ---- the decision ----------------------------------------------------------------------------
@@ -94,6 +125,18 @@ export class WorkerDispatchService implements OnModuleInit {
     if (cannot) return { use: false, say: `Ran it the old way — ${lowerFirst(cannot)}` };
     const worker = await this.builds.livePromoted(job.id).catch(() => null);
     if (!worker) {
+      // A goal-built job cannot fall back — the engine has no tools here and only the build
+      // instruction as its prompt, so the old way cannot produce this job at all (BEA-1541).
+      if (isGoalBuilt(job)) {
+        const building = await this.builds.isBuilding(job.id).catch(() => false);
+        return {
+          use: false,
+          refuse: true,
+          say: building
+            ? 'Its worker is still being built — that usually takes a few minutes. Nothing was run; try again once the build finishes.'
+            : 'It has no worker yet, and this job can only run on its worker. Build one in Settings → Worker, then run it.',
+        };
+      }
       return { use: false, say: 'Ran it the old way — no worker is built for this job yet. Build one in Settings → Worker.' };
     }
     // …and the SAME hash, from the one function that computes it. Bare `planHashOf` stood here while

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Markdown } from '../ui/markdown';
-import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw, Sparkles, Terminal, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Loader2, Square, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw, Sparkles, Terminal, ChevronDown } from 'lucide-react';
 import { StatusBadge } from './Agents';
 import { useToast } from '../ui/Toast';
 
@@ -96,6 +96,7 @@ export function AgentRunView() {
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const [stopping, setStopping] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -191,6 +192,25 @@ export function AgentRunView() {
     } catch { /* the poll will catch up */ } finally { setSubmitting(false); }
   }
 
+  /**
+   * STOP (BEA-1541). Offered only while a run is actually live, and it means it: the server revokes
+   * the worker's keys first — so it can no longer fetch, write or send — and then asks the host to
+   * kill the process. Before this there was no stop at all: you watched a bad run to the end.
+   */
+  async function stopRun() {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      const r = await fetch(`/api/agent/runs/${id}/cancel`, { method: 'POST' });
+      if (!r.ok) throw new Error('the app would not stop it');
+      toast('success', 'Stopped \u2014 it cannot write or send anything now');
+      const g = await fetch(`/api/agent/runs/${id}`);
+      if (g.ok) setRun(await g.json());
+    } catch (e: any) {
+      toast('error', e?.message || 'Could not stop it');
+    } finally { setStopping(false); }
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6">
       <button onClick={() => nav(-1)} className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
@@ -210,6 +230,19 @@ export function AgentRunView() {
               {run.input && <p className="mt-0.5 line-clamp-2 text-sm text-zinc-500">{run.input}</p>}
             </div>
             <StatusBadge status={run.status} />
+            {active && (
+              <button
+                type="button"
+                data-testid="run-stop"
+                onClick={stopRun}
+                disabled={stopping}
+                title="Stop this run — it will not be able to write or send anything"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-300 px-2.5 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-400 dark:hover:bg-rose-500/10"
+              >
+                {stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                {stopping ? 'Stopping…' : 'Stop'}
+              </button>
+            )}
           </header>
 
           {/* WHERE YOU ARE, AT A GLANCE (BEA-1537) — from web/public/agent-vision.html, the "live run

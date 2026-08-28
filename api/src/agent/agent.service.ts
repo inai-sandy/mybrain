@@ -72,6 +72,8 @@ export type WorkerCleanup = (jobId: string) => Promise<void>;
  * until the agent itself was deleted. Registered by `WorkerDispatchService`, the same seam as above.
  */
 export type JournalCleanup = (runId: string) => Promise<unknown>;
+/** Stops a run's actual WORK — revokes its keys and asks the host to kill the process (BEA-1541). */
+export type RunStopper = (runId: string) => Promise<unknown>;
 
 /**
  * AgentService — the DURABLE human-in-the-loop engine (BEA-619).
@@ -95,6 +97,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly prisma: PrismaService, private readonly locks?: RunLockService) {}
 
   /** Register the flow-picture drawer (BEA-1366). Called once by `AgentFlowSyncService.onModuleInit`. */
+  private runStopper: RunStopper | null = null;
+
   setFlowSync(sync: AgentFlowSync | null) {
     this.flowSync = sync;
   }
@@ -136,6 +140,18 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    */
   setJournalCleanup(hook: JournalCleanup | null) {
     this.journalCleanup = hook;
+  }
+
+  /**
+   * Register who actually STOPS a run's work (BEA-1541). Registered once by `WorkerDispatchService`.
+   *
+   * Until now "cancel" only changed this app's RECORD of a run: the row went `cancelled`, the lock was
+   * freed, the journal dropped — and the worker carried on to the end, still holding a valid token, so
+   * a cancelled run could still spend credits, write to his Google Sheet and send WhatsApp messages.
+   * Stopping has to mean the work stops, or the button is a lie.
+   */
+  setRunStopper(hook: RunStopper | null) {
+    this.runStopper = hook;
   }
 
   onModuleInit() {
@@ -1019,6 +1035,10 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   async cancelRun(id: string) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
     if (!run) throw new NotFoundException('Run not found');
+    // STOP THE WORK FIRST, then write it down (BEA-1541). The old order only ever wrote it down. This
+    // runs before the row changes so the gap where a worker still holds usable keys is as small as it
+    // can be — and it is swallowed, because a runner that is down must never make a run un-cancellable.
+    await Promise.resolve(this.runStopper?.(id)).catch(() => undefined);
     await this.prisma.waitpoint.updateMany({ where: { runId: id, status: 'pending' }, data: { status: 'cancelled' } });
     const updated = await this.prisma.agentRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date() } });
     await this.locks?.releaseForRun(id).catch(() => undefined); // cancelled is terminal too (BEA-1388)

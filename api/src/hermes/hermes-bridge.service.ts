@@ -67,7 +67,8 @@ export type StartRunInput = {
  * answers `{ fallback }` when the road was not available and the run should carry on the old way.
  */
 export type WorkerDispatch = {
-  decide(agentId: string): Promise<{ use: boolean; say?: string; version?: number }>;
+  // `refuse` = do not run at all, as opposed to `use:false` = run it the old way (BEA-1541).
+  decide(agentId: string): Promise<{ use: boolean; say?: string; version?: number; refuse?: boolean }>;
   run(runId: string, agentId: string, opts?: { version?: number }): Promise<{ fallback?: string }>;
 };
 
@@ -637,9 +638,16 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     if (input.agentId && this.workers) {
       const decision = await this.workers.decide(input.agentId).catch((e: any) => {
         this.log.warn(`run ${runId}: could not decide the road (${e?.message || e}) — running it the old way`);
-        return { use: false } as { use: boolean; say?: string; version?: number };
+        return { use: false } as { use: boolean; say?: string; version?: number; refuse?: boolean };
       });
       if (decision?.say) await this.agent.appendStep(runId, { label: decision.say, status: 'info' }).catch(() => undefined);
+      // REFUSE means do not run at all (BEA-1541) — the old way is only an answer when there is
+      // something to fall back TO. A goal-built job without its worker has no tools and a build
+      // instruction for a prompt; the engine cannot do the job and will burn minutes proving it.
+      if (decision?.refuse) {
+        await this.agent.finishRun(runId, { status: 'failed', error: decision.say || 'This job can only run on its worker, and it does not have one yet.' }).catch(() => undefined);
+        return;
+      }
       if (decision?.use) {
         const out = await this.workers.run(runId, input.agentId, { version: decision.version }).catch((e: any) => ({
           fallback: `Ran it the old way for this run — the worker could not be started (${String(e?.message || e).slice(0, 160)}).`,

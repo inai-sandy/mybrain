@@ -292,6 +292,8 @@ function runWorker(opts, emit) {
       catch (e) { try { child.kill('SIGKILL'); } catch (e2) {} }
     };
     const killer = setTimeout(() => { timedOut = true; killGroup(); }, timeoutMs);
+    // Reachable by run id while it lives, so `/stop` can kill it on request (BEA-1541).
+    if (opts.runId) LIVE.set(String(opts.runId), { kill: killGroup, jobId: opts.jobId || null, startedAt: Date.now() });
 
     // ONE budget for everything relayed, whatever kind of line it is: a runaway worker printing a
     // flood of JSON is exactly as expensive as one printing a flood of text.
@@ -329,6 +331,7 @@ function runWorker(opts, emit) {
       if (settled) return;
       settled = true;
       clearTimeout(killer);
+      if (opts.runId) LIVE.delete(String(opts.runId));
       resolve(r);
     };
 
@@ -530,6 +533,15 @@ function noNetworkUrl() {
   }
   return `file://${noNetworkFile}`;
 }
+
+/**
+ * Live workers, by runId — what `/stop` reaches for (BEA-1541).
+ *
+ * Before this the ONLY thing that could kill a worker was its own timeout. The app could mark a run
+ * "cancelled" in its database while the process carried on to the end, still writing sheets and
+ * sending messages. A stop that does not stop is worse than no stop at all.
+ */
+const LIVE = new Map(); // runId -> { kill, jobId, startedAt }
 
 /** Run one command in a folder, detached, killed as a group at the timeout. Never throws. */
 function runCommand(cmd, args, cwd, timeoutMs, env) {
@@ -938,6 +950,36 @@ async function handlePromote(req, res) {
 // pulled out from under itself — the app deletes the run rows first, so the spawn is already
 // orphaned and will die at its timeout, and a second delete of a folder nobody wants is harmless.
 // ---------------------------------------------------------------------------------------------
+/**
+ * STOP a run's worker, now (BEA-1541).
+ *
+ * The only thing that could ever kill a worker before this was its own timeout. Cancelling in the app
+ * changed the database and nothing else, so the process ran to completion — still fetching, still
+ * writing to his sheets, still sending WhatsApp messages, minutes after he pressed stop.
+ *
+ * Kills the whole process GROUP (the worker is spawned detached for exactly this reason), so anything
+ * the worker started dies with it. Answers `ok:true, stopped:false` when there was nothing to stop —
+ * a run that already finished is not an error, and the caller should not have to care about the race.
+ */
+async function handleStop(req, res) {
+  let body = {};
+  try { body = JSON.parse(await readBody(req)); }
+  catch (e) {
+    const msg = String((e && e.message) || '');
+    if (/too large/.test(msg)) { res.statusCode = 413; try { res.end(JSON.stringify({ ok: false, error: 'request body too large (8MB max)' }), () => req.destroy()); } catch (e2) { try { req.destroy(); } catch (e3) {} } return; }
+    if (/socket|aborted|ECONN|hang up/i.test(msg)) return;
+    res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad body' })); return;
+  }
+  const runId = String(body.runId || '');
+  if (!runId) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing runId' })); return; }
+  const found = LIVE.get(runId);
+  if (!found) { res.end(JSON.stringify({ ok: true, stopped: false, why: 'nothing of that run is running here' })); return; }
+  try { found.kill(); } catch (e) { /* it may have exited between the lookup and the kill */ }
+  LIVE.delete(runId);
+  log(`stopped run ${runId} on request`);
+  res.end(JSON.stringify({ ok: true, stopped: true, jobId: found.jobId, ranForMs: Date.now() - found.startedAt }));
+}
+
 async function handleRemove(req, res) {
   let body = {};
   try { body = JSON.parse(await readBody(req)); }
@@ -998,6 +1040,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/build') { await handleBuild(req, res); return; }
     if (req.method === 'POST' && req.url === '/promote') { await handlePromote(req, res); return; }
     if (req.method === 'POST' && req.url === '/parity') { await handleParity(req, res); return; }
+    if (req.method === 'POST' && req.url === '/stop') { await handleStop(req, res); return; }
     if (req.method === 'POST' && req.url === '/remove') { await handleRemove(req, res); return; }
     res.statusCode = 404;
     res.end(JSON.stringify({ error: 'not found' }));

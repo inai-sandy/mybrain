@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -92,7 +92,8 @@ export type WorkerState = {
  *     rebuilt — never silently ignored, and never silently used to mean an edit took effect.
  */
 @Injectable()
-export class WorkerBuildService implements OnModuleInit {
+export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
+  private stuckTimer: ReturnType<typeof setInterval> | null = null;
   private readonly log = new Logger('WorkerBuild');
 
   constructor(
@@ -113,6 +114,52 @@ export class WorkerBuildService implements OnModuleInit {
     // The sweep may never evict a saved answer a live worker's tests stand on (§A's hook, filled in
     // here now that worker folders exist).
     this.samples?.setPinned?.(() => this.pinnedSampleIds());
+    // A BUILD MUST BE ABLE TO FAIL, NOT FADE (BEA-1541). A build that never finished — the app was
+    // deployed mid-Codex-session, the host died, the runner was restarted — left its row on
+    // `building` for ever. The screens stopped CALLING it building after 45 minutes, so it vanished
+    // from the interface while the record still claimed a build was in flight: no worker, no failure,
+    // no reason, nothing to retry. Sweep once at boot (the restart IS the usual cause) and hourly.
+    void this.failStuckBuilds();
+    this.stuckTimer = setInterval(() => { void this.failStuckBuilds(); }, 60 * 60_000);
+    if (typeof this.stuckTimer.unref === 'function') this.stuckTimer.unref();
+  }
+
+  onModuleDestroy() { if (this.stuckTimer) clearInterval(this.stuckTimer); }
+
+  /**
+   * Mark builds that stopped talking as failed, with words the owner can act on.
+   *
+   * Deliberately NOT a cancel of the Codex session — by the time a row is this old the process that
+   * owned it is gone with the restart that orphaned it. This corrects the RECORD so the job stops
+   * claiming a build is running, and so `Rebuild` is offered again.
+   */
+  /** Is a build for this job in flight right now? Same staleness rule the Worker row uses. */
+  async isBuilding(agentId: string): Promise<boolean> {
+    const row: any = await this.prisma.workerBuild
+      .findFirst({ where: { agentId, status: 'building', startedAt: { gt: new Date(Date.now() - BUILD_STUCK_MS) } }, select: { id: true } })
+      .catch(() => null);
+    return !!row;
+  }
+
+  async failStuckBuilds(): Promise<number> {
+    const cutoff = new Date(Date.now() - BUILD_STUCK_MS);
+    const rows: any[] = await this.prisma.workerBuild
+      .findMany({ where: { status: 'building', startedAt: { lt: cutoff } }, select: { id: true, version: true } })
+      .catch(() => []);
+    for (const r of rows) {
+      await this.prisma.workerBuild
+        .update({
+          where: { id: r.id },
+          data: {
+            status: 'failed',
+            error: `This build stopped part-way through and never finished — most likely the app was restarted or deployed while it was still writing. Nothing was put live. Press Rebuild to try again.`,
+            finishedAt: new Date(),
+          },
+        })
+        .catch(() => undefined);
+    }
+    if (rows.length) this.log?.warn?.(`marked ${rows.length} unfinished build(s) as failed`);
+    return rows.length;
   }
 
   // ---- what the owner sees ----------------------------------------------------------------------

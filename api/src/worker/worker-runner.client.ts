@@ -170,6 +170,29 @@ export class WorkerRunnerClient {
    * answers its tests stood on (BEA-1394 §I, "deleting an agent deletes its worker"). Idempotent: a
    * job with no folder answers ok, because that is already the state the caller wants.
    */
+  /**
+   * Stop a run's worker on the host, now (BEA-1541).
+   *
+   * Never throws and never blocks a cancel: a runner that is down must not make a run impossible to
+   * cancel. `stopped:false` means there was nothing of that run running there — which is the normal
+   * answer when the work had already finished, and is not a failure.
+   */
+  async stop(runId: string): Promise<{ ok: boolean; stopped?: boolean; error?: string }> {
+    try {
+      const r = await fetch(`${RUNNER}/stop`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ runId }),
+        signal: AbortSignal.timeout(SHORT_TIMEOUT_MS),
+      });
+      const json: any = await r.json().catch(() => null);
+      if (!r.ok || !json?.ok) return { ok: false, error: json?.error || `the worker runner answered ${r.status}` };
+      return { ok: true, stopped: !!json.stopped };
+    } catch (e: any) {
+      return { ok: false, error: `The worker could not be stopped on the host — ${reasonOf(e)}.` };
+    }
+  }
+
   async remove(jobId: string): Promise<{ ok: boolean; removed?: boolean; error?: string }> {
     try {
       const r = await fetch(`${RUNNER}/remove`, {
