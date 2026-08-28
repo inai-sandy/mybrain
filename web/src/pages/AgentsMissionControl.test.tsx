@@ -104,3 +104,61 @@ describe('the agent row says when it runs and whether it is on', () => {
     expect(src()).toMatch(/jobs\.length === 0 \? true/);
   });
 });
+
+/**
+ * Cards or list, and Landed today folded away (BEA-1539) — both his asks.
+ *
+ * "i need list view" — the redesign mockup always had a `▦ ▤` toggle; only the card grid was built.
+ * A list is better for scanning names, schedules and what ran when; cards are better for browsing.
+ *
+ * "LANDED TODAY has to be accordian" — what landed is reassurance, not a decision, so it should not
+ * hold permanent height above the agents.
+ */
+describe('the agents home offers both views', () => {
+  const src = () => require('fs').readFileSync(__dirname + '/Agents.tsx', 'utf8');
+
+  it('has a cards/list toggle', () => {
+    const s = src();
+    expect(s).toContain('data-testid={`view-${v}`}');
+    expect(s).toMatch(/'cards' \| 'list'/);
+  });
+
+  it('remembers which view he picked', () => {
+    const s = src();
+    expect(s).toMatch(/localStorage\.getItem\('agents\.view'\)/);
+    expect(s).toMatch(/localStorage\.setItem\('agents\.view', v\)/);
+  });
+
+  it('only forces cards in card view, so the table can render in list view', () => {
+    expect(src()).toMatch(/cardsOnly=\{view === 'cards'\}/);
+  });
+
+  // The search box must find the same agents in both views. Keying the first column on `search`
+  // rather than `name` is what makes that true — DataTable matches against column values.
+  it('searches the same text in list view as in cards', () => {
+    expect(src()).toMatch(/\{ key: 'search', label: 'Agent'/);
+  });
+
+  it('a list row opens the agent', () => {
+    expect(src()).toMatch(/onRowClick=\{view === 'list'/);
+  });
+});
+
+describe('Landed today folds away', () => {
+  const src = () => require('fs').readFileSync(__dirname + '/Agents.tsx', 'utf8');
+
+  it('is an accordion, not a permanent block', () => {
+    const s = src();
+    expect(s).toMatch(/<details open=\{landed\.some/);
+  });
+
+  // A failure is the one case you want in front of you rather than behind a tap.
+  it('stays open when something failed', () => {
+    expect(src()).toMatch(/open=\{landed\.some\(\(l\) => l\.status !== 'done'\)\}/);
+  });
+
+  it('says the count and any failures while closed', () => {
+    const s = src();
+    expect(s).toMatch(/failed<\/span>/);
+  });
+});

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentKind } from '../ui/agentKind';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X, Send, Pencil, MoreHorizontal, Copy, Check, CheckSquare, Square, FolderInput } from 'lucide-react';
+import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X, Send, Pencil, MoreHorizontal, Copy, Check, CheckSquare, Square, FolderInput, ChevronDown } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Sheet } from '../ui/Sheet';
 import { GrowTextarea } from '../ui/GrowTextarea';
@@ -776,6 +776,13 @@ export function Agents() {
   // roads read `areaNeedsYou`, so the tab, its count and the dropdown cannot drift apart.
   const [kindTab, setKindTab] = useState<'all' | 'tools' | 'research' | 'needs'>('all');
   const [agentSort, setAgentSort] = useState<'recent' | 'name' | 'jobs'>('recent');
+  // CARDS OR LIST (BEA-1539) — his ask, and the `\u25A6 \u25A4` toggle the redesign mockup always had.
+  // Cards are good for browsing ten agents; a list is better for scanning names, schedules and what
+  // ran when. Remembered, because a view you have to re-pick every visit is not really a choice.
+  const [view, setView] = useState<'cards' | 'list'>(() => {
+    try { return localStorage.getItem('agents.view') === 'list' ? 'list' : 'cards'; } catch { return 'cards'; }
+  });
+  const pickView = (v: 'cards' | 'list') => { setView(v); try { localStorage.setItem('agents.view', v); } catch { /* private mode */ } };
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
   const [showBuilder, setShowBuilder] = useState((params.get('builder') === '1' && !readSocialPrefill(params)) || params.get('builder') === 'chat'); // chat builder (BEA-1104); `?builder=1` alone opens it; `builder=chat` = the Social hand-off (BEA-1372)
   // Folders (BEA-1380): flat, owner-made. The selection lives in the URL (`?folder=<id|unfiled>`)
@@ -1168,14 +1175,25 @@ export function Agents() {
       )}
 
       {landed.length > 0 && (
-        <section className="space-y-2" data-testid="mc-landed">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">Landed today</h2>
-            <button onClick={() => nav('/agent/runs')} className="text-xs font-medium text-emerald-600 hover:underline">everything →</button>
-          </div>
-          <div className="space-y-1.5">
-            {landed.slice(0, 5).map((l) => <LandedRow key={l.id} l={l} />)}
-          </div>
+        <section data-testid="mc-landed">
+          {/* AN ACCORDION, HIS ASK (BEA-1539). What landed is reassurance, not a decision — it does not
+              deserve permanent height above the agents. Closed it still says the useful part (how many,
+              and whether any failed); open it lists them. It stays OPEN when something failed, because
+              that is the one case you want in front of you rather than behind a tap. */}
+          <details open={landed.some((l) => l.status !== 'done')} className="group rounded-2xl border border-zinc-200 dark:border-zinc-800">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2">
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">Landed today</h2>
+              <span className="text-[11px] text-zinc-400">
+                {landed.length}
+                {landed.some((l) => l.status !== 'done') && <span className="ml-1 font-semibold text-rose-600 dark:text-rose-400">· {landed.filter((l) => l.status !== 'done').length} failed</span>}
+              </span>
+              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); nav('/agent/runs'); }} className="ml-auto text-xs font-medium text-emerald-600 hover:underline">everything →</button>
+              <ChevronDown className="h-4 w-4 shrink-0 text-zinc-400 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="space-y-1.5 border-t border-zinc-100 p-2 dark:border-zinc-800">
+              {landed.slice(0, 5).map((l) => <LandedRow key={l.id} l={l} />)}
+            </div>
+          </details>
         </section>
       )}
 
@@ -1296,6 +1314,18 @@ export function Agents() {
                   <option value="ran">Has run</option>
                   <option value="never">Never run</option>
                 </select>
+                <div className="flex shrink-0 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700" role="group" aria-label="How to show them">
+                  {([['cards', '\u25A6', 'Cards'], ['list', '\u25A4', 'List']] as const).map(([v, glyph, label]) => (
+                    <button
+                      key={v}
+                      data-testid={`view-${v}`}
+                      aria-pressed={view === v}
+                      title={label}
+                      onClick={() => pickView(v)}
+                      className={'px-2.5 py-1.5 text-sm ' + (view === v ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200')}
+                    >{glyph}</button>
+                  ))}
+                </div>
                 <select value={agentSort} onChange={(e) => setAgentSort(e.target.value as any)} aria-label="Sort agents" className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
                   <option value="recent">Most recent</option>
                   <option value="name">By name</option>
@@ -1320,7 +1350,29 @@ export function Agents() {
               ) : (
               <>
               <DataTable<any>
-                columns={[{ key: 'search', label: 'Agent' }]}
+                columns={view === 'list' ? [
+                  // keyed on `search`, not `name`, so the search box matches the SAME text in both
+                  // views — name, description and the names of the jobs inside. It sorts sensibly too,
+                  // because that string starts with the name.
+                  { key: 'search', label: 'Agent', sortable: true, width: '46%', render: (ar: any) => (
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span aria-hidden className="shrink-0">{ar.icon || '\u{1F916}'}</span>
+                      <span className="min-w-0 truncate font-medium">{ar.name}</span>
+                      <span aria-hidden title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}>{areaKind(ar) === 'tools' ? '\u{1F527}' : '\u{1F50E}'}</span>
+                    </span>
+                  ) },
+                  { key: 'lastAtNum', label: 'Last run', sortable: true, render: (ar: any) => {
+                    const done = (ar.jobs || []).map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((x: any, y: any) => new Date(y.at).getTime() - new Date(x.at).getTime())[0];
+                    return <span className="whitespace-nowrap text-zinc-500">{done ? timeAgo(done.at) : 'never'}</span>;
+                  } },
+                  { key: 'schedKey', label: 'When', render: (ar: any) => <span className="whitespace-nowrap text-zinc-500">{schedOf(ar) || 'when you run it'}</span> },
+                  { key: 'jobsNum', label: 'Jobs', sortable: true, align: 'right' as const },
+                  { key: 'onKey', label: 'On', align: 'right' as const, render: (ar: any) => (
+                    <span className={'rounded-full px-2 py-0.5 text-[10px] font-semibold ' + (anyOn(ar)
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                      : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{anyOn(ar) ? 'on' : 'off'}</span>
+                  ) },
+                ] : [{ key: 'search', label: 'Agent' }]}
                 rows={rows}
                 filters={[
                   { key: 'kind', label: 'Kind', options: [], match: (row: any, v: string) => (v === 'needs' ? areaNeedsYou(row) : areaKind(row) === v) },
@@ -1341,7 +1393,9 @@ export function Agents() {
                   sort: agentSort === 'name' ? { key: 'nameKey', dir: 1 } : agentSort === 'jobs' ? { key: 'jobsNum', dir: -1 } : { key: 'lastAtNum', dir: -1 },
                 }}
                 pageSize={PER}
-                cardsOnly
+                cardsOnly={view === 'cards'}
+                tableLayoutFixed
+                onRowClick={view === 'list' ? ((ar: any) => nav(`/agent/a/${ar.jobCount === 1 && ar.jobs?.[0]?.id ? ar.jobs[0].id : ar.id}`)) : undefined}
                 // `[&>*]:min-w-0` below is load-bearing (BEA-1531). DataTable wraps each card in a
                 // div of its own, so THAT wrapper is the grid item, not the card — and a grid item
                 // defaults to `min-width:auto` and refuses to shrink. Without it the conversion
