@@ -162,6 +162,14 @@ export class WorkerController {
           stop: out.stop || null,
           ...this.readWith(out.r ? out.r.data : undefined, body?.recipe, step),
           ...rawAnswer(out.r ? out.r.data : undefined),
+          // SAY THAT IT WAS CUT SHORT (BEA-1554). The clamp is silent, and silence reads as "that was
+          // everything": his worker asked for `pages: 'all'`, was handed ONE page, and reported
+          // "fetched Reddit until it ran out and found 6 posts" — then asked whether to write 6
+          // instead of 100. It had been lied to. A cap the caller cannot see is worse than no cap,
+          // because the wrong conclusion looks like a fact.
+          ...(trial
+            ? { cappedForCheck: true, why: 'This is a check before going live, so only ONE page was fetched. Do NOT treat this as the source running out — there is very likely more.' }
+            : {}),
         };
       });
       return { ...(hit.value as any), replayed: hit.replayed };
@@ -616,13 +624,32 @@ export class WorkerController {
 
   @Post('ask')
   async ask(@Req() req: any, @Body() body: any) {
-    const { runId, agentId } = who(req);
+    const { runId, agentId, trial } = who(req);
     const seq = seqOf(body);
     const question = String(body?.question || '').trim();
     if (!question) throw new BadRequestException('A question needs to say something.');
     const choices = Array.isArray(body?.choices) ? body.choices.map((c: any) => String(c)).slice(0, 6) : [];
     const ifNoAnswer = body?.ifNoAnswer === undefined || body?.ifNoAnswer === null ? null : String(body.ifNoAnswer);
     if (choices.length && ifNoAnswer === null) throw new BadRequestException('A question with choices must say what to do if nobody answers (ifNoAnswer).');
+    // A TRIAL NEVER REACHES HIS PHONE (BEA-1554).
+    //
+    // Trial mode has always held writes and sends — but an ASK went out through a different door, so
+    // the pre-promotion check I added in BEA-1553 messaged him on WhatsApp about a build he had not
+    // asked for and could not act on. A check that interrupts him is not a check, it is a nuisance.
+    //
+    // It takes its own default and carries on, so the smoke run still learns whether the worker can
+    // meet the vendor — which is the only thing it exists to find out. Needing to ask is not a
+    // failure, and it is recorded on the run so it is visible without anyone being disturbed.
+    if (trial) {
+      const taken = ifNoAnswer ?? (choices[0] ?? '');
+      await this.stepper(runId)({
+        label: `Not asked — this is a check, not a real run: "${question.slice(0, 120)}"`,
+        status: 'info',
+        detail: taken ? `Carried on with "${taken}", which is what it would do if nobody answered.` : 'Carried on without an answer.',
+        kind: 'ask',
+      }).catch(() => undefined);
+      return { answered: true, answer: taken, trial: true, asked: false };
+    }
     const deadlineHours = Math.min(Math.max(Number(body?.deadlineHours) || ASK_DEADLINE_HOURS, 1), 24 * 14);
     const stepKey = this.journal.stepKey(seq, 'ask', { question, choices });
 
