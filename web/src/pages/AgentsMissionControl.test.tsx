@@ -74,3 +74,33 @@ describe('the agents home matches the approved design', () => {
     expect(s).toMatch(/home\?\.landed/);   // read inside the per-agent dedupe
   });
 });
+
+/**
+ * The agent row carries the two facts the approved mockup shows (BEA-1535).
+ *
+ * The redesign artifact's row reads "✅ ran 3h ago · every day at 22:00 · Notion" with an on/off
+ * pill. The live card showed only "1 job · ran 3h ago" — so you could not tell when an agent next
+ * runs, or whether it is even switched on, without opening it. Both facts were already in the
+ * payload; the card just never drew them.
+ */
+describe('the agent row says when it runs and whether it is on', () => {
+  const src = () => require('fs').readFileSync(__dirname + '/Agents.tsx', 'utf8');
+
+  it('draws the schedule and an on/off pill', () => {
+    const s = src();
+    expect(s).toContain('function schedOf');
+    expect(s).toContain('function anyOn');
+    expect(s).toMatch(/\{schedOf\(ar\)\}/);
+    expect(s).toMatch(/anyOn\(ar\) \? 'on' : 'off'/);
+  });
+
+  // "Manual only. Runs when you press Run." is not a schedule; printing it on every row is noise.
+  it('does not print "manual only" as if it were a schedule', () => {
+    expect(src()).toMatch(/manual only/i);
+  });
+
+  // An agent with no jobs yet should not read as switched off.
+  it('treats an agent with no jobs as on', () => {
+    expect(src()).toMatch(/jobs\.length === 0 \? true/);
+  });
+});

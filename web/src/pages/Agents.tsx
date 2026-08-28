@@ -717,6 +717,20 @@ export function areaNeedsYou(ar: any): boolean {
   return !!waitingJobOf(ar);
 }
 
+/** When this agent runs, in his words — the first job that has a schedule (BEA-1535). */
+function schedOf(ar: any): string {
+  const j = (ar?.jobs || []).find((x: any) => x?.scheduleText);
+  const t = j?.scheduleText ? String(j.scheduleText) : '';
+  // "Manual only. Runs when you press Run." is not a schedule — saying it on a row is noise.
+  return /manual only/i.test(t) ? '' : t;
+}
+
+/** Is anything in this agent switched on? Off means nothing in it will fire on its own. */
+function anyOn(ar: any): boolean {
+  const jobs = ar?.jobs || [];
+  return jobs.length === 0 ? true : jobs.some((j: any) => j?.enabled !== false);
+}
+
 function areaKind(ar: any): 'tools' | 'research' {
   const jobs = ar?.jobs || [];
   return jobs.some((j: any) => agentKind(j) === 'tools') ? 'tools' : 'research';
@@ -1387,7 +1401,17 @@ export function Agents() {
                         {waitingJob && <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><PauseCircle className="h-3 w-3" />needs you</span>}
                         {runningJob && <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"><Loader2 className="h-3 w-3 animate-spin" />running</span>}
                         {!runningJob && !waitingJob && lastDone && <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" />ran {timeAgo(lastDone.at)}</span>}
-                        {(ar.tools || []).length > 0 && <span className="ml-auto">🔧 {ar.tools.length}</span>}
+                        {/* WHEN IT RUNS, AND WHETHER IT IS ON (BEA-1535). The approved mockup reads
+                            "ran 3h ago · every day at 22:00" with an on/off pill — the two facts that
+                            let you judge a row without opening it. Both were already on every job in
+                            the payload (`scheduleText`, `enabled`); the card just never drew them. */}
+                        {schedOf(ar) && <span className="inline-flex items-center gap-1 text-zinc-400"><CalendarClock className="h-3 w-3" />{schedOf(ar)}</span>}
+                        <span className="ml-auto flex items-center gap-1.5">
+                          {(ar.tools || []).length > 0 && <span>🔧 {ar.tools.length}</span>}
+                          <span className={'rounded-full px-2 py-0.5 text-[10px] font-semibold ' + (anyOn(ar)
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                            : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{anyOn(ar) ? 'on' : 'off'}</span>
+                        </span>
                       </span>
                     </button>
                     </div>
