@@ -51,6 +51,56 @@ export type SampleField = { path: string; kind: FieldKind };
  * so a union would not narrow): `ok:true` = a real answer; `ok:false` + `refused:true` = we did not
  * call (caps, not a read, cannot load, ceiling); `ok:false` alone = the vendor answered no.
  */
+/**
+ * Does this answer say there is another page? (BEA-1549)
+ *
+ * Read from the vendor's own cursor keys — the same names `nextCursorOf` follows for real paging, so
+ * the look and the fetch agree about what "more" means. Never inferred from the item count: a full
+ * page is not evidence of a next one, and an empty page is not evidence there is none.
+ */
+export function hasMorePages(data: any): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const CURSORS = ['after', 'cursor', 'next_cursor', 'nextCursor', 'next_max_id', 'end_cursor', 'continuation', 'next_page', 'nextPageToken', 'paging_token'];
+  const look = (o: any, depth: number): boolean => {
+    if (!o || typeof o !== 'object' || depth > 2) return false;
+    for (const k of Object.keys(o)) {
+      const v = (o as any)[k];
+      if (CURSORS.includes(k) && v !== null && v !== undefined && v !== '' && v !== false) return true;
+      if ((k === 'more_available' || k === 'has_more' || k === 'hasMore') && v === true) return true;
+      if (v && typeof v === 'object' && !Array.isArray(v) && look(v, depth + 1)) return true;
+    }
+    return false;
+  };
+  return look(data, 0);
+}
+
+/**
+ * Is this page already sorted by one of its numbers, and which way? (BEA-1549)
+ *
+ * Answers the question that cost four rebuilds: can the job trust the vendor's order, or must it sort
+ * what it fetched? Returns the FIRST numeric column that is cleanly ordered across every row — and
+ * `null` when nothing is, which is itself the useful answer ("sort it yourself").
+ *
+ * Needs at least three rows to mean anything: two rows are in some order by accident.
+ */
+export function orderingOf(rows: any[][], columns: string[]): { field: string; descending: boolean } | null {
+  if (!Array.isArray(rows) || rows.length < 3 || !Array.isArray(columns)) return null;
+  for (let c = 0; c < columns.length; c++) {
+    const nums = rows.map((r) => Number(r?.[c]));
+    if (nums.some((n) => !Number.isFinite(n))) continue;
+    if (new Set(nums).size < 3) continue; // a column of the same value is not "sorted"
+    let down = true;
+    let up = true;
+    for (let i = 1; i < nums.length; i++) {
+      if (nums[i] > nums[i - 1]) down = false;
+      if (nums[i] < nums[i - 1]) up = false;
+    }
+    if (down) return { field: String(columns[c]), descending: true };
+    if (up) return { field: String(columns[c]), descending: false };
+  }
+  return null;
+}
+
 export type SampleView = {
   ok: boolean;
   actionId: string;
@@ -64,6 +114,19 @@ export type SampleView = {
   fields: SampleField[];
   /** True when any field is a date — the fact "last 30 days" plans need. */
   hasDate: boolean;
+  /**
+   * Does this action have MORE after this page? (BEA-1549) Read from the answer's own cursor, never
+   * guessed. It decides whether a job asking for "the top 100" needs paging at all — his ESP32 agent
+   * was rebuilt partly because nobody knew this until a live run hit a ceiling.
+   */
+  morePages?: boolean;
+  /**
+   * Is the answer ALREADY sorted by a number, and which way? `null` when it cannot be told.
+   *
+   * The Reddit worker ASSERTED its results came back in descending score order, threw when they did
+   * not, and discarded 70 good posts. One real look answers it before a line of code is written.
+   */
+  ordering?: { field: string; descending: boolean } | null;
   items: Record<string, any>[];
   credits: number;
   ms: number;
@@ -219,7 +282,8 @@ export class BuilderSampleService {
       return o;
     });
     // `callId`/`sampleId` ride through so a brief line can point at the call that proves it (BEA-1405).
-    return this.view({ ok: true, actionId, name: shown, args, count: table.itemCount, listKey: table.listKey || undefined, fields, hasDate: fields.some((f) => f.kind === 'date'), items, credits, ms: r.ms || 0, callId: r.callId, sampleId: r.sampleId }, counter);
+      // The two facts a saved answer can never carry, read from the LIVE one (BEA-1549).
+    return this.view({ ok: true, actionId, name: shown, args, count: table.itemCount, listKey: table.listKey || undefined, fields, hasDate: fields.some((f) => f.kind === 'date'), items, credits, ms: r.ms || 0, callId: r.callId, sampleId: r.sampleId, morePages: hasMorePages(r.data), ordering: orderingOf(table.rows, table.columns) }, counter);
   }
 
   private view(v: Partial<SampleView> & { ok: boolean; actionId: string; name: string }, counter: SampleCounter): SampleView {
@@ -232,6 +296,8 @@ export class BuilderSampleService {
       ...(v.listKey ? { listKey: v.listKey } : {}),
       fields: v.fields || [],
       hasDate: !!v.hasDate,
+      ...(v.morePages === undefined ? {} : { morePages: !!v.morePages }),
+      ...(v.ordering === undefined ? {} : { ordering: v.ordering }),
       items: v.items || [],
       credits: v.credits || 0,
       ms: v.ms || 0,

@@ -3,8 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
 import { ToolSampleService } from '../tools/tool-sample.service';
+import { BuilderSampleService } from './builder-sample.service';
 import { cardText } from './thinking-builder';
-import { GoalRequest, Turn, ToolInfo, goalPrompt, isQuestion, nothingCameBack } from './goal';
+import { GoalRequest, Turn, ToolInfo, LiveLook, goalPrompt, isQuestion, nothingCameBack } from './goal';
+
+/** The sampler budget the goal's live looks are charged to — its own, never a chat's (BEA-1549). */
+const GOAL_LOOK_SESSION = 'agent.goalLook';
 
 /** How much of Codex's answer is kept. A goal he has to scroll for ever is not a goal he reads. */
 const GOAL_MAX = 20_000;
@@ -64,6 +68,8 @@ export class GoalService {
     // Optional + LAST — spec harnesses build this positionally with fewer arguments.
     private readonly knowledge?: ToolKnowledgeService,
     private readonly samples?: ToolSampleService,
+    /** The builder's capped, read-only sampler — used for the one live look (BEA-1549). */
+    private readonly looker?: BuilderSampleService,
   ) {}
 
   /** The newest goal for this conversation, whatever its state. Null when he has not asked yet. */
@@ -255,6 +261,28 @@ export class GoalService {
     return ids.length ? this.toolInfo(ids) : [];
   }
 
+  /**
+   * One real call to this action, for the facts a saved answer cannot carry (BEA-1549).
+   *
+   * Uses the builder's own sampler, so every guard it already has applies unchanged: reads only, never
+   * a write or a gated action, capped per conversation, every call written to the ToolCall ledger.
+   * Anything unusable comes back `undefined` and the goal is written exactly as it was before — a look
+   * that cannot be taken must never block the goal.
+   */
+  private async liveLook(actionId: string): Promise<LiveLook | undefined> {
+    const v: any = await this.looker?.sample?.(GOAL_LOOK_SESSION, actionId, {}).catch(() => null);
+    if (!v) return undefined;
+    if (v.refused) return undefined;               // a write or a gated action — not ours to try
+    if (v.ok === false) return { count: 0, error: String(v.error || 'the call did not come back') };
+    return {
+      count: Number(v.count) || 0,
+      morePages: v.morePages,
+      ordering: v.ordering ?? null,
+      hasDate: v.hasDate,
+      credits: Number(v.credits) || 0,
+    };
+  }
+
   private async toolInfo(ids: string[]): Promise<ToolInfo[]> {
     const out: ToolInfo[] = [];
     for (const raw of ids || []) {
@@ -263,7 +291,17 @@ export class GoalService {
       const card = await this.knowledge?.card?.(actionId).catch(() => null);
       let sample: any = undefined;
       try { sample = (await this.samples?.replay?.(actionId))?.data ?? undefined; } catch { sample = undefined; }
-      out.push({ actionId, name: (card as any)?.name || null, card: card ? cardText(card as any) : null, sample });
+      // ONE REAL LOOK, BEFORE THE GOAL IS WRITTEN (BEA-1549).
+      //
+      // The saved answer above is a REPLAY: frozen, always well-behaved, and silent about the three
+      // things that decide the shape of a job — how many exist, whether there is another page, and
+      // whether the vendor already sorted them. His ESP32 agent was rebuilt FOUR times learning
+      // exactly those, one live run at a time, after promotion each time.
+      //
+      // Read-only and capped by the sampler's own budget, so this cannot run away with his credits. A
+      // refusal or a failure is reported to Codex as a fact about the source, never as a blocker.
+      const look = await this.liveLook(actionId).catch(() => undefined);
+      out.push({ actionId, name: (card as any)?.name || null, card: card ? cardText(card as any) : null, sample, look });
     }
     return out;
   }

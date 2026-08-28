@@ -32,6 +32,24 @@ import { CHOOSE_TOOLS_RULE } from './prompt-rules';
 export type Turn = { who: string; text: string; at?: string; kind?: string };
 
 /** An action he named in the chat, with what Codex needs in order to call it. */
+/**
+ * What ONE real call to this action just returned (BEA-1549).
+ *
+ * The difference between this and `sample` matters: `sample` is a REPLAYED saved answer, frozen and
+ * always well-behaved. This is a live look, and it is the only place three facts can come from —
+ * how many came back, whether there is another page, and whether the vendor already sorted them.
+ *
+ * Those three are what the ESP32 agent was rebuilt four times to learn, one run at a time.
+ */
+export type LiveLook = {
+  count: number;
+  morePages?: boolean;
+  ordering?: { field: string; descending: boolean } | null;
+  hasDate?: boolean;
+  credits?: number;
+  error?: string;
+};
+
 export type ToolInfo = {
   actionId: string;
   name?: string | null;
@@ -39,6 +57,8 @@ export type ToolInfo = {
   card?: string | null;
   /** A real answer this action gave, when one was kept. Never invented. */
   sample?: any;
+  /** What ONE real call just returned (BEA-1549) — a live look, not a replay. */
+  look?: LiveLook;
 };
 
 export type GoalRequest = {
@@ -86,6 +106,24 @@ export function toolsText(tools: ToolInfo[]): string {
     out.push(`### \`${t.actionId}\`${t.name ? ` — ${t.name}` : ''}`);
     out.push('');
     out.push(t.card ? String(t.card) : '_(no fact card is available for this action — call it and see, or ask him.)_');
+    // THE LIVE LOOK COMES FIRST (BEA-1549). A replayed sample is frozen and always well-behaved; one
+    // real call is the only thing that can say how many exist, whether there is another page, and
+    // whether the vendor already sorted them. Those three facts are what four rebuilds of his ESP32
+    // agent went to learn, one live run at a time.
+    if (t.look) {
+      const l = t.look;
+      if (l.error) {
+        out.push('', `**A real call just now FAILED:** ${l.error} — plan for this being unavailable, and say so.`);
+      } else {
+        const bits: string[] = [`came back with **${l.count}** item${l.count === 1 ? '' : 's'} on one page`];
+        bits.push(l.morePages ? 'and there **are more pages** after it' : 'and there was **no next page** — that was everything it has');
+        bits.push(l.ordering
+          ? `already sorted by \`${l.ordering.field}\`, ${l.ordering.descending ? 'highest first' : 'lowest first'}`
+          : '**not in any order you can rely on** — sort what you fetch yourself');
+        if (l.hasDate !== undefined) bits.push(l.hasDate ? 'items carry a date' : 'items carry **no date**, so "the last N days" cannot be filtered here');
+        out.push('', `**One real call just now:** ${bits.join('; ')}.`);
+      }
+    }
     if (t.sample !== undefined && t.sample !== null) {
       let json = '';
       try { json = JSON.stringify(t.sample, null, 2).slice(0, 4000); } catch { json = ''; }
