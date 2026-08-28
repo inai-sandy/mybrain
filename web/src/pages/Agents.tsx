@@ -1163,7 +1163,13 @@ export function Agents() {
                   return (
                     <div key={ar.id} style={{ borderLeftColor: color }}
                       onTouchStart={() => pressStart(ar.id)} onTouchEnd={pressEnd} onTouchMove={pressEnd} onTouchCancel={pressEnd}
-                      className={'group relative flex select-none flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all touch-manipulation hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900 ' + (isSel ? 'ring-2 ring-emerald-500' : '')}>
+                      // `min-w-0` is load-bearing (BEA-1514): a grid item defaults to `min-width:auto`,
+                      // so this card refused to shrink below its content and rendered 478px wide inside
+                      // a 343px cell at 390. The page never scrolled sideways — the overflow was hidden
+                      // — so it looked fine while agent names were being cut mid-word ("Instagram dige").
+                      // The inner spans already had `truncate`; they were truncating against a width the
+                      // phone never had.
+                      className={'group relative flex min-w-0 select-none flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all touch-manipulation hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900 ' + (isSel ? 'ring-2 ring-emerald-500' : '')}>
                     {/* Rename · duplicate · move to folder · delete, right where you can see them (BEA-1182 / BEA-1380). */}
                     <AgentCardMenu area={ar} onChanged={() => { loadAreas(); loadHome(); loadFolders(); }} onMoveToFolder={() => setPickerFor({ kind: 'one', id: ar.id, name: ar.name })} />
                     {/* Multi-select (BEA-1380): a checkbox on hover at laptop widths; long-press starts it on the phone. */}

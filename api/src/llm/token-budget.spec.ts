@@ -242,11 +242,21 @@ describe('an engine that is out of quota is remembered (BEA-1201)', () => {
   beforeEach(() => { for (const k of Object.keys(store)) delete store[k]; });
 
   it('reads the reset time out of the refusal, rather than guessing', async () => {
+    // The date is built ~40 days AHEAD, never hardcoded. This test used to say "Aug 28th, 2026 2:55 AM"
+    // and passed for months — until 2:55 on 28 Aug 2026, when that reset time became the past, the
+    // limit was correctly forgotten as expired, and `lim` came back null. A fixture date that must be
+    // in the future is a test with an expiry date on it.
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const soon = new Date(Date.now() + 40 * 24 * 3600_000);
+    const said = `${MONTHS[soon.getMonth()]} ${soon.getDate()}th, ${soon.getFullYear()} 2:55 AM`;
+
     const s = svc();
-    await (s as any).markEngineLimited('codex', "You've hit your usage limit. Upgrade to Plus, or try again at Aug 28th, 2026 2:55 AM.");
+    await (s as any).markEngineLimited('codex', `You've hit your usage limit. Upgrade to Plus, or try again at ${said}.`);
     const lim = await s.engineLimit('codex');
-    expect(lim.until.getUTCMonth()).toBe(7);   // August
-    expect(lim.until.getUTCFullYear()).toBe(2026);
+    // It read the month and year out of the sentence — not "an hour from now", which is the guess.
+    expect(lim.until.getMonth()).toBe(soon.getMonth());
+    expect(lim.until.getFullYear()).toBe(soon.getFullYear());
+    expect((lim.until.getTime() - Date.now()) / 3600_000).toBeGreaterThan(2);
   });
 
   it('falls back to an hour when no time is given, so a blip is not a month', async () => {

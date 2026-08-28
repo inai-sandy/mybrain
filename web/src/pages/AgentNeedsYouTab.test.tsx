@@ -58,6 +58,16 @@ describe('the tab is wired to that one predicate', () => {
     expect(calls).toBeGreaterThanOrEqual(4); // the definition + count + tab filter + dropdown
   });
 
+  // The agent card is a grid item, and a grid item's default `min-width:auto` stops it shrinking below
+  // its content. Without `min-w-0` it rendered 478px wide inside a 343px cell at 390 — the page never
+  // scrolled sideways (the overflow was hidden), so every automated width check passed while agent
+  // names were cut mid-word. Only reading the screenshot found it.
+  it('the agent card can shrink on a phone', () => {
+    const card = src().match(/'group relative flex[^']*/);
+    expect(card).toBeTruthy();
+    expect(card![0]).toContain('min-w-0');
+  });
+
   it('nothing re-implements the waiting condition inline any more', () => {
     const inline = (src().match(/status\s*===\s*'awaiting_input'/g) || []).length;
     expect(inline).toBe(1); // only inside areaNeedsYou itself
