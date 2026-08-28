@@ -861,6 +861,19 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // goes AFTER the row is written: a lock freed for a run still marked 'running' would let the next
     // start overlap the one that never actually ended.
     await this.locks?.releaseForRun(id).catch(() => undefined);
+    // A job the SYSTEM switched off comes back on when the system's own evidence says it works again
+    // (BEA-1514). Every self-pause — the repair loop giving up, the daily credit ceiling — is a guess
+    // that the job is broken, and nothing ever un-guessed it: his flagship agent paused itself after
+    // one network failure, was fixed hours later, ran green three times, and was STILL switched off
+    // with "its worker keeps failing" on the screen. A schedule that will never fire again is the
+    // worst possible outcome of a safety feature.
+    //
+    // The distinction that makes this safe is already in the data: a pause HE set leaves
+    // `pausedReason` null (`updateAgent` only writes one from a self-pause), so the system can only
+    // ever clear its own. A job he switched off by hand stays off, whatever it does on a manual run.
+    if ((patch.status ?? 'done') === 'done' && run.agentId) {
+      await this.clearSelfPause(run.agentId, id).catch(() => undefined);
+    }
     // A worker that failed is evidence (BEA-1393). This runs before the callback controller drops
     // the run's journal, so the answers that broke it are still there — and it is swallowed, because
     // a run that has already failed must not fail a second time on the way out.
@@ -881,6 +894,29 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       await Promise.resolve(this.journalCleanup(id)).catch(() => undefined);
     }
     return this.shapeRun(updated);
+  }
+
+  /**
+   * Switch a self-paused job back on after a run of it succeeded, and say so on that run (BEA-1514).
+   *
+   * Only a pause the system set is cleared — `pausedReason` is the marker, written by the repair loop
+   * and by the credit ceiling and by nothing else. His own "switch it off" writes `enabled: false`
+   * with no reason and is never touched here.
+   *
+   * Swallowed by the caller: a finished run must never fail on the way out because of this.
+   */
+  private async clearSelfPause(agentId: string, runId: string): Promise<void> {
+    const job: any = await this.prisma.agent
+      ?.findUnique?.({ where: { id: agentId }, select: { enabled: true, pausedReason: true } })
+      .catch(() => null);
+    if (!job || job.enabled || !job.pausedReason) return;
+    await this.prisma.agent.update({ where: { id: agentId }, data: { enabled: true, pausedReason: null } });
+    await this.appendStep(runId, {
+      label: 'Switched back on — it paused itself, and this run worked',
+      status: 'done',
+      detail: `Why it was off: ${String(job.pausedReason).slice(0, 200)}`,
+      kind: 'info',
+    }).catch(() => undefined);
   }
 
   /** Link a saved Document to the run (the agent's output). */

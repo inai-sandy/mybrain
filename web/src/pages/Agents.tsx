@@ -633,6 +633,20 @@ function StarterCard({ s, onPick }: { s: Starter; onPick: (s: Starter) => void }
  * than what it also happens to read. An area with no jobs yet has nothing to act on, so it reads as
  * research until it does.
  */
+/**
+ * Is this agent parked on a question of his? (BEA-1514)
+ *
+ * ONE definition, used by the "Needs you" tab, its count and the "Waiting on you" dropdown — a count
+ * that disagreed with the list it counts is the exact bug class this module keeps producing.
+ */
+export function waitingJobOf(ar: any): any | undefined {
+  return (ar?.jobs || []).find((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
+}
+
+export function areaNeedsYou(ar: any): boolean {
+  return !!waitingJobOf(ar);
+}
+
 function areaKind(ar: any): 'tools' | 'research' {
   const jobs = ar?.jobs || [];
   return jobs.some((j: any) => agentKind(j) === 'tools') ? 'tools' : 'research';
@@ -668,10 +682,15 @@ export function Agents() {
   const [q, setQ] = useState('');
   // Agents list standards (BEA-1183) — always on, 12 per page.
   const [agentFilter, setAgentFilter] = useState<'all' | 'waiting' | 'ran' | 'never'>('all');
-  // TOOLS OR RESEARCH (BEA-1506) — his segregation, as tabs above the list. Deliberately separate
-  // from `agentFilter`: "show me the research ones that need me" is a real thing to want, and folding
-  // kind into the same dropdown would make the two mutually exclusive.
-  const [kindTab, setKindTab] = useState<'all' | 'tools' | 'research'>('all');
+  // TOOLS OR RESEARCH (BEA-1506) — his segregation, as tabs above the list, plus the "Needs you" tab
+  // he asked for (BEA-1514). It is the one that earns its place: an agent parked on a question was
+  // otherwise invisible here until you checked WhatsApp.
+  //
+  // It sits in the tab row and is therefore exclusive with Tools/Research, which is the one thing this
+  // comment used to argue against. Nothing is lost: "show me the RESEARCH ones that need me" is still
+  // one pick away in the Waiting-on-you dropdown, which is orthogonal to the tabs by design. Both
+  // roads read `areaNeedsYou`, so the tab, its count and the dropdown cannot drift apart.
+  const [kindTab, setKindTab] = useState<'all' | 'tools' | 'research' | 'needs'>('all');
   const [agentSort, setAgentSort] = useState<'recent' | 'name' | 'jobs'>('recent');
   const [agentPage, setAgentPage] = useState(1);
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
@@ -1053,8 +1072,9 @@ export function Agents() {
             const jobs = ar.jobs || [];
             // TOOLS OR RESEARCH (BEA-1506). An area holding any tools job is a tools area: what it
             // can touch in his accounts matters more than what it also happens to read.
-            if (kindTab !== 'all' && areaKind(ar) !== kindTab) return false;
-            if (agentFilter === 'waiting') return jobs.some((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
+            if (kindTab === 'needs') { if (!areaNeedsYou(ar)) return false; }
+            else if (kindTab !== 'all' && areaKind(ar) !== kindTab) return false;
+            if (agentFilter === 'waiting') return areaNeedsYou(ar);
             if (agentFilter === 'ran') return jobs.some((j: any) => j.lastRun);
             if (agentFilter === 'never') return jobs.every((j: any) => !j.lastRun);
             return true;
@@ -1081,8 +1101,12 @@ export function Agents() {
                   { k: 'all' as const, label: 'All' },
                   { k: 'tools' as const, label: '\u{1F527} Tools' },
                   { k: 'research' as const, label: '\u{1F50E} Research' },
+                  { k: 'needs' as const, label: '\u{23F3} Needs you' },
                 ]).map((t) => {
-                  const n = t.k === 'all' ? scope.length : scope.filter((ar: any) => areaKind(ar) === t.k).length;
+                  const n =
+                    t.k === 'all' ? scope.length
+                    : t.k === 'needs' ? scope.filter(areaNeedsYou).length
+                    : scope.filter((ar: any) => areaKind(ar) === t.k).length;
                   const on = kindTab === t.k;
                   return (
                     <button
@@ -1094,7 +1118,10 @@ export function Agents() {
                         'shrink-0 rounded-t-lg px-3 py-1.5 text-xs font-semibold transition-colors ' +
                         (on
                           ? 'border-b-2 border-emerald-500 text-emerald-700 dark:text-emerald-300'
-                          : 'border-b-2 border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
+                          : t.k === 'needs' && n > 0
+                            // Something is actually parked on him — the tab says so without being tapped.
+                            ? 'border-b-2 border-transparent text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
+                            : 'border-b-2 border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
                       }
                     >
                       {t.label}<span className="ml-1.5 text-[10px] font-bold text-zinc-400">{n}</span>
@@ -1129,7 +1156,7 @@ export function Agents() {
                 {filtered.map((ar) => {
                   const color = ar.color || '#818cf8';
                   const runningJob = ar.jobs.find((j: any) => j.lastRun?.status === 'running');
-                  const waitingJob = ar.jobs.find((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
+                  const waitingJob = waitingJobOf(ar);
                   const lastDone = ar.jobs.map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
                   const isSel = selected.has(ar.id);
                   const selectMode = selected.size > 0;
