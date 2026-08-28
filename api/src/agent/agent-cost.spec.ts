@@ -101,6 +101,38 @@ describe('agentCost (BEA-1526)', () => {
     expect((await s.agentCost('a')).firstRunAt).toBe(old.toISOString());
   });
 
+  /**
+   * The first version sorted Date OBJECTS with a bare `.sort()`, which compares their `toString()`
+   * forms — "Wed Aug 27 2026…" vs "Fri Aug 28 2026…" — and therefore orders by WEEKDAY NAME. It
+   * shipped, and reported his agent's first run as today when it had plainly run the day before.
+   *
+   * These two dates are chosen so weekday order and real order DISAGREE: Wednesday 26 Aug came first,
+   * but "Fri" sorts before "Wed". The old code returned the Friday.
+   */
+  it('orders by the real time, not the weekday name', async () => {
+    const wed = new Date('2026-08-26T03:00:00.000Z'); // earlier, but "Wed" sorts last
+    const fri = new Date('2026-08-28T03:00:00.000Z'); // later, but "Fri" sorts first
+    const s = svc(
+      [
+        { id: 'r1', agentId: 'a', aiTokens: 0, startedAt: fri },
+        { id: 'r2', agentId: 'a', aiTokens: 0, startedAt: wed },
+      ],
+      [],
+    );
+    expect((await s.agentCost('a')).firstRunAt).toBe(wed.toISOString());
+  });
+
+  it('survives a run row with no start time', async () => {
+    const s = svc(
+      [
+        { id: 'r1', agentId: 'a', aiTokens: 0, startedAt: null },
+        { id: 'r2', agentId: 'a', aiTokens: 0, startedAt: recent },
+      ],
+      [],
+    );
+    expect((await s.agentCost('a')).firstRunAt).toBe(recent.toISOString());
+  });
+
   it('a broken query is an empty answer, never a failed page', async () => {
     const prisma: any = { agentRun: { findMany: async () => { throw new Error('database gone'); } } };
     const c = await new (AgentService as any)(prisma).agentCost('a');

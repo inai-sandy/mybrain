@@ -325,7 +325,13 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         aiTokens += n;
         if (recent.has(r.id)) aiTokens30d += n;
       }
-      const started = runs.map((r) => r.startedAt).filter(Boolean).sort();
+      // Sorted on the TIMESTAMP, never the Date object. A bare `.sort()` compares `toString()` forms
+      // — "Wed Aug 27 2026…" vs "Fri Aug 28 2026…" — so it orders by WEEKDAY NAME. It shipped once
+      // and reported his agent's first run as today when it had run the day before.
+      const firstAt = runs
+        .map((r) => (r.startedAt ? new Date(r.startedAt).getTime() : 0))
+        .filter((t) => t > 0)
+        .reduce((a, b) => Math.min(a, b), Infinity);
       return {
         runs: runs.length,
         runs30d: recent.size,
@@ -334,7 +340,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         aiTokens,
         aiTokens30d,
         calls: rows.length,
-        firstRunAt: started.length ? new Date(started[0]).toISOString() : null,
+        firstRunAt: Number.isFinite(firstAt) ? new Date(firstAt).toISOString() : null,
       };
     } catch {
       return empty;
