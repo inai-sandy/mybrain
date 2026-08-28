@@ -45,3 +45,32 @@ describe('the run screen shows progress, as the design does', () => {
     expect(src()).toMatch(/progress\.total > 0 &&/);
   });
 });
+
+/**
+ * A finished run does not look like it is still working (BEA-1537).
+ *
+ * Found by building the progress line: on a run that finished hours earlier, several steps were still
+ * marked `running` — a worker that exits without stamping its last update leaves them that way. They
+ * were drawn as spinning blue loaders, so a completed job appeared to be working for ever, and the
+ * progress line named the FIRST such step as "now" on a job that had long since finished.
+ */
+describe('a finished run stops spinning', () => {
+  const src = () => require('fs').readFileSync(__dirname + '/AgentRunView.tsx', 'utf8');
+
+  it('the step icon knows whether the run is still going', () => {
+    const s = src();
+    expect(s).toMatch(/function StepIcon\(\{ status, live/);
+    expect(s).toMatch(/<StepIcon status=\{s\.status\} live=\{active\}/);
+  });
+
+  it('only spins while the run is actually live', () => {
+    expect(src()).toMatch(/status === 'running'\) return live/);
+  });
+
+  // The bug this replaced: picking a stuck-running step on a finished run named step one as "now".
+  it('takes the last step as "now" once the run is over', () => {
+    const s = src();
+    expect(s).toMatch(/const stillGoing = real\.find/);
+    expect(s).toMatch(/&& stillGoing\s*\n?\s*\? stillGoing/);
+  });
+});

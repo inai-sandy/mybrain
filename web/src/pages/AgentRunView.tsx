@@ -66,9 +66,17 @@ function GradeCard({ grade }: { grade: Grade }) {
   );
 }
 
-function StepIcon({ status }: { status?: string }) {
+/**
+ * `live` = the RUN is still going. A finished run can still carry steps stuck on `running` — a worker
+ * that exits without stamping its last update leaves them that way — and drawing those as spinning
+ * blue loaders made a completed job look like it was still working, for ever (BEA-1537). Once the run
+ * is over, a step that never said how it ended is simply over too.
+ */
+function StepIcon({ status, live = true }: { status?: string; live?: boolean }) {
   if (status === 'done') return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
-  if (status === 'running') return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+  if (status === 'running') return live
+    ? <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+    : <CheckCircle2 className="h-4 w-4 text-zinc-400" />;
   if (status === 'failed') return <AlertCircle className="h-4 w-4 text-red-500" />;
   if (status === 'info') return <Info className="h-4 w-4 text-zinc-400" />;
   return <Circle className="h-4 w-4 text-zinc-300 dark:text-zinc-600" />;
@@ -135,7 +143,14 @@ export function AgentRunView() {
   const progress = (() => {
     const real = steps.filter((s: any) => s && s.kind !== 'info' && s.kind !== 'log');
     const doneN = real.filter((s: any) => s.status === 'done' || s.status === 'failed').length;
-    const current = real.find((s: any) => s.status === 'running') || real[real.length - 1];
+    // While it runs, the step still going IS where you are. Once it has finished, it is the LAST
+    // step — because a finished run can still carry steps stuck on `running` (a worker that exits
+    // without stamping its last update leaves them that way), and picking one of those named the
+    // FIRST step of a completed job as "now".
+    const stillGoing = real.find((x: any) => x.status === 'running');
+    const current = (run?.status === 'running' || run?.status === 'awaiting_input') && stillGoing
+      ? stillGoing
+      : real[real.length - 1];
     return { total: real.length, at: Math.min(real.length, doneN + 1), now: current?.label ? String(current.label) : '' };
   })();
   const timeline = steps.filter((s) => s.kind !== 'log'); // curated steps; raw log lines live in the Terminal
@@ -232,7 +247,7 @@ export function AgentRunView() {
               <ol className="space-y-2.5">
                 {timeline.map((s, i) => (
                   <li key={i} className="flex items-start gap-2.5">
-                    <span className="mt-0.5 shrink-0"><StepIcon status={s.status} /></span>
+                    <span className="mt-0.5 shrink-0"><StepIcon status={s.status} live={active} /></span>
                     <div className="min-w-0">
                       <div className="text-sm text-zinc-800 dark:text-zinc-200">{s.label}</div>
                       {s.detail && <div className="truncate text-xs text-zinc-500">{s.detail}</div>}
