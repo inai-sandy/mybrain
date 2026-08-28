@@ -50,6 +50,58 @@ export type LiveLook = {
   error?: string;
 };
 
+/**
+ * The number the goal promises, if it promises one (BEA-1551).
+ *
+ * "the top 100 posts", "50 profiles", "20 repos" — a quantity in a goal is a promise about the WORLD,
+ * and nothing ever checked it against the world. Four of his fourteen failed runs were exactly that
+ * promise meeting reality at runtime: *"the goal asks for 100 posts, but Reddit returned only 71"*.
+ *
+ * Deliberately conservative. It reads a number that is clearly a COUNT of the thing being fetched, and
+ * returns null otherwise — a wrong quantity would put a false warning in front of him, which is worse
+ * than no warning at all. Years, dates and money are never counts.
+ */
+export function askedQuantity(goalText: string): number | null {
+  const t = String(goalText || '').toLowerCase();
+  // "top 100 posts" · "100 posts" · "first 50 profiles" · "latest 20 repos"
+  const m = t.match(/\b(?:top|first|latest|best|newest|up to|at most)?\s*(\d{1,5})\s+(?:of\s+the\s+)?[a-z_-]{3,20}s\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n < 2 || n > 100000) return null;
+  // A year, a price or a time is not a count of anything.
+  const around = t.slice(Math.max(0, (m.index || 0) - 12), (m.index || 0) + m[0].length + 12);
+  if (/\b(19|20)\d{2}\b/.test(m[1]) && /year|since|until|in \d{4}/.test(around)) return null;
+  if (/[₹$€£]\s*$/.test(t.slice(0, m.index || 0))) return null;
+  return n;
+}
+
+/**
+ * What one real look says about a promised quantity (BEA-1551).
+ *
+ * Three answers, and only three, because only three are provable from one call:
+ *
+ *  - **impossible** — the source said there is no next page and returned fewer than promised. Then the
+ *    number simply does not exist, and building a worker to chase it wastes his afternoon.
+ *  - **needs paging** — more pages exist, so it is reachable but only by paging; the arithmetic is
+ *    stated so nobody has to guess how deep it goes.
+ *  - **fine** — one page already covers it.
+ *
+ * Never claims a total it has not seen. "There are more pages" is not "there are enough".
+ */
+export function feasibilityNote(asked: number | null, look?: LiveLook | null): string | null {
+  if (!asked || !look || look.error) return null;
+  const per = Number(look.count) || 0;
+  if (per >= asked) return `The goal asks for ${asked}, and one page already returned ${per}. One fetch covers it.`;
+  if (look.morePages === false) {
+    return `**The goal asks for ${asked}, and the source has only ${per}.** It said there is no next page, so ${asked} do not exist right now. Say this in the goal — promise what is really there ("all of them, however many that is"), not a number the source cannot supply.`;
+  }
+  if (per > 0 && look.morePages) {
+    const pages = Math.ceil(asked / per);
+    return `The goal asks for ${asked} and one page returned ${per}, so this needs about ${pages} pages. There are more pages, but nothing has proved ${asked} exist — say what happens if there are fewer.`;
+  }
+  return null;
+}
+
 export type ToolInfo = {
   actionId: string;
   name?: string | null;
@@ -143,6 +195,39 @@ export function toolsText(tools: ToolInfo[]): string {
  * rather than guess — because guessing is what produced every defect so far, and a question costs a
  * minute where a wrong assumption costs a rebuild.
  */
+/**
+ * The promised number, checked against what the real look found (BEA-1551).
+ *
+ * Empty when the goal names no quantity, or when no look could be taken — an unchecked promise is
+ * quieter than a wrong warning.
+ */
+export function quantityText(req: GoalRequest): string {
+  const asked = askedQuantity(goalAsk(req));
+  if (!asked) return '';
+  const notes: string[] = [];
+  for (const t of req.tools || []) {
+    const n = feasibilityNote(asked, t.look);
+    if (n) notes.push(`- \`${t.actionId}\` — ${n}`);
+  }
+  if (!notes.length) return '';
+  return [
+    '',
+    '## The number this goal promises',
+    '',
+    'He asked for a specific amount. One real call was made to check it against what the source actually holds:',
+    '',
+    ...notes,
+    '',
+    'Say the truth of this **in the goal he approves**, in his own plain words — he should never approve a number that cannot be delivered, and should never be surprised at the first run. If the amount is not there, promise what is ("everything there is, however many that turns out to be").',
+  ].join('\n');
+}
+
+/** His own words — the last thing he said, which is what the number was asked in. */
+function goalAsk(req: GoalRequest): string {
+  const turns = Array.isArray(req.transcript) ? req.transcript : [];
+  return turns.map((t: any) => String(t?.text || '')).join(' ');
+}
+
 export function goalPrompt(req: GoalRequest): string {
   return `# Read this conversation and tell him what you are going to build
 
@@ -190,6 +275,7 @@ These are the actions he said to use. He chose them; you do not have to justify 
 cannot do what the conversation needs, say so in the goal rather than working around it silently.
 
 ${toolsText(req.tools)}
+${quantityText(req)}
 
 You also have the open web while you build and while the agent runs — search it, read pages, call
 whatever you need. Nothing is blocked.
