@@ -59,3 +59,37 @@ describe('a capped fetch says it was capped', () => {
     expect(ctl()).toMatch(/pages: trial \? 1 : clampPages/);
   });
 });
+
+/**
+ * The gate must not fail a worker for the trial's own doing (BEA-1554).
+ *
+ * v8 passed its tests, fetched Reddit, produced rows — then reached `create_google_sheet1`, which the
+ * trial correctly HELD. With no sheet id back, the worker correctly reported it had none, and my gate
+ * read that as a defect and refused to promote. v7 stayed live for no good reason.
+ *
+ * Left alone, this would have blocked **every agent that creates anything** — nearly all of them.
+ */
+describe('the gate judges only what it can', () => {
+  const svc = () => fs.readFileSync(path.join(__dirname, 'worker-build.service.ts'), 'utf8');
+
+  it('passes the check when the run reached a held write', () => {
+    const s = svc();
+    expect(s).toMatch(/const heldAWrite = await this\.reachedAHeldWrite\(runId\)/);
+    expect(s).toMatch(/const ok = out\?\.status !== 'failed' \|\| heldAWrite/);
+  });
+
+  // The marker is the step the controller already writes — not a new signal invented for this.
+  it('spots the hold from the step the controller already writes', () => {
+    expect(svc()).toMatch(/Held back —/);
+  });
+
+  // It must still catch a worker that cannot even reach a write.
+  it('still fails when the run broke before any write', () => {
+    const s = svc();
+    expect(s).toMatch(/return ok \? \{ ok: true \} : \{ ok: false/);
+  });
+
+  it('says why this is not a loophole', () => {
+    expect(svc()).toMatch(/at all means the worker started, fetched/);
+  });
+});

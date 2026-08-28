@@ -180,7 +180,18 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
       const out: any = await this.runner
         .run({ jobId: agentId, runId, token: spawn.token, seed: spawn.seed, timeoutMs: SMOKE_TIMEOUT_MS } as any)
         .catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }));
-      const ok = out?.status !== 'failed';
+      // EVERYTHING AFTER A HELD WRITE IS FICTION (BEA-1554).
+      //
+      // A trial holds writes, so `create_google_sheet1` returns nothing usable — and the worker then
+      // fails, correctly, saying it has no sheet id. That is not a defect; it is the trial doing its
+      // job. Without this, the gate would block every agent that creates anything, which is nearly all
+      // of them: v8 was refused for exactly this, and v7 stayed live for no good reason.
+      //
+      // So the check judges only what it can: everything up to the first held call. Reaching a write
+      // at all means the worker started, fetched, read the answer and produced rows — which is the
+      // whole question a smoke run exists to answer.
+      const heldAWrite = await this.reachedAHeldWrite(runId).catch(() => false);
+      const ok = out?.status !== 'failed' || heldAWrite;
       await this.agent
         .finishRun?.(runId, ok
           ? { status: 'done', resultText: `v${version} met the real source: one page read, nothing written.` }
@@ -190,6 +201,19 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
     } finally {
       await Promise.resolve(this.tokens.revokeRun(runId)).catch(() => undefined);
     }
+  }
+
+  /**
+   * Did this trial get as far as a write being held back? (BEA-1554)
+   *
+   * The marker is the step the controller already writes when it refuses a trial write — "Held back —
+   * svc:googlesheets.create_google_sheet1". Past that point the worker is reasoning about a sheet that
+   * was never made, so nothing it says afterwards is evidence about the worker.
+   */
+  private async reachedAHeldWrite(runId: string): Promise<boolean> {
+    const run: any = await this.prisma.agentRun.findUnique({ where: { id: runId }, select: { stepLog: true } }).catch(() => null);
+    if (!run?.stepLog) return false;
+    return /Held back —/.test(String(run.stepLog));
   }
 
   /** Is a build for this job in flight right now? Same staleness rule the Worker row uses. */
