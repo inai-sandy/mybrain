@@ -590,7 +590,11 @@ export function AgentApp() {
             ) : spec.view === 'checklist' ? (
               <ul className="space-y-1.5">
                 {(latest.resultText || '').split('\n').map((l: string) => l.replace(/^[-*•\s]+/, '')).filter(Boolean).slice(0, 20).map((l: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm"><span className="mt-0.5 text-emerald-500">✓</span><span className="text-zinc-700 dark:text-zinc-300">{l}</span></li>
+                  // `min-w-0 break-words` (BEA-1529): these lines carry whatever a run reported —
+                  // sheet URLs, markdown table rows — and a long unbroken URL will not wrap. Inside a
+                  // flex row it then pushed the line to 684px in a 324px column at 390, clipped with
+                  // no way to read the rest. The page never scrolled sideways, so nothing flagged it.
+                  <li key={i} className="flex items-start gap-2 text-sm"><span className="mt-0.5 shrink-0 text-emerald-500">✓</span><span className="min-w-0 break-words text-zinc-700 dark:text-zinc-300">{l}</span></li>
                 ))}
               </ul>
             ) : spec.view === 'plain' ? (

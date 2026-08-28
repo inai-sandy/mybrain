@@ -88,6 +88,30 @@ describe('kindOfMade', () => {
   });
 });
 
+/**
+ * Run result lines wrap on a phone (BEA-1529).
+ *
+ * These lines carry whatever a run reported — a Google Sheet URL, a markdown table row. A long
+ * unbroken URL will not wrap, and inside a flex row it pushed the line to 684px in a 324px column at
+ * 390: clipped, with no way to read the rest. The page never scrolled sideways, so no width assertion
+ * caught it — the same shape as the card bug in BEA-1525.
+ */
+describe('run result lines survive a phone', () => {
+  const src = () => require('fs').readFileSync(__dirname + '/AgentApp.tsx', 'utf8');
+
+  it('the result line can wrap and can shrink', () => {
+    const line = src().match(/<li key=\{i\} className="flex items-start gap-2 text-sm">.*?<\/li>/s);
+    expect(line).toBeTruthy();
+    expect(line![0]).toContain('min-w-0');
+    expect(line![0]).toContain('break-words');
+  });
+
+  it('the tick beside it never shrinks instead of the text', () => {
+    const line = src().match(/<li key=\{i\} className="flex items-start gap-2 text-sm">.*?<\/li>/s);
+    expect(line![0]).toContain('shrink-0');
+  });
+});
+
 describe('the made list is on the shared table', () => {
   const src = () => require('fs').readFileSync(__dirname + '/AgentApp.tsx', 'utf8');
 
