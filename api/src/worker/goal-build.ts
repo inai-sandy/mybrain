@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { RANK_AT_THE_SOURCE_RULE, FETCH_EVERYTHING_RULE } from '../agent/prompt-rules';
+import { RANK_AT_THE_SOURCE_RULE, FETCH_EVERYTHING_RULE, NO_PRIVATE_CLOCK_RULE } from '../agent/prompt-rules';
 import { ToolInfo, Turn, toolsText, transcriptText } from '../agent/goal';
 
 /**
@@ -104,6 +104,8 @@ handed you all three, written by the app, and each one quietly changed what he h
 ${RANK_AT_THE_SOURCE_RULE}
 
 ${FETCH_EVERYTHING_RULE}
+
+${NO_PRIVATE_CLOCK_RULE}
 
 ## Check your own work against the goal
 

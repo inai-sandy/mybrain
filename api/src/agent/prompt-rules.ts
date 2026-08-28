@@ -63,3 +63,21 @@ export const RANK_AT_THE_SOURCE_RULE = `RANKING: when the job asks for the top /
  * question.
  */
 export const FETCH_EVERYTHING_RULE = `PAGES: when the job needs a COMPLETE set — "all of them", "the top N of a week/month", "everything that matched" — pass \`pages: 'all'\` to \`kit.callAll\`. It fetches until the source itself runs out, so the run can tell "that was everything" (finish and write it) from "I stopped early" (which it must ask about). Do not pass a number and then treat running out of pages as a shortage — that turns a finished job into a question. And NEVER state a page limit, a cap or a count you have not read: the kit's answer tells you how many pages you actually used and whether the source ran out. Say those numbers, or say none.`;
+
+/**
+ * Do not invent your own clock.
+ *
+ * His Reddit worker wrote `const SOURCE_TIMEOUT_MS = 240_000` into itself and abandoned a fetch that
+ * was working — 30 pages in, 204 items collected, still making progress — because its own stopwatch
+ * ran out. It had budgeted just under the runner's old 5-minute limit; when that limit moved to 25
+ * minutes, the worker's private copy did not, and could not.
+ *
+ * There are already two clocks, and both are better than one a worker can invent:
+ *   - the **stall watchdog** fails a run that has written nothing for 20 minutes — it measures
+ *     PROGRESS, so it can tell a stuck worker from a slow one, which a stopwatch never can;
+ *   - the **runner's ceiling** stops anything pathological.
+ *
+ * A worker that abandons a fetch mid-progress throws away everything it had and produces nothing —
+ * which is exactly the outcome the whole "ask for all the pages" rule exists to avoid.
+ */
+export const NO_PRIVATE_CLOCK_RULE = `TIME: do NOT give yourself a wall clock. No \`SOURCE_TIMEOUT_MS\`, no "give up after N seconds", no racing a fetch against a timer. A long paged fetch is not a hung one — abandoning it throws away every page already paid for and produces nothing. The platform already stops a run that has genuinely stopped making progress, and it says so properly; you do not need to, and a number you pick today will be wrong the moment the work changes. Time out only a single call that the vendor itself has left hanging, never the job as a whole.`;
