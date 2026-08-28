@@ -246,7 +246,15 @@ export class AgentAreasService {
 
       // ---- the tools that fit, and their cards ---------------------------------------------------
       const cat = await this.catalog?.catalog().catch(() => null);
-      const shortlist = shortlistForPrompt((cat?.tools || []).filter((t: any) => t.connected), convo());
+      // WHAT HAS ACTUALLY WORKED, ranked first (BEA-1542). Two providers can both offer a service
+      // called `reddit`; names and a `connected` flag cannot tell which one does the job, and the
+      // builder stopped and asked him which to use — a question his own tool-call log had answered 35
+      // times over. One cheap grouped count, and the actions with a track record sort to the top.
+      const proven = await this.provenCounts().catch(() => ({} as Record<string, number>));
+      const shortlist = shortlistForPrompt(
+        (cat?.tools || []).filter((t: any) => t.connected).map((t: any) => ({ ...t, proven: proven[String(t.id)] || 0 })),
+        convo(),
+      );
       const cardIds = pickCardIds(shortlist as any, convo());
       const cards: ToolKnowledge[] = cardIds.length ? await this.knowledge?.lookup(cardIds).catch(() => []) || [] : [];
       const cardsById: Record<string, ToolKnowledge> = Object.fromEntries(cards.map((c) => [c.actionId, c]));
@@ -602,6 +610,22 @@ export class AgentAreasService {
   }
 
   /** One builder turn: owner's message → the thinking builder's reply (+ the evolving spec or plan). */
+  /**
+   * How many times each action has SUCCEEDED on his account (BEA-1542).
+   *
+   * One grouped count over the tool-call log — the cheapest possible read, and a far better signal
+   * than any flag: it is the difference between an integration he never linked and the one that has
+   * served every real call. Empty on any error; ranking simply falls back to what it did before.
+   */
+  private async provenCounts(): Promise<Record<string, number>> {
+    const rows: any[] = await (this.prisma as any)?.toolCall
+      ?.groupBy?.({ by: ['action'], where: { ok: true }, _count: { action: true } })
+      .catch(() => []);
+    const out: Record<string, number> = {};
+    for (const r of rows || []) if (r?.action) out[String(r.action)] = Number(r?._count?.action) || 0;
+    return out;
+  }
+
   async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null; goal: string | null; brief: ReturnType<typeof briefCardOf> | null; tools: string[] }> {
     const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');

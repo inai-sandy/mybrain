@@ -20,6 +20,16 @@ export type ShortlistTool = {
   important?: boolean;
   /** The vendor retired it (BEA-1365) — still offered, but ranked after every live action. */
   retired?: boolean;
+  /**
+   * How many times THIS action has actually succeeded on his account (BEA-1542).
+   *
+   * The strongest signal there is, and it outranks every guess. Two providers can both offer a service
+   * called `reddit`: one is a Composio integration he never linked, which reports "not connected"; the
+   * other is the social provider that has served 35 successful calls. Ranking on names and a
+   * `connected` flag put the dead one first, so the builder stopped and asked him which to use — a
+   * question his own tool-call log had already answered.
+   */
+  proven?: number;
 };
 
 /** How many actions of one service a prompt is shown when nothing narrower was asked for. */
@@ -68,7 +78,16 @@ export function rankActions<T extends ShortlistTool>(actions: T[], text: string)
   const words = keywords(text);
   return actions
     .map((t, i) => ({ t, i, s: matchScore(t, words) }))
-    .sort((a, b) => Number(!!a.t.retired) - Number(!!b.t.retired) || b.s - a.s || Number(!!b.t.important) - Number(!!a.t.important) || a.i - b.i)
+    // PROVEN FIRST (BEA-1542): anything that has actually worked on his account outranks anything
+    // that merely reads well. Retired still sinks below everything — a retired action that once
+    // worked is still retired. Below proven, the old order stands exactly as it was.
+    .sort((a, b) =>
+      Number(!!a.t.retired) - Number(!!b.t.retired) ||
+      (a.t.proven ? 0 : 1) - (b.t.proven ? 0 : 1) ||
+      (Number(b.t.proven) || 0) - (Number(a.t.proven) || 0) ||
+      b.s - a.s ||
+      Number(!!b.t.important) - Number(!!a.t.important) ||
+      a.i - b.i)
     .map((x) => x.t);
 }
 
