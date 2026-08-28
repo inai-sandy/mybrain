@@ -36,6 +36,26 @@ describe('the ranking rule', () => {
   it('points it at the action\'s own parameters', () => {
     expect(RANK_AT_THE_SOURCE_RULE).toMatch(/action's own parameters/i);
   });
+
+  /**
+   * The sentence the first version of this rule was missing (BEA-1547).
+   *
+   * "Ask the source to sort — never rank them yourself" was obeyed literally: the rebuilt worker asked
+   * for `sort: 'top'` (right), then ASSERTED Reddit returned them in perfect descending score order
+   * and threw when they were not — "Reddit's top/week results were not in descending score order at
+   * post 1; nothing was written." It had 70 good posts in hand and produced nothing.
+   *
+   * The source's sort decides WHICH items you get. Your own sort decides the ORDER they go out in.
+   */
+  it('says to sort what you fetched, yourself', () => {
+    expect(RANK_AT_THE_SOURCE_RULE).toMatch(/SORT WHAT YOU FETCHED/i);
+    expect(RANK_AT_THE_SOURCE_RULE).toMatch(/decides WHICH items you get/i);
+  });
+
+  it('forbids asserting the vendor returned them in order', () => {
+    expect(RANK_AT_THE_SOURCE_RULE).toMatch(/[Nn]ever ASSERT that the source returned them in order/);
+    expect(RANK_AT_THE_SOURCE_RULE).toMatch(/produced nothing out of something/i);
+  });
 });
 
 describe('both briefs carry it', () => {
