@@ -136,3 +136,34 @@ describe('the made list is on the shared table', () => {
     expect(s).not.toContain("m.icon === '\\u{1F4CA}' ?");   // the old inline re-derivation is gone
   });
 });
+
+/**
+ * Every closed settings row shows its current setting (BEA-1536).
+ *
+ * `specs/mockups/agent-settings.html` is built on one rule: *"every closed row shows its current
+ * setting — 'Sources · 5 sources · ≈14 credits/run', 'Schedule · Every Monday 08:00' — so the whole
+ * agent is readable in one screen without opening anything."*
+ *
+ * The cost row shipped fetching only when opened, so its closed summary read "Open to work it out" —
+ * eleven rows told you where you stood and the twelfth demanded a tap. Loading with the page is the
+ * cost of honouring the design, and it is one request.
+ */
+describe('the cost row obeys the settings design', () => {
+  const src = () => require('fs').readFileSync(__dirname + '/AgentApp.tsx', 'utf8');
+
+  it('does not wait for the row to be opened before it knows the figure', () => {
+    expect(src()).not.toMatch(/if \(openRow !== 'cost'\) return;/);
+  });
+
+  // Match the JSX, not the word: the comment above the fix quotes the old string to explain it, and a
+  // word-match would trip on that and teach the next person to delete the explanation (BEA-1462).
+  it('never tells him to open it to find out', () => {
+    expect(src()).not.toMatch(/summary=\{[^}]*Open to work it out/);
+  });
+
+  it('says the real figure when closed, and says so plainly when there is none', () => {
+    const s = src();
+    expect(s).toMatch(/summary=\{costLines\(cost\)\?\.all/);
+    expect(s).toContain('It has not run yet, so it has not cost anything');
+  });
+});

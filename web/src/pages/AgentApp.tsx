@@ -317,12 +317,15 @@ export function AgentApp() {
   const [cost, setCost] = useState<AgentCost | null>(null);
   const [spend, setSpend] = useState<{ spentToday?: number; ceiling?: number; balance?: number } | null>(null);
   useEffect(() => {
-    if (openRow !== 'cost') return;
+    // Loaded with the page, NOT when the row is opened (BEA-1536). The settings design
+    // (specs/mockups/agent-settings.html) is built on one rule: "every closed row shows its current
+    // setting … so you rarely need to open them." A lazy fetch made this the only row that could not,
+    // and it read "Open to work it out" — the one row demanding a tap to tell you anything.
     let live = true;
     fetch(`/api/agent/agents/${id}/cost`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live && d) setCost(d); }).catch(() => undefined);
     fetch('/api/social/spend').then((r) => (r.ok ? r.json() : null)).then((d) => { if (live && d) setSpend(d); }).catch(() => undefined);
     return () => { live = false; };
-  }, [openRow, id]);
+  }, [id]);
   const [savingAll, setSavingAll] = useState(false);
   function toggleRow(k: string) { setOpenRow((p) => (p === k ? '' : k)); }
   function markCfgDirty() { dirtyRef.current = true; setCfgDirty(true); }
@@ -881,7 +884,7 @@ export function AgentApp() {
                   but an agent's cost OVER TIME was nowhere, and neither was how close today is to the
                   ceiling that can pause a job on its own. */}
               <SettingsRow k="cost" icon="💰" title="What it costs"
-                summary={costLines(cost)?.all || 'Open to work it out'}
+                summary={costLines(cost)?.all || (cost ? 'It has not run yet, so it has not cost anything' : 'Adding it up…')}
                 open={openRow === 'cost'} onToggle={toggleRow}>
                 <div className="space-y-1.5 text-sm text-zinc-600 dark:text-zinc-300" data-testid="cost-panel">
                   {!cost && <div className="text-zinc-400">Adding it up…</div>}
