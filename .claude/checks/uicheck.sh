@@ -98,6 +98,33 @@ cat <<'PROBE'
     return t.parentElement && t.scrollWidth > t.parentElement.clientWidth + 2 && !scrolls;
   }).length;
 
+  // BLOCKING 2b — content that starts ON screen and runs OFF it, with nothing to scroll it.
+  //
+  // This is the bug BLOCKING 1 and 2 both miss, and it has shipped three times in one week: an agent
+  // card 478px wide in a 343px grid cell, and a run line pushed to 684px by an unbroken sheet URL.
+  // The page does NOT scroll sideways (the overflow is hidden), so BLOCKING 1 passes; it is not a
+  // <table>, so BLOCKING 2 passes. The text is simply cut off mid-word and there is no way to read it.
+  //
+  // Calibration — every clause below exists to stop a false alarm on a known-good page:
+  //   left < vw       a drawer/menu parked off-screen STARTS off-screen; this bug starts on-screen.
+  //   +8px            rounding and sub-pixel layout, not a real overflow.
+  //   no scrolling ancestor   content inside overflow-x:auto is correct by design.
+  //   has text        an oversized decorative box nobody reads is not this bug.
+  //   visible         display:none is zero-sized; visibility/opacity:0 is deliberate.
+  //   not aria-hidden decorative duplicates.
+  o.runsOffScreen = [...document.querySelectorAll('main *, [role=main] *')].filter(el => {
+    if (!(el.textContent || '').trim()) return false;
+    if (el.closest('[aria-hidden="true"]')) return false;
+    const s = getComputedStyle(el);
+    if (s.visibility === 'hidden' || s.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.left < vw && r.right > vw + 8)) return false;
+    let a = el.parentElement;
+    while (a) { const ox = getComputedStyle(a).overflowX;
+      if (ox === 'auto' || ox === 'scroll') return false; a = a.parentElement; }
+    return true;
+  }).map(el => Math.round(el.getBoundingClientRect().right) + 'px: ' + (el.textContent || '').trim().slice(0, 40));
+
   // BLOCKING 3 — nothing actually rendered (white screen of death).
   const bodyText = (document.body.innerText || '').trim();
   o.visibleChars = bodyText.length;
@@ -181,7 +208,7 @@ for W in $WIDTHS; do
     agent-browser screenshot "${PWD}/${SHOTDIR}/${label}-${W}.png" >/dev/null 2>&1
 
     P_OVER=false; P_DOCW=0; P_VW=0; P_TABLES=0; P_CHARS=0; P_INTER=0; P_UNREAD=0; P_TAPS=0
-    P_LOGIN=false; P_MARKER=none; P_WIDEST=""
+    P_LOGIN=false; P_MARKER=none; P_WIDEST=""; P_OFFSCR=0; P_OFFSCR_EG=""
     eval "$(printf '%s' "$json" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
@@ -198,6 +225,8 @@ out = [
   "P_LOGIN=" + str(g("looksLikeLogin", False)).lower(),
   "P_MARKER=" + ("none" if g("marker", None) is None else str(g("marker")).lower()),
   "P_WIDEST=" + json.dumps(", ".join(g("widest", []))),
+  "P_OFFSCR=" + str(len(g("runsOffScreen", []))),
+  "P_OFFSCR_EG=" + json.dumps(" | ".join(g("runsOffScreen", [])[:3])),
 ]
 print("\n".join(out))
 ')"
@@ -207,6 +236,8 @@ print("\n".join(out))
       FAILURES+=("[${W}px] ${path} — page is wider than the screen (${P_DOCW}px in ${P_VW}px)${P_WIDEST:+ — widest: ${P_WIDEST}}")
     [ "${P_TABLES:-0}" -gt 0 ] && \
       FAILURES+=("[${W}px] ${path} — ${P_TABLES} table(s) cut off with no way to scroll them")
+    [ "${P_OFFSCR:-0}" -gt 0 ] && \
+      FAILURES+=("[${W}px] ${path} — ${P_OFFSCR} thing(s) start on screen and run off it with no way to scroll: ${P_OFFSCR_EG}")
     if [ "${P_CHARS:-0}" -lt 20 ] && [ "${P_INTER:-0}" -lt 2 ]; then
       FAILURES+=("[${W}px] ${path} — the page rendered essentially nothing (${P_CHARS} characters)")
     fi

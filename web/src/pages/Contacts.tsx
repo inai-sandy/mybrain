@@ -391,7 +391,7 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
         const card = (c: BoardContact) => {
           const b = c.board;
           return (
-            <li key={c.id} className={'group flex items-start gap-3 rounded-xl border bg-white p-3.5 transition-colors dark:bg-zinc-900 ' + (alert(c) ? 'border-rose-400/40 hover:border-rose-400/70 dark:border-rose-500/30' : 'border-zinc-200 hover:border-emerald-300 dark:border-zinc-800 dark:hover:border-emerald-500/40')}>
+            <li key={c.id} className={'group flex min-w-0 items-start gap-3 rounded-xl border bg-white p-3.5 transition-colors dark:bg-zinc-900 ' + (alert(c) ? 'border-rose-400/40 hover:border-rose-400/70 dark:border-rose-500/30' : 'border-zinc-200 hover:border-emerald-300 dark:border-zinc-800 dark:hover:border-emerald-500/40')}>
               <button onClick={() => onOpen(c.id)} className="flex min-w-0 flex-1 items-start gap-3 text-left" title="Open contact">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 font-bold text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{c.name.slice(0, 1).toUpperCase()}</span>
                 <div className="min-w-0 flex-1">
