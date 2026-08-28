@@ -57,7 +57,7 @@ export class BriefTrialService {
 
   onModuleInit() {
     // Hear his answer whichever road it came down — WhatsApp, the run screen, Telegram (BEA-1418).
-    this.owner?.setAnswerWatcher?.((runId, answer) => this.onAnswer(runId, answer));
+    this.owner?.setAnswerWatcher?.((runId, answer, waitpointId) => this.onAnswer(runId, answer, waitpointId));
   }
 
   /**
@@ -66,7 +66,31 @@ export class BriefTrialService {
    *
    * `create()` still decides — WhatsApp is another way to press the button, never a way around it.
    */
-  private async onAnswer(runId: string, answer: string): Promise<void> {
+  /**
+   * ONLY MY OWN QUESTION (BEA-1512) — the same guard the goal road needed, for the same reason.
+   *
+   * Every listener hears every answer since BEA-1505. A run's PROGRAM asks him things too, and on the
+   * goal road an answer meant for the program ("Write those posts") was taken as a correction and
+   * wiped an approved goal. This road's only guard was "does this run have a trial", which does not
+   * distinguish the two questions at all — the same damage was one program question away.
+   *
+   * Recognised by the trial's own two choices, which survives a restart.
+   */
+  private async isMyQuestion(waitpointId?: string): Promise<boolean> {
+    if (!waitpointId) return false;
+    const wp: any = await this.prisma?.waitpoint?.findUnique?.({ where: { id: String(waitpointId) } }).catch(() => null);
+    if (!wp) return false;
+    try {
+      const raw = typeof wp.options === 'string' ? JSON.parse(wp.options) : wp.options;
+      const options = Array.isArray(raw) ? raw.map((o: any) => String(o)) : [];
+      return options.includes(KEEP_IT) && options.includes(SEND_BACK);
+    } catch {
+      return false;
+    }
+  }
+
+  private async onAnswer(runId: string, answer: string, waitpointId?: string): Promise<void> {
+    if (!(await this.isMyQuestion(waitpointId))) return;
     const trial = await this.prisma?.agentTrial?.findFirst?.({ where: { runId: String(runId) }, orderBy: { createdAt: 'desc' } }).catch(() => null);
     if (!trial) return;
     const areaId = String(trial.areaId);
