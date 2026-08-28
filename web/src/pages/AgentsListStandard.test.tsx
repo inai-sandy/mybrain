@@ -37,24 +37,40 @@ describe('the agents home meets the list standard (BEA-1528)', () => {
     for (const k of ['recent', 'name', 'jobs']) expect(s).toContain(`'${k}'`);
   });
 
-  it('paginates, and says which page you are on', () => {
+  it('paginates through the shared table', () => {
     const s = src();
     expect(s).toMatch(/const PER = \d+/);
-    expect(s).toContain('Page {page} of {pages}');
+    expect(s).toContain('pageSize={PER}');
   });
 
   it('shows a total count', () => {
     expect(src()).toMatch(/agent\$\{|agent\{|agents?\$\{/);
   });
 
-  // The two empty states are the whole reason this screen is not on DataTable. If either goes, the
-  // justification goes with it — and then it SHOULD be converted.
+  // Both empty states survived the move to the shared table (BEA-1531), which is the whole point:
+  // the folder case is answered BEFORE the table, and the way out of a narrowed list sits under it.
   it('has both empty states, each with a way out', () => {
     const s = src();
     expect(s).toContain('This folder is empty');
     expect(s).toContain('Show all');
-    expect(s).toContain('Nothing matches');
-    expect(s).toContain('>Clear<');
+    expect(s).toContain('Nothing matches');           // the table's emptyText
+    expect(s).toContain('Clear search and filters');  // the way out, under the list
+  });
+
+  it('renders the list through the shared table', () => {
+    const s = src();
+    expect(s).toContain("import { DataTable }");
+    expect(s).toContain('<DataTable<any>');
+    expect(s).toContain('cardsOnly');
+  });
+
+  // controls mode is what lets this screen keep its own control bar AND get the table's paging.
+  // Passing the kind tab as a filter is what makes a tab change reset to page one.
+  it('hands its control values to the table, kind tab included', () => {
+    const s = src();
+    expect(s).toMatch(/controls=\{\{/);
+    expect(s).toMatch(/kind: kindTab/);
+    expect(s).toMatch(/status: agentFilter/);
   });
 
   it('has a loading state, not a blank screen', () => {

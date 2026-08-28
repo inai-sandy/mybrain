@@ -15,6 +15,7 @@ import { EMPTY_THRESHOLD, KEEP_AS_FETCHED, OutputDestPicker, ThresholdDraft, Too
 import { AddSourcePanel, SocialSource } from './social/AddSourcePanel';
 import { sourceIdFor, toolArgsOf, toolsOf } from '../ui/toolArgs';
 import { AgentFolder, FolderNav, FolderPickerSheet, FolderSel, folderCounts, inFolder } from '../ui/AgentFolders';
+import { DataTable } from '../ui/DataTable';
 
 /** What a Social result hands the builder (BEA-1357): the tool, the exact arguments just used, a label. */
 export type SocialPrefill = { tool: string; args: Record<string, any>; label?: string; mode?: string };
@@ -692,7 +693,6 @@ export function Agents() {
   // roads read `areaNeedsYou`, so the tab, its count and the dropdown cannot drift apart.
   const [kindTab, setKindTab] = useState<'all' | 'tools' | 'research' | 'needs'>('all');
   const [agentSort, setAgentSort] = useState<'recent' | 'name' | 'jobs'>('recent');
-  const [agentPage, setAgentPage] = useState(1);
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
   const [showBuilder, setShowBuilder] = useState((params.get('builder') === '1' && !readSocialPrefill(params)) || params.get('builder') === 'chat'); // chat builder (BEA-1104); `?builder=1` alone opens it; `builder=chat` = the Social hand-off (BEA-1372)
   // Folders (BEA-1380): flat, owner-made. The selection lives in the URL (`?folder=<id|unfiled>`)
@@ -821,7 +821,6 @@ export function Agents() {
     const p = new URLSearchParams(params);
     if (sel) p.set('folder', sel); else p.delete('folder');
     setParams(p, { replace: true });
-    setAgentPage(1);
     setSelected(new Set());
   }
   async function createFolderReturning(name: string): Promise<AgentFolder | null> {
@@ -1078,29 +1077,20 @@ export function Agents() {
           // ever dropped, the justification goes with them and it SHOULD be converted.
           const scope = inFolder(areasList as any[], folderSel);
           const needle = q.trim().toLowerCase();
-          const matched = scope.filter((ar) => {
-            if (needle && !(ar.name + ' ' + (ar.description || '') + ' ' + ar.jobs.map((j: any) => j.name).join(' ')).toLowerCase().includes(needle)) return false;
-            const jobs = ar.jobs || [];
-            // TOOLS OR RESEARCH (BEA-1506). An area holding any tools job is a tools area: what it
-            // can touch in his accounts matters more than what it also happens to read.
-            if (kindTab === 'needs') { if (!areaNeedsYou(ar)) return false; }
-            else if (kindTab !== 'all' && areaKind(ar) !== kindTab) return false;
-            if (agentFilter === 'waiting') return areaNeedsYou(ar);
-            if (agentFilter === 'ran') return jobs.some((j: any) => j.lastRun);
-            if (agentFilter === 'never') return jobs.every((j: any) => !j.lastRun);
-            return true;
-          });
           const lastAt = (ar: any) => Math.max(0, ...(ar.jobs || []).map((j: any) => (j.lastRun?.at ? new Date(j.lastRun.at).getTime() : 0)));
-          const sorted = [...matched].sort((a, b) => {
-            if (agentSort === 'name') return String(a.name).localeCompare(String(b.name));
-            if (agentSort === 'jobs') return (b.jobCount || 0) - (a.jobCount || 0) || String(a.name).localeCompare(String(b.name));
-            return lastAt(b) - lastAt(a) || String(a.name).localeCompare(String(b.name));
-          });
+          // Rows for the shared table (BEA-1531): the fields it searches and sorts on, materialised.
+          // `DataTable` matches the search against its COLUMNS and sorts on the key straight off the
+          // row, so the one `search` column below reproduces exactly what this screen always searched
+          // — name, description and the names of the jobs inside.
+          const rows = scope.map((ar: any) => ({
+            ...ar,
+            search: [ar.name, ar.description || '', (ar.jobs || []).map((j: any) => j.name).join(' ')].join(' '),
+            lastAtNum: lastAt(ar),
+            jobsNum: ar.jobCount || 0,
+            nameKey: String(ar.name || '').toLowerCase(),
+          }));
           const PER = 12;
-          const pages = Math.max(1, Math.ceil(sorted.length / PER));
-          const page = Math.min(agentPage, pages);
-          const filtered = sorted.slice((page - 1) * PER, page * PER);
-          const narrowed = needle || agentFilter !== 'all';
+          const narrowed = !!needle || agentFilter !== 'all' || kindTab !== 'all';
           return (
             <div className="space-y-3">
               {/* TOOLS OR RESEARCH (BEA-1506). Tabs rather than another dropdown: which kind am I
@@ -1124,7 +1114,7 @@ export function Agents() {
                       key={t.k}
                       data-testid={`kind-tab-${t.k}`}
                       aria-pressed={on}
-                      onClick={() => { setKindTab(t.k); setAgentPage(1); }}
+                      onClick={() => setKindTab(t.k)}
                       className={
                         'shrink-0 rounded-t-lg px-3 py-1.5 text-xs font-semibold transition-colors ' +
                         (on
@@ -1145,12 +1135,12 @@ export function Agents() {
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                   <input
                     value={q}
-                    onChange={(e) => { setQ(e.target.value); setAgentPage(1); }}
+                    onChange={(e) => setQ(e.target.value)}
                     placeholder="Search agents…"
                     className="w-full rounded-lg border border-zinc-200 bg-transparent py-1.5 pl-8 pr-3 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm"
                   />
                 </div>
-                <select value={agentFilter} onChange={(e) => { setAgentFilter(e.target.value as any); setAgentPage(1); }} aria-label="Filter agents" className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
+                <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value as any)} aria-label="Filter agents" className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
                   <option value="all">All agents</option>
                   <option value="waiting">Waiting on you</option>
                   <option value="ran">Has run</option>
@@ -1161,10 +1151,50 @@ export function Agents() {
                   <option value="name">By name</option>
                   <option value="jobs">Most jobs</option>
                 </select>
-                <span className="shrink-0 text-xs text-zinc-400">{narrowed ? `${sorted.length} of ${scope.length}` : `${scope.length}`}</span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {filtered.map((ar) => {
+              {/* THE SHARED TABLE (BEA-1531). Search, filters, sort, count and pages all come from
+                  `DataTable` now, in `controls` mode: this screen keeps its own control bar — the
+                  kind tabs, the search box, the two selects — and hands their VALUES over, so the
+                  table does the filtering and resets to page one when any of them changes. The
+                  kind tab is passed as a filter for exactly that reason.
+                  `cardsOnly` + `gridClassName` keep the card grid identical to before. */}
+              {/* AN EMPTY FOLDER IS NOT "NOTHING MATCHES" (BEA-1380, kept through BEA-1531).
+                  The shared table renders one `emptyText` string; this case needs a sentence that
+                  says how to fill the folder and a button that leaves it, so it is answered BEFORE
+                  the table rather than inside it. */}
+              {scope.length === 0 && !narrowed ? (
+                <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
+                  {folderSel === 'unfiled' ? 'Nothing is unfiled — every agent sits in a folder.' : 'This folder is empty — open an agent card\u2019s ⋯ menu and pick "Move to folder…", or create a new agent while you\u2019re in here.'}{' '}
+                  <button onClick={() => setFolder(null)} className="text-emerald-600 hover:underline">Show all</button>
+                </div>
+              ) : (
+              <>
+              <DataTable<any>
+                columns={[{ key: 'search', label: 'Agent' }]}
+                rows={rows}
+                filters={[
+                  { key: 'kind', label: 'Kind', options: [], match: (row: any, v: string) => (v === 'needs' ? areaNeedsYou(row) : areaKind(row) === v) },
+                  {
+                    key: 'status', label: 'Status', options: [],
+                    match: (row: any, v: string) => {
+                      const jobs = row.jobs || [];
+                      if (v === 'waiting') return areaNeedsYou(row);
+                      if (v === 'ran') return jobs.some((j: any) => j.lastRun);
+                      if (v === 'never') return jobs.every((j: any) => !j.lastRun);
+                      return true;
+                    },
+                  },
+                ]}
+                controls={{
+                  search: q,
+                  filters: { kind: kindTab === 'all' ? '' : kindTab, status: agentFilter === 'all' ? '' : agentFilter },
+                  sort: agentSort === 'name' ? { key: 'nameKey', dir: 1 } : agentSort === 'jobs' ? { key: 'jobsNum', dir: -1 } : { key: 'lastAtNum', dir: -1 },
+                }}
+                pageSize={PER}
+                cardsOnly
+                gridClassName="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+                emptyText={`Nothing matches${needle ? ` \u201C${q}\u201D` : ' that filter'}${folderSel ? ' in this folder' : ''}.`}
+                renderCard={(ar: any) => {
                   const color = ar.color || '#818cf8';
                   const runningJob = ar.jobs.find((j: any) => j.lastRun?.status === 'running');
                   const waitingJob = waitingJobOf(ar);
@@ -1221,28 +1251,17 @@ export function Agents() {
                     </button>
                     </div>
                   );
-                })}
-              </div>
-              {filtered.length === 0 && (
-                scope.length === 0 && !narrowed ? (
-                  // An empty folder (BEA-1380) — say how to fill it rather than "nothing matches".
-                  <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
-                    {folderSel === 'unfiled' ? 'Nothing is unfiled — every agent sits in a folder.' : 'This folder is empty — open an agent card’s ⋯ menu and pick "Move to folder…", or create a new agent while you’re in here.'}{' '}
-                    <button onClick={() => setFolder(null)} className="text-emerald-600 hover:underline">Show all</button>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
-                    Nothing matches{needle ? ` “${q}”` : ' that filter'}{folderSel ? ' in this folder' : ''}.{' '}
-                    <button onClick={() => { setQ(''); setAgentFilter('all'); setAgentPage(1); }} className="text-emerald-600 hover:underline">Clear</button>
-                  </div>
-                )
-              )}
-              {pages > 1 && (
-                <div className="flex items-center justify-center gap-2 pt-1">
-                  <button onClick={() => setAgentPage(Math.max(1, page - 1))} disabled={page <= 1} className="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs disabled:opacity-40 dark:border-zinc-700">Back</button>
-                  <span className="text-xs text-zinc-500">Page {page} of {pages}</span>
-                  <button onClick={() => setAgentPage(Math.min(pages, page + 1))} disabled={page >= pages} className="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs disabled:opacity-40 dark:border-zinc-700">Next</button>
+                }}
+              />
+              {/* The way out of a narrowed list (BEA-1531). It used to live inside the empty state;
+                  the shared table renders that, so the button sits under the list instead — where it
+                  is also reachable when the filter left you one result rather than none. */}
+              {narrowed && (
+                <div className="pt-1 text-center">
+                  <button onClick={() => { setQ(''); setAgentFilter('all'); setKindTab('all'); }} className="text-xs font-medium text-emerald-600 hover:underline">Clear search and filters</button>
                 </div>
+              )}
+              </>
               )}
             </div>
           );
