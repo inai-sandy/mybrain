@@ -130,6 +130,14 @@ export function AgentRunView() {
   const [keepSel, setKeepSel] = useState<Record<number, boolean>>({});
   const [savingLearn, setSavingLearn] = useState(false);
   const steps = run?.stepLog || [];
+  // How far in the job is (BEA-1537). `info` steps are an agent talking about itself — "running this
+  // job's worker (v10)" — not work done, so counting them would overstate progress on every run.
+  const progress = (() => {
+    const real = steps.filter((s: any) => s && s.kind !== 'info' && s.kind !== 'log');
+    const doneN = real.filter((s: any) => s.status === 'done' || s.status === 'failed').length;
+    const current = real.find((s: any) => s.status === 'running') || real[real.length - 1];
+    return { total: real.length, at: Math.min(real.length, doneN + 1), now: current?.label ? String(current.label) : '' };
+  })();
   const timeline = steps.filter((s) => s.kind !== 'log'); // curated steps; raw log lines live in the Terminal
   const proposed = (run?.learnings || []).filter((l) => l.status === 'proposed');
 
@@ -188,6 +196,20 @@ export function AgentRunView() {
             </div>
             <StatusBadge status={run.status} />
           </header>
+
+          {/* WHERE YOU ARE, AT A GLANCE (BEA-1537) — from web/public/agent-vision.html, the "live run
+              screen" he designed: a status pill and "Step 2 of 5" beside it, so you can see how far in
+              the job is without reading the whole log. The log below is good, but with fifteen steps
+              you had to read all of them to find that out. Only real steps are counted — the plain
+              notes an agent writes about itself are not work. */}
+          {progress.total > 0 && (
+            <p className="-mt-2 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400" data-testid="run-progress">
+              <span className="font-medium text-zinc-600 dark:text-zinc-300">
+                {active ? `Step ${progress.at} of ${progress.total}` : `${progress.total} step${progress.total === 1 ? '' : 's'}`}
+              </span>
+              {progress.now && <><span aria-hidden>·</span><span className="min-w-0 truncate">{progress.now}</span></>}
+            </p>
+          )}
 
           {/* What this run cost (BEA-1394 §I). Until now neither road showed a total anywhere: the
               credits are summed from this run's own tool calls, the AI tokens from its model steps. */}
