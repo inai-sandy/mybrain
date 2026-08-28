@@ -140,7 +140,14 @@ export class WorkerController {
         id: actionId,
         actionId,
         args: body?.args && typeof body.args === 'object' ? body.args : {},
-        pages: clampPages(body.pages ?? 11),
+        // A TRIAL FETCHES ONE PAGE (BEA-1552). Trial mode already holds every write and send, but the
+        // READS were full price — his ESP32 worker asks for `pages: 'all'` and really fetches 35. A
+        // smoke run before promotion must cost about what one look costs, or nobody will keep it on.
+        //
+        // Clamped HERE, from the token, for the same reason the write-hold is: a worker must not be
+        // able to talk its way out of it. One page is enough to learn what a smoke run is for — does
+        // it run, does it parse the answer, does it produce rows.
+        pages: trial ? 1 : clampPages(body.pages ?? 11),
       };
       const args = { actionId, args: src.args, pages: src.pages };
       const hit = await this.journal.once(runId, seq, 'fetchPaged', args, async () => {
@@ -179,6 +186,7 @@ export class WorkerController {
       }
       // Pages are the plan's unless the worker asks for fewer/more, and always inside the cap.
       if (src.kind === 'source' && body.pages !== undefined && body.pages !== null) src.pages = clampPages(body.pages);
+      if (trial && src.kind === 'source') src.pages = 1; // a trial fetches one page (BEA-1552)
       const args = { sourceId: src.id, pages: src.kind === 'source' ? src.pages : 0 };
       // The whole paged fetch is ONE journal step, on purpose: the pages of a source are one
       // answer, and a per-page journal would have to invent sub-positions the worker cannot know.

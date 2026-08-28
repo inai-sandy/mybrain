@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { WorkerTokenService } from './worker-token.service';
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -25,6 +26,9 @@ import { WorkerRunnerClient } from './worker-runner.client';
 
 /** A build that has been going this long is not going to finish — its row stops blocking the next one. */
 const BUILD_STUCK_MS = 45 * 60_000;
+
+/** A smoke run reads one page and writes nothing, so it has no business taking minutes (BEA-1552). */
+const SMOKE_TIMEOUT_MS = 150_000;
 /** How much of the runner's log is kept on the row. Enough to read the failure, not a novel. */
 const LOG_KEPT = 8000;
 
@@ -108,6 +112,7 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
     private readonly lookup?: ToolLookupService, // the whole shelf, for the build brief (BEA-1457)
     private readonly goals?: GoalService, // the goal HE approved, which the build now stands on (BEA-1464)
     private readonly docs?: ToolDocsService, // one document per tool, put in the prompt (BEA-1472)
+    private readonly tokens?: WorkerTokenService, // mints the trial token the smoke run stands on (BEA-1552)
   ) {}
 
   onModuleInit() {
@@ -149,6 +154,42 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
     if (!row) return { running: false, log: '' };
     const ms = row.finishedAt ? new Date(row.finishedAt).getTime() - new Date(row.startedAt).getTime() : undefined;
     return { running: false, log: String(row.log || ''), ranForMs: ms, status: String(row.status || ''), version: Number(row.version) || undefined };
+  }
+
+  /**
+   * Run the new version once against the real source, with everything held back (BEA-1552).
+   *
+   * The trial token is what makes this safe, and it is minted HERE rather than accepted from anywhere:
+   * writes and sends are refused by the controller and the fetch is clamped to one page, both read off
+   * the token, so a worker cannot argue its way out of either.
+   *
+   * Only a hard failure blocks promotion. A worker that runs, reads its page and stops because the
+   * goal wants more than one page holds has done its job here — the point is not to produce the
+   * result, it is to prove the thing can meet the vendor at all.
+   *
+   * Anything missing (no token service, no run service, no run row) returns ok: a check that cannot be
+   * made must never block a build that passed its tests.
+   */
+  private async smokeRun(agentId: string, version: number): Promise<{ ok: boolean; why?: string }> {
+    if (!this.tokens || !this.agent?.createRun) return { ok: true };
+    const run: any = await this.agent.createRun({ agentId, title: `Checking v${version} against the real source` }).catch(() => null);
+    if (!run?.id) return { ok: true };
+    const runId = String(run.id);
+    try {
+      const spawn: any = await this.tokens.mint(runId, agentId, { trial: true });
+      const out: any = await this.runner
+        .run({ jobId: agentId, runId, token: spawn.token, seed: spawn.seed, timeoutMs: SMOKE_TIMEOUT_MS } as any)
+        .catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }));
+      const ok = out?.status !== 'failed';
+      await this.agent
+        .finishRun?.(runId, ok
+          ? { status: 'done', resultText: `v${version} met the real source: one page read, nothing written.` }
+          : { status: 'failed', error: String(out?.error || 'it did not finish') })
+        .catch(() => undefined);
+      return ok ? { ok: true } : { ok: false, why: `${String(out?.error || 'it did not finish')}.` };
+    } finally {
+      await Promise.resolve(this.tokens.revokeRun(runId)).catch(() => undefined);
+    }
   }
 
   /** Is a build for this job in flight right now? Same staleness rule the Worker row uses. */
@@ -506,6 +547,24 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
       ...(opts.reason ? { reason: opts.reason } : {}),
       samples: req.sampleIds.length,
     };
+      // ONE REAL RUN BEFORE IT GOES LIVE (BEA-1552).
+      //
+      // Green tests prove the worker handles the SAVED answers it was given. They cannot prove it
+      // handles the LIVE source, and that gap is where his versions came from: 12 of 14 failed runs
+      // were properties only the real vendor could show — an error shape, an empty field, an answer
+      // whose list sat somewhere the parser never looked.
+      //
+      // So the worker runs once, for real, as a TRIAL: every write and every send is held, and the
+      // fetch is clamped server-side to one page, so it costs about what one look costs. If it cannot
+      // survive one page of reality it does not go live, and v(n-1) keeps running — exactly the rule
+      // the tests already follow.
+      const smoke = await this.smokeRun(agentId, version).catch((e: any) => ({ ok: false as const, why: String(e?.message || e) }));
+      if (!smoke.ok) {
+        const stayedSmoke = before.worker ? `v${before.worker.version} is still the live worker.` : 'The job is still running the old way, on the plan runner.';
+        const whySmoke = `It passed its own tests, but one real run could not get through: ${smoke.why} Nothing was written and nothing was sent. ${stayedSmoke}`;
+        await this.finish(row.id, { status: 'failed', version, tests, sessionId: built.sessionId, log, error: whySmoke });
+        return { ...(await this.state(agentId)), built: { ok: false, version, tests, error: whySmoke } };
+      }
     const promoted = await this.runner.promote({ jobId: agentId, version, meta });
     if (!promoted.ok) {
       const stayed = before.worker ? `v${before.worker.version} is still the live worker.` : 'The job is still running the old way, on the plan runner.';
