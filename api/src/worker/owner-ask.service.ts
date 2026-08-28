@@ -57,7 +57,7 @@ export class OwnerAskService implements OnModuleInit {
     // WhatsApp, the run screen, Telegram, or the 12-hour timeout taking the question's own default.
     // Settling it only on the WhatsApp road would leave a timed-out gate `pending` for ever, and the
     // resumed worker would park and message him again every twelve hours.
-    this.agent.setAnswerHook?.(async (runId: string, answer: string) => {
+    this.agent.setAnswerHook?.(async (runId: string, answer: string, _via: string, waitpointId?: string) => {
       await Promise.resolve(this.gates?.settlePending?.(runId, answer)).catch(() => undefined);
       // EVERY listener hears it, not just the last one to register (BEA-1505).
       //
@@ -73,7 +73,7 @@ export class OwnerAskService implements OnModuleInit {
         // synchronously never returns a promise to attach a catch to, and would take the whole
         // answer down with it — including the listeners after it in the list.
         try {
-          await w(runId, answer);
+          await w(runId, answer, waitpointId);
         } catch (e: any) {
           this.log?.warn?.(`a listener could not act on his answer: ${e?.message || e}`);
         }
@@ -125,9 +125,9 @@ export class OwnerAskService implements OnModuleInit {
    * A list, never one slot. Two services register here and a single slot silently dropped one of
    * them, which is how "Keep it" stopped keeping anything.
    */
-  private readonly watchers: ((runId: string, answer: string) => Promise<void> | void)[] = [];
+  private readonly watchers: ((runId: string, answer: string, waitpointId?: string) => Promise<void> | void)[] = [];
 
-  setAnswerWatcher(fn: (runId: string, answer: string) => Promise<void> | void) {
+  setAnswerWatcher(fn: (runId: string, answer: string, waitpointId?: string) => Promise<void> | void) {
     if (typeof fn !== 'function') return;
     if (!this.watchers.includes(fn)) this.watchers.push(fn);
   }

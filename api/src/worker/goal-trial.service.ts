@@ -61,7 +61,7 @@ export class GoalTrialService implements OnModuleInit {
     // …and what happens when he answers (BEA-1481). Without this the question reached his phone, he
     // replied "keep it", and NOTHING happened — the run sat waiting for ever and the agent stayed
     // switched off. The last step of the road was a dead end.
-    this.owner?.setAnswerWatcher?.((runId: string, answer: string) => this.onAnswer(runId, answer));
+    this.owner?.setAnswerWatcher?.((runId: string, answer: string, waitpointId?: string) => this.onAnswer(runId, answer, waitpointId));
   }
 
   /**
@@ -75,7 +75,35 @@ export class GoalTrialService implements OnModuleInit {
    * writes the goal again. `saidKeepIt` deliberately reads "yes but change the timing" as a NO —
    * a sentence describing what was wrong must never be mistaken for approval.
    */
-  private async onAnswer(runId: string, answer: string): Promise<void> {
+  /**
+   * ONLY MY OWN QUESTION (BEA-1512).
+   *
+   * BEA-1505 made every listener hear every answer, which fixed "Keep it" — and immediately broke
+   * something worse. A run's PROGRAM also asks him things ("Reddit had only 84 posts, not 100 — write
+   * those, or stop?"). He replied **"Write those posts"**, this listener heard it, decided it was not
+   * "keep it", and sent it to Codex as a correction to the GOAL. His approved goal was replaced by a
+   * question, and the sheet he had just approved was never written.
+   *
+   * Hearing every answer is right. ACTING on every answer is not. The trial's question is recognised
+   * by its own two choices, which survives a restart — unlike remembering an id in memory.
+   */
+  private async isMyQuestion(waitpointId?: string): Promise<boolean> {
+    if (!waitpointId) return false; // cannot tell — and guessing is exactly what caused this
+    const wp: any = await this.prisma?.waitpoint?.findUnique?.({ where: { id: String(waitpointId) } }).catch(() => null);
+    if (!wp) return false;
+    let options: string[] = [];
+    try {
+      const raw = typeof wp.options === 'string' ? JSON.parse(wp.options) : wp.options;
+      options = Array.isArray(raw) ? raw.map((o: any) => String(o)) : [];
+    } catch {
+      return false;
+    }
+    return options.includes(KEEP_IT) && options.includes(SEND_BACK);
+  }
+
+  private async onAnswer(runId: string, answer: string, waitpointId?: string): Promise<void> {
+    // A question the running program asked is not this one, and must be left alone.
+    if (!(await this.isMyQuestion(waitpointId))) return;
     const run: any = await this.prisma?.agentRun?.findUnique?.({ where: { id: String(runId) } }).catch(() => null);
     if (!run?.agentId) return;
     const job: any = await this.prisma?.agent?.findUnique?.({ where: { id: run.agentId } }).catch(() => null);

@@ -209,6 +209,53 @@ describe('what he is asked, and what the app does NOT decide', () => {
  * switched off. Everything before this worked; the last inch did not exist.
  */
 describe('what his answer does', () => {
+  /**
+   * ONLY MY OWN QUESTION (BEA-1512).
+   *
+   * The regression BEA-1505 caused: every listener now hears every answer, so when his RUNNING
+   * PROGRAM asked "Reddit had only 84 posts, not 100 — write those, or stop?" and he replied
+   * **"Write those posts"**, this service heard it, decided it was not "keep it", and sent his words
+   * to Codex as a correction to the GOAL. The approved goal was replaced by a question and the sheet
+   * he had just approved was never written.
+   */
+  function answeredWaitpoint(reply: string, options: string[] | null) {
+    const w = world();
+    const sentBack: string[] = [];
+    const enabled: any[] = [];
+    const svc: any = w.svc;
+    svc.prisma = {
+      agentRun: { findUnique: async () => ({ id: 'run-1', agentId: 'job-1' }) },
+      agent: { findUnique: async () => ({ id: 'job-1', areaId: 'ar1' }) },
+      waitpoint: { findUnique: async () => (options ? { id: 'wp1', options: JSON.stringify(options) } : null) },
+    };
+    svc.agent = { updateAgent: async (id: string, i: any) => { enabled.push({ id, ...i }); }, appendStep: async () => undefined, finishRun: async () => undefined };
+    svc.goals = { sendBack: async (_a: string, note: string) => { sentBack.push(note); }, approved: async () => ({ text: 'g' }) };
+    svc.llm = { completeHelper: async () => '{}' };
+    return { svc, sentBack, enabled, run: () => svc.onAnswer('run-1', reply, 'wp1') };
+  }
+
+  it('ignores an answer to the PROGRAM’s own question — the goal is not touched', async () => {
+    // His real words, to his program's real question. Before this they became a goal correction.
+    const a = answeredWaitpoint('Write those posts', ['Write those posts', 'Stop without writing']);
+    await a.run();
+    expect(a.sentBack).toEqual([]);
+    expect(a.enabled).toEqual([]);
+  });
+
+  it('still acts on its OWN question, recognised by its two choices', async () => {
+    const a = answeredWaitpoint('the summaries are too long', [KEEP_IT, SEND_BACK]);
+    await a.run();
+    expect(a.sentBack).toEqual(['the summaries are too long']);
+  });
+
+  it('does nothing when it cannot tell which question was answered', async () => {
+    // No waitpoint, no id, no guessing. Guessing is what caused the damage.
+    const a = answeredWaitpoint('Write those posts', null);
+    await a.run();
+    expect(a.sentBack).toEqual([]);
+    expect(a.enabled).toEqual([]);
+  });
+
   function answered(reply: string) {
     const w = world();
     const enabled: any[] = [];
@@ -218,6 +265,9 @@ describe('what his answer does', () => {
     svc.prisma = {
       agentRun: { findUnique: async () => ({ id: 'run-1', agentId: 'job-1' }) },
       agent: { findUnique: async () => ({ id: 'job-1', areaId: 'ar1' }) },
+      // The trial's OWN question (BEA-1512) — recognised by its two choices, so these cases exercise
+      // the road he actually takes when answering "keep it".
+      waitpoint: { findUnique: async () => ({ id: 'wp1', options: JSON.stringify([KEEP_IT, SEND_BACK]) }) },
     };
     svc.agent = {
       updateAgent: async (id: string, input: any) => { enabled.push({ id, ...input }); },
@@ -231,7 +281,7 @@ describe('what his answer does', () => {
       approved: async () => ({ text: 'Runs every day at 22:00 and reads his Gmail.' }),
     };
     svc.llm = { completeHelper: async () => '{"every":"day","at":"22:00","text":"every day at 22:00"}' };
-    return { svc, enabled, sentBack, run: () => svc.onAnswer('run-1', reply) };
+    return { svc, enabled, sentBack, run: () => svc.onAnswer('run-1', reply, 'wp1') };
   }
 
   it('switches the agent ON — the first moment it may touch anything for real', async () => {

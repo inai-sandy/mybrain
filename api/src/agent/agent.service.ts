@@ -21,7 +21,12 @@ export type AskInput = {
  * What runs when a question is answered, whichever road answered it (BEA-1392) — see
  * {@link AgentService.setAnswerHook}. `via` is `web | telegram | whatsapp | timeout`.
  */
-export type RunAnswered = (runId: string, answer: string, via: string) => any;
+/**
+ * A run's question was answered. `waitpointId` says WHICH question (BEA-1512) — without it a listener
+ * cannot tell the trial's own "keep it?" from a question the running program asked, and will act on
+ * an answer that was never meant for it.
+ */
+export type RunAnswered = (runId: string, answer: string, via: string, waitpointId?: string) => any;
 
 /**
  * A run on the WORKER road has just failed (BEA-1393, agent workers 8/10). The self-heal loop
@@ -1245,7 +1250,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // Whatever else this answer settles — today, a can't-undo call a worker parked on (BEA-1392).
     // Never throws: an answer that was applied must stay applied.
     try {
-      await this.answered?.(wp.runId, typeof answer === 'string' ? answer : JSON.stringify(answer ?? ''), via);
+      await this.answered?.(wp.runId, typeof answer === 'string' ? answer : JSON.stringify(answer ?? ''), via, String(wp.id));
     } catch { /* the answer stands whatever the hook makes of it */ }
     const run = await this.prisma.agentRun.findUnique({ where: { id: wp.runId } });
     const fresh = await this.prisma.waitpoint.findUnique({ where: { id: wp.id } });
