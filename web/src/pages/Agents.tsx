@@ -1192,7 +1192,12 @@ export function Agents() {
                 }}
                 pageSize={PER}
                 cardsOnly
-                gridClassName="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+                // `[&>*]:min-w-0` below is load-bearing (BEA-1531). DataTable wraps each card in a
+                // div of its own, so THAT wrapper is the grid item, not the card — and a grid item
+                // defaults to `min-width:auto` and refuses to shrink. Without it the conversion
+                // silently reintroduced BEA-1525: agent names cut mid-word at 390. The ship gate
+                // caught it and rolled the deploy back.
+                gridClassName="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0"
                 emptyText={`Nothing matches${needle ? ` \u201C${q}\u201D` : ' that filter'}${folderSel ? ' in this folder' : ''}.`}
                 renderCard={(ar: any) => {
                   const color = ar.color || '#818cf8';

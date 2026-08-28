@@ -64,6 +64,13 @@ describe('the agents home meets the list standard (BEA-1528)', () => {
     expect(s).toContain('cardsOnly');
   });
 
+  // DataTable wraps each card in a div of its own, so THAT wrapper is the grid item — and a grid
+  // item defaults to `min-width:auto`. Without this the conversion reintroduced BEA-1525 (names cut
+  // mid-word at 390) and the ship gate rolled the deploy back. The class is not cosmetic.
+  it('the cards the table renders can shrink on a phone', () => {
+    expect(src()).toContain('[&>*]:min-w-0');
+  });
+
   // controls mode is what lets this screen keep its own control bar AND get the table's paging.
   // Passing the kind tab as a filter is what makes a tab change reset to page one.
   it('hands its control values to the table, kind tab included', () => {
