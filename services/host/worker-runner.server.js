@@ -1072,6 +1072,19 @@ function allowed(req) {
   return same === 0;
 }
 
+/**
+ * NODE'S OWN 300-SECOND WALL (BEA-1563).
+ *
+ * `http.Server.requestTimeout` defaults to 300_000 and closes ANY request that takes longer — which
+ * is every real `/run` and `/build` this server exists to serve. It is why raising `DEFAULT_TIMEOUT`
+ * to 25 minutes changed nothing: his worker finished the whole job — sheet created, WhatsApp sent —
+ * and the app still recorded "the worker runner could not be reached (fetch failed)" at 301 seconds,
+ * because Node had hung up on the connection while the work carried on.
+ *
+ * Both are disabled deliberately. This server's requests are LONG by design, and it is not exposed to
+ * the internet — it listens on the Docker bridge behind a shared token. The real protections are the
+ * per-run timeout that kills the process group, the app's own client timeout, and the stall watchdog.
+ */
 const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -1101,6 +1114,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 pruneWorkerTrust();
+// A run or a build takes minutes on purpose; Node's defaults are written for ordinary web requests.
+server.requestTimeout = 0;   // no ceiling on how long one request may take (BEA-1563)
+server.headersTimeout = 0;   // and none on how long the headers may take to arrive
+server.keepAliveTimeout = 75_000;
+
 server.listen(PORT, HOST, () => {
   console.log(`worker-runner on http://${HOST}:${PORT} — workers in ${ROOT}, callbacks to ${API}, kit v${KIT_VERSION}`);
   // Loud at boot, as well as honest on /status: the two ways this service can be up and useless

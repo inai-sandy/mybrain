@@ -92,3 +92,38 @@ describe('workers do not carry their own stopwatch', () => {
     }
   });
 });
+
+/**
+ * Node's own 300-second wall (BEA-1563) — the clock that was never ours.
+ *
+ * `http.Server.requestTimeout` defaults to 300_000 and closes ANY request that runs longer. That is
+ * every real `/run` and `/build` this server exists to serve, which is why raising the runner's own
+ * `DEFAULT_TIMEOUT` to 25 minutes changed nothing at all.
+ *
+ * The proof was a run that SUCCEEDED and was recorded as a failure: sheet created, sheet verified,
+ * WhatsApp sent — and then *"The worker could not be started — the worker runner could not be reached
+ * (fetch failed)"* at 301 seconds. Node had hung up on the connection while the work carried on.
+ *
+ * Four clocks had to agree before a long job could finish: the runner's own limit, the worker's
+ * self-imposed stopwatch, the app's client timeout, and this one.
+ */
+describe("Node's default request wall is off", () => {
+  const src = () => fs.readFileSync(path.join(__dirname, '../../../services/host/worker-runner.server.js'), 'utf8');
+
+  it('disables the request and header ceilings', () => {
+    const s = src();
+    expect(s).toMatch(/server\.requestTimeout = 0;/);
+    expect(s).toMatch(/server\.headersTimeout = 0;/);
+  });
+
+  // Keep-alive is a different thing and should stay bounded — an idle socket is not long work.
+  it('still bounds idle sockets', () => {
+    expect(src()).toMatch(/server\.keepAliveTimeout = \d/);
+  });
+
+  it('records why this is safe here', () => {
+    const s = src();
+    expect(s).toMatch(/LONG by design/);
+    expect(s).toMatch(/behind a shared token/);
+  });
+});
