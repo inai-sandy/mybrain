@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { RANK_AT_THE_SOURCE_RULE } from '../agent/prompt-rules';
 import { ToolInfo, Turn, toolsText, transcriptText } from '../agent/goal';
 
 /**
@@ -97,6 +98,10 @@ ${inp.goal}
 Nothing else is required. No plan file, no config, no contract — earlier versions of this system
 handed you all three, written by the app, and each one quietly changed what he had asked for.
 **The conversation and the goal are the specification.** Design the rest yourself.
+
+## How to ask a source for the best of something
+
+${RANK_AT_THE_SOURCE_RULE}
 
 ## Check your own work against the goal
 

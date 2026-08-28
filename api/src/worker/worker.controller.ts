@@ -585,6 +585,23 @@ export class WorkerController {
    * (`{waiting:true}`); when the answer lands, the SAME position returns the answer, so the worker
    * carries on from where it stopped and everything before the question is replayed, not redone.
    */
+  /**
+   * What this run has really done so far, in one line, from its own `ToolCall` rows.
+   *
+   * Only facts the app can prove: how many calls reached a vendor, how many succeeded, and what they
+   * cost. Empty when there is nothing to say — a question is not improved by "0 calls, 0 credits".
+   */
+  private async runFacts(runId: string): Promise<string> {
+    // `runCost` is already THE function that adds up a run's real calls and credits — the run screen
+    // and the cost rollup both read it. Counting them again here would be a second answer to the same
+    // question, which is the mistake this codebase keeps paying for.
+    const cost = await this.agent.runCost?.(runId).catch(() => null);
+    if (!cost || (!cost.calls && !cost.credits)) return '';
+    const bits = [`${cost.calls} call${cost.calls === 1 ? '' : 's'} so far`];
+    if (cost.credits > 0) bits.push(`${cost.credits} credit${cost.credits === 1 ? '' : 's'}`);
+    return `What has actually happened: ${bits.join(' · ')}.`;
+  }
+
   @Post('ask')
   async ask(@Req() req: any, @Body() body: any) {
     const { runId, agentId } = who(req);
@@ -669,7 +686,18 @@ export class WorkerController {
     } as any);
     await this.agent.parkRun?.(runId, 'worker')?.catch?.(() => undefined);
     await this.agent.appendStep(runId, { label: `Waiting for you: ${o.question.slice(0, 200)}`, status: 'running', kind: 'ask' }).catch(() => undefined);
-    await this.owner?.send?.(runId, wp?.id || '', { jobName: o.jobName, question: o.question, choices: o.choices }).catch(() => undefined);
+    // THE NUMBERS COME FROM WHAT HAPPENED, NOT FROM WHAT IT REMEMBERS (BEA-1546).
+    //
+    // His Reddit worker told him it had gone "after 100 pages". It had done 11 — its own step log said
+    // so two lines above. A question carrying a wrong number is worse than no number: he answered it
+    // as if 100 pages had really been tried, and the option he was offered ("increase the paging
+    // limit") could never have worked.
+    //
+    // So the app appends what it can prove from this run's own tool calls. The worker's wording is
+    // left exactly as written — this stands beside it as the record.
+    const facts = await this.runFacts(runId).catch(() => '');
+    const asked = facts ? `${o.question}\n\n${facts}` : o.question;
+    await this.owner?.send?.(runId, wp?.id || '', { jobName: o.jobName, question: asked, choices: o.choices }).catch(() => undefined);
     this.tokens.revokeRun(runId);
     return wp;
   }

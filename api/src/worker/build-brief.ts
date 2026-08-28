@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { RANK_AT_THE_SOURCE_RULE } from '../agent/prompt-rules';
 import { SANDBOX_RULE } from './brief-rules';
 import { AgentPlan, PlanBlock, sourceLabel, sourceActionId } from '../social/plan';
 import { ToolKnowledge } from '../tools/tool-knowledge.service';
@@ -543,5 +544,7 @@ Use \`node:test\` and \`node:assert/strict\`. Keep the tests readable: an owner 
 
 Say in one short paragraph what the worker does, what its tests cover, and anything you could not
 do. ${SANDBOX_RULE}
+
+${RANK_AT_THE_SOURCE_RULE}
 `;
 }

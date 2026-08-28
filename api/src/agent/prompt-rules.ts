@@ -27,3 +27,21 @@
  * Asking about the JOB is always right. Asking about the plumbing never is.
  */
 export const CHOOSE_TOOLS_RULE = `CHOOSE THE TOOLS YOURSELF. Never ask the owner which connected tool, service or action to use — he does not know the ids, and everything you are shown is already connected and usable. Where two could do the job, take the one that has actually worked. Name your choice in the reply in plain words ("searching Reddit, writing a new Google Sheet, messaging you on WhatsApp"). Ask about the JOB — what counts, how much, when it runs, where the result goes — never about the plumbing. If nothing you were shown can do a part of the job, say that plainly instead of asking him to pick.`;
+
+/**
+ * Let the vendor rank, when the vendor can rank.
+ *
+ * His Reddit agent wanted "the top 100 posts of the week by score". Codex called the search with
+ * `sort: 'new'` and set out to rank them itself — which means fetching EVERY post of the week, an
+ * unbounded job. It ran to the 11-page ceiling, got 71 posts, could not honestly call them the top
+ * 100, and stopped to ask him. Eleven credits and an afternoon for nothing.
+ *
+ * The same action's own fact card lists `sort: ['relevance', 'new', 'top', 'comment_count']`.
+ * `sort: 'top'` with `timeframe: 'week'` returns the week's best already ranked — the first page IS
+ * the answer. It picked the one option that makes the job impossible while the one that makes it
+ * trivial sat beside it in the same list.
+ *
+ * Written as a rule rather than a checker on purpose: a checker clever enough to catch this would be
+ * clever enough to block good plans, and a rule cannot false-alarm.
+ */
+export const RANK_AT_THE_SOURCE_RULE = `RANKING: when the job asks for the top / best / most / highest N of something, ask the SOURCE to sort that way and take the first N — never fetch by newest (or by relevance) and rank them yourself. Sorting yourself means fetching everything before you can know the top of it, which is unbounded and will hit the page limit and produce nothing. Read the action's own parameters: if it offers a sort or an order, use the one the job asks for. Only rank in your own code when the source genuinely cannot sort that way — and if it cannot, say so plainly rather than fetching everything and hoping.`;

@@ -116,6 +116,23 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
    *
    * Never throws: it is called from inside `finishRun()`.
    */
+  /**
+   * Did this run end because HE answered a question, rather than because something broke?
+   *
+   * True when the run has a question he actually answered and the run ended after it. A wall the
+   * worker could not get past is still worth knowing about — but it is a finding, not a defect, and
+   * spending a Codex build on "the owner pressed stop" helps nobody.
+   */
+  private async ownerChoseToStop(runId: string): Promise<boolean> {
+    const answered: any = await this.prisma.waitpoint
+      .findFirst({ where: { runId, status: 'answered' }, orderBy: { answeredAt: 'desc' }, select: { answeredAt: true } })
+      .catch(() => null);
+    if (!answered?.answeredAt) return false;
+    const run: any = await this.prisma.agentRun.findUnique({ where: { id: runId }, select: { endedAt: true } }).catch(() => null);
+    if (!run?.endedAt) return false;
+    return new Date(run.endedAt).getTime() >= new Date(answered.answeredAt).getTime();
+  }
+
   async onRunFailed(runId: string, ctx: { agentId: string | null; error: string; runKind: string }): Promise<string | null> {
     try {
       const agentId = ctx.agentId;
@@ -123,10 +140,30 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
       const job = await this.agent.getAgent(agentId).catch(() => null);
       if (!job) return null;
 
+
       const fetches = await this.evidenceOf(runId, job);
       const cause = causeOf({ jobId: agentId, error: ctx.error, fetches });
       const contract = safeContract(job);
       const sampleIds = await this.keepEvidence(agentId, cause, contract, ctx.error, fetches);
+
+      // HIS DECISION IS NOT A DEFECT (BEA-1546).
+      //
+      // A worker that hits a wall asks him, and Codex writes the "he said stop" branch as
+      // `kit.fail('Stopped at your request…')` — so a run he deliberately ended arrives here looking
+      // exactly like a crash. It cost a real Codex build: his Reddit agent asked, he answered "Stop
+      // this run", and the repair loop was handed "Stopped at your request; nothing further was sent."
+      // as the thing to fix. It rebuilt, promoted v2, and changed nothing that mattered — the sentence
+      // it was given described his button press, not the wall.
+      //
+      // Deliberately placed AFTER the evidence is kept: the wall is still worth having for a later
+      // rebuild. What is skipped is spending a Codex build on "the owner pressed stop".
+      //
+      // Detected from the RUN, not the wording, so it holds however a worker phrases it: a question he
+      // answered, and a failure that followed it. Nothing else ends that way.
+      if (await this.ownerChoseToStop(runId).catch(() => false)) {
+        this.log.log(`run ${runId} ended on his own answer — kept the evidence, but this is not a defect to repair`);
+        return null;
+      }
 
       const live = await this.builds.livePromoted(agentId);
       if (!live) return null; // nothing to repair — this job has no worker of its own
