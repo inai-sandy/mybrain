@@ -43,7 +43,21 @@ const PORT = Number(process.env.WORKER_RUNNER_PORT || 8769);
 const ROOT = path.resolve(process.env.WORKER_ROOT || '/srv/mybrain-workers');
 // What a worker calls back on. The app container publishes 3000 on the host.
 const API = (process.env.WORKER_API || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-const DEFAULT_TIMEOUT = Number(process.env.WORKER_TIMEOUT_MS || 300_000); // 5 min (§F)
+/**
+ * The wall clock is the LAST resort, not the first (BEA-1556).
+ *
+ * It was 5 minutes, set when a worker fetched at most 11 pages. BEA-1548 then taught workers to ask
+ * for `pages: 'all'` — fetch until the source runs out — because stopping at a ceiling is what made
+ * his agent ask him questions it could have answered itself. His Reddit job really needs 35 pages and
+ * about 250 seconds, so the very next real run died at 300s having made 39 calls, still working.
+ * I changed the workload and left the budget alone.
+ *
+ * 25 minutes, deliberately ABOVE the 20-minute stall watchdog, so for a genuinely wedged worker the
+ * watchdog always fires first — it measures PROGRESS, not elapsed time, and says something useful:
+ * "nothing was written for 20 minutes". A wall clock cannot tell a stuck worker from a busy one, so
+ * it should only ever catch something pathological, never honest work.
+ */
+const DEFAULT_TIMEOUT = Number(process.env.WORKER_TIMEOUT_MS || 1_500_000); // 25 min (§F, raised in BEA-1556)
 const MAX_TIMEOUT = Number(process.env.WORKER_MAX_TIMEOUT_MS || 1_800_000); // 30 min ceiling
 const BUILD_TIMEOUT = Number(process.env.WORKER_BUILD_TIMEOUT_MS || 900_000); // 15 min for a Codex build
 const TEST_TIMEOUT = Number(process.env.WORKER_TEST_TIMEOUT_MS || 120_000);
