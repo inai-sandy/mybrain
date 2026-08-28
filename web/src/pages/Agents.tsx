@@ -1065,6 +1065,17 @@ export function Agents() {
           // Search · filter · sort · count · pagination — ALWAYS on, never behind a threshold
           // (BEA-1183). A list with one item still shows its controls. The selected folder narrows
           // the scope first (BEA-1380): All searches everything, a folder searches that folder.
+          //
+          // NOT ON `DataTable`, ON PURPOSE (BEA-1528). The redesign plan said "the shared table", and
+          // this is the one place that was not followed to the letter — a decision, not an oversight.
+          // `DataTable` renders a single `emptyText`, and this screen needs two empty states that each
+          // do something a string cannot: an empty FOLDER says how to fill it and offers "Show all",
+          // and a search that matched nothing offers "Clear". It also carries multi-select bulk
+          // actions and a skeleton loader, which `DataTable` does not model. Converting would lose
+          // working affordances on his most-used screen and gain only component uniformity — every
+          // FUNCTION the standard asks for is already here. `AgentsListStandard.test.tsx` enforces
+          // each of them, so this cannot silently drift below the standard; if those empty states are
+          // ever dropped, the justification goes with them and it SHOULD be converted.
           const scope = inFolder(areasList as any[], folderSel);
           const needle = q.trim().toLowerCase();
           const matched = scope.filter((ar) => {
