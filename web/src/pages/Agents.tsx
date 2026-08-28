@@ -1354,20 +1354,20 @@ export function Agents() {
                   // keyed on `search`, not `name`, so the search box matches the SAME text in both
                   // views — name, description and the names of the jobs inside. It sorts sensibly too,
                   // because that string starts with the name.
-                  { key: 'search', label: 'Agent', sortable: true, width: '46%', render: (ar: any) => (
+                  { key: 'search', label: 'Agent', sortable: true, width: '38%', render: (ar: any) => (
                     <span className="flex min-w-0 items-center gap-2">
                       <span aria-hidden className="shrink-0">{ar.icon || '\u{1F916}'}</span>
                       <span className="min-w-0 truncate font-medium">{ar.name}</span>
                       <span aria-hidden title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}>{areaKind(ar) === 'tools' ? '\u{1F527}' : '\u{1F50E}'}</span>
                     </span>
                   ) },
-                  { key: 'lastAtNum', label: 'Last run', sortable: true, render: (ar: any) => {
+                  { key: 'lastAtNum', label: 'Last run', sortable: true, width: '14%', render: (ar: any) => {
                     const done = (ar.jobs || []).map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((x: any, y: any) => new Date(y.at).getTime() - new Date(x.at).getTime())[0];
                     return <span className="whitespace-nowrap text-zinc-500">{done ? timeAgo(done.at) : 'never'}</span>;
                   } },
-                  { key: 'schedKey', label: 'When', render: (ar: any) => <span className="whitespace-nowrap text-zinc-500">{schedOf(ar) || 'when you run it'}</span> },
-                  { key: 'jobsNum', label: 'Jobs', sortable: true, align: 'right' as const },
-                  { key: 'onKey', label: 'On', align: 'right' as const, render: (ar: any) => (
+                  { key: 'schedKey', label: 'When', width: '28%', render: (ar: any) => <span className="block truncate text-zinc-500" title={schedOf(ar) || 'when you run it'}>{schedOf(ar) || 'when you run it'}</span> },
+                  { key: 'jobsNum', label: 'Jobs', sortable: true, width: '9%', align: 'right' as const },
+                  { key: 'onKey', label: 'On', width: '11%', align: 'right' as const, render: (ar: any) => (
                     <span className={'rounded-full px-2 py-0.5 text-[10px] font-semibold ' + (anyOn(ar)
                       ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
                       : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{anyOn(ar) ? 'on' : 'off'}</span>
