@@ -74,9 +74,23 @@ describe('only the tools he named', () => {
     expect(t).toContain('"m1"');
   });
 
-  it('tells Codex to ask rather than guess when he named nothing', () => {
-    // The owner's rule: he picks the tools in the chat. Silence is not permission to go shopping.
-    expect(toolsText([])).toContain('ask him which — do not guess');
+  it('does not ask him to pick ids when he named nothing (BEA-1543)', () => {
+    // HIS RULE, REVISED BY HIM. It was "he picks the tools in the chat — silence is not permission to
+    // go shopping", from: "Why do you have to send the full catalog of tools? During the chat
+    // discussion I will let you know the tools that we have to send."
+    //
+    // The objection was VOLUME, and it was implemented as "name them or Codex asks you". Being asked
+    // is what he is now tired of — twice in one morning: "Which connected tools should the agent use
+    // to create and populate the Google Sheet and send the WhatsApp message?" He does not know the
+    // action ids, so that question can only stall him.
+    //
+    // Both hold now: still never the catalog, but the caller hands over the dozen actions that have
+    // actually SUCCEEDED on his account, so Codex chooses without asking. This line is reached only
+    // when nothing has ever worked — and then saying so plainly is the honest answer.
+    const t = toolsText([]);
+    expect(t).not.toContain('ask him which');
+    expect(t).toMatch(/nothing has ever run successfully/i);
+    expect(t).toMatch(/do not ask him to pick ids/i);
   });
 });
 

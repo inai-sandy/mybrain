@@ -129,7 +129,21 @@ export class GoalService {
     const last = await this.latest(areaId);
     const sentBack = last && last.status === 'sent_back' && last.note ? { text: last.text, note: last.note } : null;
 
-    const req: GoalRequest = { transcript: turns, tools: await this.toolInfo(opts.tools || []), sentBack };
+    // WHEN HE NAMED NONE, DON'T ASK HIM — OFFER WHAT WORKS (BEA-1543).
+    //
+    // His original instruction stands and is honoured: "Why do you have to send the full catalog of
+    // tools? During the chat discussion I will let you know the tools that we have to send." The
+    // objection was VOLUME — 1,279 actions in a prompt. It was implemented as "name them or Codex
+    // asks you", and the asking is what he is now tired of: "Which connected tools should the agent
+    // use to create and populate the Google Sheet and send the WhatsApp message?" is a question about
+    // ids he does not know.
+    //
+    // So: still not the catalog. A short list of actions that have ACTUALLY SUCCEEDED on his account,
+    // most-used first, capped — enough for Codex to choose without a question, small enough that his
+    // objection never applies.
+    const named = (opts.tools || []).filter((t) => String(t || '').trim());
+    const tools = named.length ? await this.toolInfo(named) : await this.provenTools();
+    const req: GoalRequest = { transcript: turns, tools, sentBack };
     const reply = await this.llm
       .completeHelper('agent-goal' as any, goalPrompt(req), GOAL_TOKENS, 'agent-goal')
       .catch((e: any) => {
@@ -220,6 +234,27 @@ export class GoalService {
    * the full catalog of tools? During the chat discussion I will let you know the tools that we have
    * to send."* An action we know nothing about still goes over, saying so.
    */
+  /** How many of these to offer when he named none — enough to choose from, never a catalog. */
+  private static readonly PROVEN_MAX = 12;
+
+  /**
+   * The actions that have actually worked on his account, most-used first (BEA-1543).
+   *
+   * Proven, not merely connected: two providers both offer a service called `reddit`, and only one of
+   * them has ever served a call. A success record cannot be wrong about that.
+   */
+  private async provenTools(): Promise<ToolInfo[]> {
+    const rows: any[] = await (this.prisma as any)?.toolCall
+      ?.groupBy?.({ by: ['action'], where: { ok: true }, _count: { action: true } })
+      .catch(() => []);
+    const ids = (rows || [])
+      .filter((r: any) => String(r?.action || '').startsWith('svc:'))
+      .sort((a: any, b: any) => (Number(b?._count?.action) || 0) - (Number(a?._count?.action) || 0))
+      .slice(0, GoalService.PROVEN_MAX)
+      .map((r: any) => String(r.action));
+    return ids.length ? this.toolInfo(ids) : [];
+  }
+
   private async toolInfo(ids: string[]): Promise<ToolInfo[]> {
     const out: ToolInfo[] = [];
     for (const raw of ids || []) {

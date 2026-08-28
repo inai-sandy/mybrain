@@ -75,7 +75,11 @@ export function transcriptText(turns: Turn[]): string {
 
 /** The tools he named, each with whatever the catalog really knows about it. */
 export function toolsText(tools: ToolInfo[]): string {
-  if (!tools?.length) return 'He did not name any tools in the conversation. If the work needs one, ask him which — do not guess.';
+  // NOT "ask him which" any more (BEA-1543). He does not know the action ids, and being asked for
+  // them is the thing he is tired of. When he named none, the caller hands over the actions that have
+  // actually worked on his account instead — so this line is only reached when nothing has ever
+  // worked, and then saying so plainly IS the honest answer.
+  if (!tools?.length) return 'He named no tools, and nothing has ever run successfully on this account yet. Say plainly which part of the job you have no tool for — do not ask him to pick ids he does not know.';
   const out: string[] = [];
   for (const t of tools) {
     out.push(`### \`${t.actionId}\`${t.name ? ` — ${t.name}` : ''}`);
@@ -150,6 +154,14 @@ ${toolsText(req.tools)}
 
 You also have the open web while you build and while the agent runs — search it, read pages, call
 whatever you need. Nothing is blocked.
+
+## Choose the tools yourself
+These are connected and working — they are what has actually succeeded on his account, most-used
+first. Pick the ones the job needs and say your choice in plain words ("searching Reddit, writing a
+new Google Sheet, messaging you on WhatsApp"). NEVER ask him which tool, service or action to use:
+he does not know the ids, and every one listed is already usable. Ask about the JOB — what counts,
+how much, when it runs, where the result goes — never about the plumbing. If no listed tool can do
+part of the job, say that plainly instead of asking him to choose.
 
 ## Look the tools up — do not guess
 
