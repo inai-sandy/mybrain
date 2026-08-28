@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { RANK_AT_THE_SOURCE_RULE } from '../agent/prompt-rules';
+import { RANK_AT_THE_SOURCE_RULE, FETCH_EVERYTHING_RULE } from '../agent/prompt-rules';
 import { SANDBOX_RULE } from './brief-rules';
 import { AgentPlan, PlanBlock, sourceLabel, sourceActionId } from '../social/plan';
 import { ToolKnowledge } from '../tools/tool-knowledge.service';
@@ -546,5 +546,7 @@ Say in one short paragraph what the worker does, what its tests cover, and anyth
 do. ${SANDBOX_RULE}
 
 ${RANK_AT_THE_SOURCE_RULE}
+
+${FETCH_EVERYTHING_RULE}
 `;
 }

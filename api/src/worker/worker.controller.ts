@@ -597,9 +597,13 @@ export class WorkerController {
     // question, which is the mistake this codebase keeps paying for.
     const cost = await this.agent.runCost?.(runId).catch(() => null);
     if (!cost || (!cost.calls && !cost.credits)) return '';
-    const bits = [`${cost.calls} call${cost.calls === 1 ? '' : 's'} so far`];
+    // Each page of a paged fetch is one call, so calls ARE the pages he cares about. Said as pages
+    // because that is the word the worker uses when it invents a number — his last two questions both
+    // quoted a page limit ("100 pages", "the 15-page cap") that nothing had ever read. Now the true
+    // figure stands next to the claim.
+    const bits = [`${cost.calls} page${cost.calls === 1 ? '' : 's'} fetched`];
     if (cost.credits > 0) bits.push(`${cost.credits} credit${cost.credits === 1 ? '' : 's'}`);
-    return `What has actually happened: ${bits.join(' · ')}.`;
+    return `What actually happened: ${bits.join(' · ')}.`;
   }
 
   @Post('ask')

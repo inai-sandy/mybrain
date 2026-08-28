@@ -45,3 +45,21 @@ export const CHOOSE_TOOLS_RULE = `CHOOSE THE TOOLS YOURSELF. Never ask the owner
  * clever enough to block good plans, and a rule cannot false-alarm.
  */
 export const RANK_AT_THE_SOURCE_RULE = `RANKING: when the job asks for the top / best / most / highest N of something, ask the SOURCE to sort that way and take the first N — never fetch by newest (or by relevance) and rank them yourself. Sorting yourself means fetching everything before you can know the top of it, which is unbounded and will hit the page limit and produce nothing. Read the action's own parameters: if it offers a sort or an order, use the one the job asks for. Only rank in your own code when the source genuinely cannot sort that way — and if it cannot, say so plainly rather than fetching everything and hoping. THEN SORT WHAT YOU FETCHED, YOURSELF, before you use it: the source's sort decides WHICH items you get, your own sort decides the ORDER they go out in. Sorting a few hundred items you already hold costs nothing. Never ASSERT that the source returned them in order and fail when it did not — vendors do not promise an exact order across pages, and a run that throws away good data because the order was imperfect has produced nothing out of something.`;
+
+/**
+ * Ask for everything when you need everything, and never invent a limit.
+ *
+ * His ESP32 agent stopped twice on the same wall. It asked for the default 11 pages, hit the ceiling,
+ * and then told him — on his phone — *"only 70 usable posts before the 15-page cap and still had more
+ * results"*. There is no 15-page cap. `kit.callAll` defaults to 11 and the run's own step said
+ * `11 pages`. It narrated a number it never read, and both times the option it offered him ("raise the
+ * paging limit") was one it could have taken itself.
+ *
+ * `pages: 'all'` already exists and is what this job wanted: it fetches until the SOURCE runs out
+ * (backstopped well above any real result set). That matters beyond convenience — a fetch that ends
+ * because the vendor ran out can honestly say "that was everything", which is what lets the
+ * "everything there was is not the same as not enough" rule finish the job instead of asking him.
+ * A fetch that stops at a page ceiling can never know, so it must ask. The ceiling created the
+ * question.
+ */
+export const FETCH_EVERYTHING_RULE = `PAGES: when the job needs a COMPLETE set — "all of them", "the top N of a week/month", "everything that matched" — pass \`pages: 'all'\` to \`kit.callAll\`. It fetches until the source itself runs out, so the run can tell "that was everything" (finish and write it) from "I stopped early" (which it must ask about). Do not pass a number and then treat running out of pages as a shortage — that turns a finished job into a question. And NEVER state a page limit, a cap or a count you have not read: the kit's answer tells you how many pages you actually used and whether the source ran out. Say those numbers, or say none.`;
