@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { SANDBOX_RULE } from './brief-rules';
 import { WorkerContract, contractInWords } from './contract';
 
 /**
@@ -371,7 +372,7 @@ ${inp.planInWords}
 
 Run \`node --test worker.test.mjs\` yourself. **Green tests are the only way this repair goes live.**
 Then say in one short paragraph: what was actually broken, what you changed, and what you could not
-fix. Do not write any other file, do not create a git repo, do not install anything.
+fix. ${SANDBOX_RULE}
 `;
 }
 

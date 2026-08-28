@@ -1,3 +1,4 @@
+import { CHOOSE_TOOLS_RULE } from './prompt-rules';
 /**
  * THE GOAL (BEA-1487) — pure functions, no Nest, no database.
  *
@@ -156,12 +157,8 @@ You also have the open web while you build and while the agent runs — search i
 whatever you need. Nothing is blocked.
 
 ## Choose the tools yourself
-These are connected and working — they are what has actually succeeded on his account, most-used
-first. Pick the ones the job needs and say your choice in plain words ("searching Reddit, writing a
-new Google Sheet, messaging you on WhatsApp"). NEVER ask him which tool, service or action to use:
-he does not know the ids, and every one listed is already usable. Ask about the JOB — what counts,
-how much, when it runs, where the result goes — never about the plumbing. If no listed tool can do
-part of the job, say that plainly instead of asking him to choose.
+These are connected and working — what has actually succeeded on his account, most-used first.
+${CHOOSE_TOOLS_RULE}
 
 ## Look the tools up — do not guess
 

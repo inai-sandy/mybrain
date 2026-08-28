@@ -1,5 +1,6 @@
 import { rankActions, shortlistForPrompt, type ShortlistTool } from './tool-shortlist';
 import { RULES_TEXT } from '../agent/thinking-builder';
+import { CHOOSE_TOOLS_RULE } from '../agent/prompt-rules';
 
 /**
  * The builder picks its own tools, and prefers what has actually worked (BEA-1542).
@@ -62,18 +63,19 @@ describe('proven actions rank first', () => {
 });
 
 describe('the builder is told to choose tools itself', () => {
-  it('has an explicit rule against asking which tool to use', () => {
-    expect(RULES_TEXT).toContain('CHOOSE THE TOOLS YOURSELF');
-    expect(RULES_TEXT).toMatch(/[Nn]ever ask the owner which connected tool/);
+  // Assert the rule is CARRIED, not how it is worded — the wording lives in one place now
+  // (BEA-1544) and a test that pins the prose would break every time it is improved.
+  it('carries the shared tool-choice rule', () => {
+    expect(RULES_TEXT).toContain(CHOOSE_TOOLS_RULE);
   });
 
   // The point is not silence — he should still be told what it picked, in words he recognises.
   it('still requires it to say what it chose, in plain words', () => {
-    expect(RULES_TEXT).toMatch(/name your choice in the reply/);
+    expect(CHOOSE_TOOLS_RULE).toMatch(/name your choice/i);
   });
 
   // And it must not go silent when nothing can do the job — that is a real thing to say.
-  it('says so plainly when nothing connected can do a part of it', () => {
-    expect(RULES_TEXT).toMatch(/nothing connected can do a part of it/);
+  it('says so plainly when nothing shown can do a part of it', () => {
+    expect(CHOOSE_TOOLS_RULE).toMatch(/say that plainly instead of asking him to pick/i);
   });
 });

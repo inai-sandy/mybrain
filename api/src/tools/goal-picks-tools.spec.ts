@@ -1,4 +1,5 @@
 import { goalPrompt, toolsText } from '../agent/goal';
+import { CHOOSE_TOOLS_RULE } from '../agent/prompt-rules';
 
 /**
  * The goal writer chooses its own tools (BEA-1543).
@@ -30,13 +31,12 @@ describe('the goal writer does not ask which tool', () => {
   it('tells Codex to choose, and to name its choice in plain words', () => {
     const p = goalPrompt({ transcript: [], tools: [{ actionId: 'svc:reddit.subreddit', name: 'Subreddit', card: null, sample: undefined }] } as any);
     expect(p).toMatch(/Choose the tools yourself/);
-    expect(p).toMatch(/NEVER ask him which tool/);
-    expect(p).toMatch(/say your choice in plain words/);
+    expect(p).toContain(CHOOSE_TOOLS_RULE);   // the ONE rule, not a second copy of it
   });
 
   it('still tells it to say when nothing can do part of the job', () => {
     const p = goalPrompt({ transcript: [], tools: [] } as any);
-    expect(p).toMatch(/say that plainly instead of asking him to choose/);
+    expect(p).toMatch(/say that plainly instead of asking him to pick/i);
   });
 
   // The whole point of his original objection: this must never become "here is the catalog".

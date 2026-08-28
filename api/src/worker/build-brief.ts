@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { SANDBOX_RULE } from './brief-rules';
 import { AgentPlan, PlanBlock, sourceLabel, sourceActionId } from '../social/plan';
 import { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { cardText } from '../agent/thinking-builder';
@@ -541,6 +542,6 @@ Use \`node:test\` and \`node:assert/strict\`. Keep the tests readable: an owner 
 ## When you are done
 
 Say in one short paragraph what the worker does, what its tests cover, and anything you could not
-do. Do not write any other file, do not create a git repo, do not install anything.
+do. ${SANDBOX_RULE}
 `;
 }
