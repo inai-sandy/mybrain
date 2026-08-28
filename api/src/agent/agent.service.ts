@@ -281,6 +281,67 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * What ONE agent has cost, over its whole life and over the last 30 days (BEA-1526).
+   *
+   * A single run's cost has been on the run screen since BEA-1394; an agent's cost over time was not
+   * anywhere, so "is this weekly digest worth what it spends?" had no answer short of adding up runs
+   * by hand.
+   *
+   * Summed from the SAME ledger `runCost` reads — `ToolCall.credits`, the table the daily ceiling is
+   * also summed from — so the per-run figures and this rollup cannot disagree. AI tokens come off the
+   * runs themselves (`UsageLog` is keyed by feature and carries no run).
+   *
+   * Never throws: a missing ledger in a harness returns zeros rather than failing the page.
+   */
+  async agentCost(agentId: string): Promise<{
+    runs: number; runs30d: number; credits: number; credits30d: number; aiTokens: number; aiTokens30d: number; calls: number; firstRunAt: string | null;
+  }> {
+    const empty = { runs: 0, runs30d: 0, credits: 0, credits30d: 0, aiTokens: 0, aiTokens30d: 0, calls: 0, firstRunAt: null as string | null };
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 3600_000);
+      const runs: any[] =
+        (await this.prisma.agentRun.findMany({
+          where: { agentId },
+          select: { id: true, aiTokens: true, startedAt: true } as any,
+        })) || [];
+      if (!runs.length) return empty;
+
+      const ids = runs.map((r) => r.id);
+      const recent = new Set(runs.filter((r) => r.startedAt && new Date(r.startedAt) >= since).map((r) => r.id));
+      const rows: any[] =
+        (await (this.prisma as any).toolCall?.findMany?.({ where: { runId: { in: ids } }, select: { runId: true, credits: true } })) || [];
+
+      let credits = 0;
+      let credits30d = 0;
+      for (const r of rows) {
+        const n = Number(r.credits) || 0;
+        credits += n;
+        if (recent.has(r.runId)) credits30d += n;
+      }
+      let aiTokens = 0;
+      let aiTokens30d = 0;
+      for (const r of runs) {
+        const n = Number(r.aiTokens) || 0;
+        aiTokens += n;
+        if (recent.has(r.id)) aiTokens30d += n;
+      }
+      const started = runs.map((r) => r.startedAt).filter(Boolean).sort();
+      return {
+        runs: runs.length,
+        runs30d: recent.size,
+        credits,
+        credits30d,
+        aiTokens,
+        aiTokens30d,
+        calls: rows.length,
+        firstRunAt: started.length ? new Date(started[0]).toISOString() : null,
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  /**
    * Add what a model step just spent to the run's own total (BEA-1394). Both roads call it — the plan
    * runner after its shaping step, the worker's `/api/worker/ai` after each one — because `UsageLog`
    * is keyed by FEATURE and has no run on it. Never throws: a figure is not worth a run.

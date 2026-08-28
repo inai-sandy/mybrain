@@ -399,6 +399,16 @@ export class AgentController {
     return this.agent.getAgent(id);
   }
 
+  /**
+   * What this agent has cost over time (BEA-1526). Its own route rather than a field on `getAgent`,
+   * because it walks the whole ToolCall ledger for the job and the detail page is loaded constantly —
+   * the panel asks for it only when he opens it.
+   */
+  @Get('agents/:id/cost')
+  agentCost(@Param('id') id: string) {
+    return this.agent.agentCost(id);
+  }
+
   @Patch('agents/:id')
   updateAgent(@Param('id') id: string, @Body() body: AgentInput) {
     return this.agent.updateAgent(id, body);

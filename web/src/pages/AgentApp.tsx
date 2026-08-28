@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { csvName, downloadCsv } from '../ui/csv';
+import { DataTable } from '../ui/DataTable';
 import { scheduleLine } from '../ui/nextRun';
 import { agentKind, hasProgram } from '../ui/agentKind';
 import { AgentKindBadge } from '../ui/AgentKindBadge';
@@ -95,6 +96,64 @@ export function subtitleOf(description?: string | null): string {
  */
 export type MadeItem = { id: string; title: string; href: string; icon: string; at: string };
 
+/**
+ * What KIND of thing an output is, in his words (BEA-1526).
+ *
+ * One rule: the list's "Kind" column, its filter and the CSV export all read this. The export used to
+ * re-derive it from the icon inline, so a new output kind would have shown correctly on screen and
+ * exported as "Document".
+ */
+/** What one agent has cost over time — the shape of `GET /api/agent/agents/:id/cost` (BEA-1526). */
+export type AgentCost = {
+  runs: number; runs30d: number; credits: number; credits30d: number;
+  aiTokens: number; aiTokens30d: number; calls: number; firstRunAt: string | null;
+};
+
+/**
+ * The cost lines, in his words (BEA-1526). Pure, so the wording is tested without a browser.
+ *
+ * Says "nothing yet" rather than "0 credits" when an agent has genuinely never spent: a run that used
+ * only saved answers costs nothing, and that is worth saying plainly instead of looking like a bug.
+ */
+export function costLines(c: AgentCost | null): { all: string; recent: string; per: string } | null {
+  if (!c || !c.runs) return null;
+  const n = (x: number) => x.toLocaleString('en-IN');
+  const tok = (x: number) => (x >= 1000 ? `${Math.round(x / 1000)}k` : String(x));
+  const spent = c.credits > 0 || c.aiTokens > 0;
+  const all = spent
+    ? `${n(c.credits)} credit${c.credits === 1 ? '' : 's'} · ${tok(c.aiTokens)} AI tokens over ${n(c.runs)} run${c.runs === 1 ? '' : 's'}`
+    : `nothing yet, over ${n(c.runs)} run${c.runs === 1 ? '' : 's'}`;
+  const recent = c.runs30d
+    ? `Last 30 days: ${n(c.credits30d)} credit${c.credits30d === 1 ? '' : 's'} · ${tok(c.aiTokens30d)} AI tokens over ${n(c.runs30d)} run${c.runs30d === 1 ? '' : 's'}`
+    : 'Last 30 days: it has not run';
+  const per = c.runs30d && c.credits30d
+    ? `About ${Math.round((c.credits30d / c.runs30d) * 10) / 10} credits a run lately`
+    : 'No credits spent lately';
+  return { all, recent, per };
+}
+
+/** How close today is to the ceiling that can pause a job on its own (BEA-1526). */
+export function ceilingLine(s: { spentToday?: number; ceiling?: number } | null): string | null {
+  if (!s || typeof s.spentToday !== 'number') return null;
+  const ceiling = Number(s.ceiling) || 0;
+  if (!ceiling) return `${s.spentToday} credits spent today across all agents · no daily limit set`;
+  const pct = Math.round((s.spentToday / ceiling) * 100);
+  const close = pct >= 80 ? ' — close to the limit, a job can pause itself past it' : '';
+  return `${s.spentToday} of ${ceiling} credits used today across all agents (${pct}%)${close}`;
+}
+
+/** A `MadeItem` with its kind materialised, which is what the shared table filters and sorts on. */
+export type MadeRow = MadeItem & { kind: string };
+
+/** Every kind an output can be — the filter's options, so it can never drift from `kindOfMade`. */
+export const MADE_KINDS = ['Google Sheet', 'Notion page', 'Document'];
+
+export function kindOfMade(m: MadeItem): string {
+  if (m.icon === '\u{1F4CA}') return 'Google Sheet';
+  if (m.icon === '\u{1F5D2}\uFE0F') return 'Notion page';
+  return 'Document';
+}
+
 export function madeFromRuns(runs: any[] | null): MadeItem[] {
   return (runs || [])
     .filter((r: any) => r && (r.outputUrl || r.outputDocId))
@@ -125,7 +184,6 @@ export function AgentApp() {
   const [running, setRunning] = useState(false);
   const [liveRun, setLiveRun] = useState<any>(null);
   const [runs, setRuns] = useState<any[] | null>(null);
-  const [madeAll, setMadeAll] = useState(false);
   // HIS zone (BEA-1508) — so the schedule line can say when it next runs, and whose clock that is.
   const [tz, setTz] = useState('Asia/Kolkata');
   useEffect(() => {
@@ -253,6 +311,18 @@ export function AgentApp() {
   const [cfgDirty, setCfgDirty] = useState(false); // task/rubric drafts differ from the saved agent
   const [sourcesDirty, setSourcesDirty] = useState(false); // a source's args/pages were edited and not yet saved
   const [openRow, setOpenRow] = useState('what'); // the one open accordion row
+  // What this agent has cost over time, and how close today is to the ceiling that can pause it
+  // (BEA-1526). Both are lazy — fetched when he opens the row, not on every page load — because the
+  // rollup walks the job's whole ToolCall ledger.
+  const [cost, setCost] = useState<AgentCost | null>(null);
+  const [spend, setSpend] = useState<{ spentToday?: number; ceiling?: number; balance?: number } | null>(null);
+  useEffect(() => {
+    if (openRow !== 'cost') return;
+    let live = true;
+    fetch(`/api/agent/agents/${id}/cost`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live && d) setCost(d); }).catch(() => undefined);
+    fetch('/api/social/spend').then((r) => (r.ok ? r.json() : null)).then((d) => { if (live && d) setSpend(d); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [openRow, id]);
   const [savingAll, setSavingAll] = useState(false);
   function toggleRow(k: string) { setOpenRow((p) => (p === k ? '' : k)); }
   function markCfgDirty() { dirtyRef.current = true; setCfgDirty(true); }
@@ -354,6 +424,9 @@ export function AgentApp() {
   // Everything this agent has produced, newest first (BEA-1507) — read off the runs, which already
   // record what each one wrote. A run that finished without writing anything is not a thing it made.
   const made = madeFromRuns(runs);
+  // The shared table sorts and filters on plain fields, so the kind is materialised onto each row
+  // rather than computed inside a renderer the table cannot see (BEA-1526).
+  const madeRows: MadeRow[] = made.map((m) => ({ ...m, kind: kindOfMade(m) }));
   const color = a.color || '#818cf8';
   const inp = 'w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900';
   const cfgInp = 'w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
@@ -752,9 +825,31 @@ export function AgentApp() {
                 <SettingsRow k="made" icon="📄" title="What it has made"
                   summary={`${made.length} thing${made.length === 1 ? '' : 's'} · newest ${timeAgo(made[0].at)}`}
                   open={openRow === 'made'} onToggle={toggleRow}>
-                  <ul className="space-y-1.5" data-testid="made-list">
-                    {made.slice(0, madeAll ? made.length : 8).map((m) => (
-                      <li key={m.id}>
+                  {/* THE LIST STANDARD, HERE TOO (BEA-1526) — search, filter by kind, sort, count and
+                      pages, on the shared table rather than a hand-capped <ul> with a "Show all"
+                      toggle. `cardsOnly` keeps the row look it already had, so nothing moved on
+                      screen; what changed is that this list now behaves like every other one. */}
+                  <div data-testid="made-list">
+                    <DataTable<MadeRow>
+                      columns={[
+                        { key: 'title', label: 'What', sortable: true },
+                        { key: 'kind', label: 'Kind', sortable: true },
+                        { key: 'at', label: 'When', sortable: true },
+                      ]}
+                      rows={madeRows}
+                      searchable
+                      filters={[{ key: 'kind', label: 'Kind', options: MADE_KINDS.map((k) => ({ value: k, label: k })) }]}
+                      sortOptions={[
+                        { label: 'Newest', key: 'at', dir: -1 },
+                        { label: 'Oldest', key: 'at', dir: 1 },
+                        { label: 'By name', key: 'title', dir: 1 },
+                      ]}
+                      defaultSort={{ key: 'at', dir: -1 }}
+                      pageSize={8}
+                      cardsOnly
+                      gridClassName="space-y-1.5"
+                      emptyText="Nothing matches that."
+                      renderCard={(m) => (
                         <a
                           href={m.href}
                           target={m.href.startsWith('http') ? '_blank' : undefined}
@@ -765,23 +860,43 @@ export function AgentApp() {
                           <span className="min-w-0 flex-1 truncate">{m.title}</span>
                           <span className="shrink-0 text-[11px] text-zinc-400">{timeAgo(m.at)}</span>
                         </a>
-                      </li>
-                    ))}
-                  </ul>
+                      )}
+                    />
+                  </div>
                   {/* EXPORT (BEA-1509) — his CRUD standard asks for it and nothing had it. */}
                   <button
                     type="button"
                     data-testid="export-made"
-                    onClick={() => downloadCsv(csvName(`${a.name} outputs`), ['What', 'Kind', 'Link', 'When'], made.map((m) => [m.title, m.icon === '\u{1F4CA}' ? 'Google Sheet' : m.icon === '\u{1F5D2}\uFE0F' ? 'Notion page' : 'Document', m.href, m.at]))}
+                    onClick={() => downloadCsv(csvName(`${a.name} outputs`), ['What', 'Kind', 'Link', 'When'], made.map((m) => [m.title, kindOfMade(m), m.href, m.at]))}
                     className="mt-2 rounded-lg border border-zinc-200 px-2.5 py-1 text-[11px] font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300"
                   >Export CSV</button>
-                  {made.length > 8 && (
-                    <button type="button" onClick={() => setMadeAll((v) => !v)} className="mt-1.5 text-[11px] font-medium text-emerald-600 hover:underline">
-                      {madeAll ? 'Show fewer' : `Show all ${made.length}`}
-                    </button>
-                  )}
                 </SettingsRow>
               )}
+
+              {/* WHAT IT COSTS (BEA-1526) — one run's cost has been on the run screen since BEA-1394,
+                  but an agent's cost OVER TIME was nowhere, and neither was how close today is to the
+                  ceiling that can pause a job on its own. */}
+              <SettingsRow k="cost" icon="💰" title="What it costs"
+                summary={costLines(cost)?.all || 'Open to work it out'}
+                open={openRow === 'cost'} onToggle={toggleRow}>
+                <div className="space-y-1.5 text-sm text-zinc-600 dark:text-zinc-300" data-testid="cost-panel">
+                  {!cost && <div className="text-zinc-400">Adding it up…</div>}
+                  {cost && !cost.runs && <div className="text-zinc-400">It has not run yet, so it has not cost anything.</div>}
+                  {cost && !!cost.runs && (
+                    <>
+                      <div data-testid="cost-all">{costLines(cost)!.all}</div>
+                      <div className="text-[13px] text-zinc-500">{costLines(cost)!.recent}</div>
+                      <div className="text-[13px] text-zinc-500">{costLines(cost)!.per}</div>
+                      {cost.calls > 0 && <div className="text-[12px] text-zinc-400">{cost.calls.toLocaleString('en-IN')} calls to outside services</div>}
+                    </>
+                  )}
+                  {ceilingLine(spend) && (
+                    <div className="mt-2 rounded-lg border border-zinc-200 px-3 py-2 text-[12px] text-zinc-500 dark:border-zinc-800" data-testid="ceiling-line">
+                      {ceilingLine(spend)}
+                    </div>
+                  )}
+                </div>
+              </SettingsRow>
 
               {hasProgram(a) && (
                 <SettingsRow k="worker" icon="🛠" title="The program"

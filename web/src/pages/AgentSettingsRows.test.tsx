@@ -119,7 +119,9 @@ describe('the accordion (BEA-1381)', () => {
     // ship gate twice; nothing about the page changed).
     await waitFor(() => {
       const ids = Array.from(document.querySelectorAll('[data-testid^="srow-"]:not([data-testid$="-summary"])')).map((el) => el.getAttribute('data-testid'));
-      expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-contract', 'srow-worker', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
+      // `srow-cost` — what it has cost over time (BEA-1526). It sits beside "what it has made":
+      // both are read-only history, and they answer the same question from two sides.
+      expect(ids).toEqual(['srow-what', 'srow-sources', 'srow-result', 'srow-contract', 'srow-cost', 'srow-worker', 'srow-schedule', 'srow-watch', 'srow-tools', 'srow-advanced', 'srow-delete']);
     });
     expect(rowOpen('what')).toBe(true);
     for (const k of ['sources', 'result', 'contract', 'worker', 'schedule', 'watch', 'tools', 'advanced', 'delete']) expect(rowOpen(k)).toBe(false);
