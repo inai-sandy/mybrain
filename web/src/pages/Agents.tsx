@@ -100,6 +100,75 @@ type HomeData = { waiting: WaitItem[]; running: RunningItem[]; landed: LandedIte
 const runUrl = (source: 'agent' | 'flow', id: string) => (source === 'flow' ? `/flows/runs/${id}` : `/agent/runs/${id}`);
 
 /** One "the agent needs you" card — answerable in place. (BEA-1066 display, inside BEA-1087) */
+/**
+ * RUNNING NOW (BEA-1533) — restored from concept-1-mission-control.html.
+ *
+ * A live run, with the steps it has actually taken. This existed and was deleted with the "Running
+ * now" strip; History was judged enough. It is not: the point of this strip is that you can see the
+ * thing working WITHOUT navigating, which is what makes an agent feel alive rather than opaque.
+ *
+ * Only the last few steps are shown — a long run has dozens and the newest is the one that matters.
+ */
+function RunningCard({ r }: { r: RunningItem }) {
+  const nav = useNavigate();
+  const started = new Date(r.startedAt).getTime();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const secs = Math.max(0, Math.round((now - started) / 1000));
+  const elapsed = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  const steps = (r.steps || []).slice(-3);
+  return (
+    <button
+      onClick={() => nav(r.source === 'flow' ? `/flows/runs/${r.id}` : `/agent/runs/${r.id}`)}
+      className="w-full rounded-2xl border border-zinc-200 bg-white p-3.5 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900"
+    >
+      <div className="flex items-center gap-2">
+        <span className="relative flex h-2 w-2 shrink-0"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" /></span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{r.title}</span>
+        <span className="shrink-0 font-mono text-xs tabular-nums text-zinc-400">{elapsed}</span>
+      </div>
+      {steps.length > 0 && (
+        <div className="mt-2 space-y-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+          {steps.map((st, i) => (
+            <div key={i} className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="shrink-0" aria-hidden>{st.status === 'done' ? '\u2705' : st.status === 'failed' ? '\u26A0\uFE0F' : '\u2022'}</span>
+              <span className="min-w-0 break-words">{st.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </button>
+  );
+}
+
+/**
+ * LANDED TODAY (BEA-1533) — one line per finished run: what it made, and how it went.
+ *
+ * The status pill is the point. "done · 6:00" and "failed" read at a glance, which is the difference
+ * between a page you scan and a page you have to work through.
+ */
+function LandedRow({ l }: { l: LandedItem }) {
+  const nav = useNavigate();
+  const ok = l.status === 'done';
+  const at = l.endedAt ? new Date(l.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  return (
+    <button
+      onClick={() => nav(l.source === 'flow' ? `/flows/runs/${l.id}` : `/agent/runs/${l.id}`)}
+      className="flex w-full items-center gap-2.5 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{l.title}</span>
+        {l.error && <span className="block truncate text-xs text-rose-600 dark:text-rose-400">{l.error}</span>}
+      </span>
+      <span className={'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ' + (ok
+        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+        : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300')}>
+        {ok ? 'done' : l.status}{at ? ` \u00B7 ${at}` : ''}
+      </span>
+    </button>
+  );
+}
+
 function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; onAnswered: () => void }) {
   const nav = useNavigate();
   const toast = useToast();
@@ -808,6 +877,9 @@ export function Agents() {
   }
 
   const waiting = home?.waiting || [];
+  // Mission Control's other two strips (BEA-1533). The API has served these the whole time.
+  const running = home?.running || [];
+  const landed = home?.landed || [];
   // running / landed are no longer shown here (BEA-1181) — History owns them.
   const agents = home?.agents || null;
   // Areas (BEA-1098): the home now shows agents-as-areas; jobs live inside each area's page.
@@ -1027,6 +1099,56 @@ export function Agents() {
           <span className="flex-1">{pushBusy ? <b>Turning on…</b> : <><b>Get notified on your phone</b> when an agent needs you or finishes — tap to turn on.</>}</span>
           {!pushBusy && <span onClick={(e) => { e.stopPropagation(); setPushNudge(false); localStorage.setItem('push.nudgeDismissed', '1'); }} className="px-1 text-emerald-600/70 hover:text-emerald-800 dark:hover:text-emerald-200">✕</span>}
         </button>
+      )}
+
+      {/* MISSION CONTROL (BEA-1533) — restored from design/agents-redesign/concept-1-mission-control.html.
+          What needs you, what is running, what landed — in that order, ABOVE the agents themselves.
+          These were built, then stripped back to a flat grid (BEA-1181 removed "Running now" and
+          "Landed today", and pushed "Needs you" below the grid where it sat off the bottom of the
+          screen). A job waiting on an answer is the most urgent thing on this page and it was the
+          least visible. The data never went away — /api/agent/home has served `running` and `landed`
+          the whole time; only the drawing was missing. */}
+      {waiting.length > 0 && (
+        <section className="space-y-2" data-testid="mc-waiting">
+          <div className="flex items-baseline justify-between">
+            <h2 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400">
+              <PauseCircle className="h-3.5 w-3.5" />Waiting on you
+              <span className="rounded-full bg-amber-100 px-1.5 text-[11px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{waiting.length}</span>
+            </h2>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {waiting.map((w) => (
+              <WaitingCard key={w.waitpointId || w.runId} w={w} focus={!!focusId && (w.waitpointId === focusId || w.runId === focusId)} onAnswered={loadHome} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {running.length > 0 && (
+        <section className="space-y-2" data-testid="mc-running">
+          <div className="flex items-baseline justify-between">
+            <h2 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-400">
+              <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" /></span>
+              Running now
+            </h2>
+            <button onClick={() => nav('/agent/runs')} className="text-xs font-medium text-emerald-600 hover:underline">all runs →</button>
+          </div>
+          <div className="space-y-2">
+            {running.map((r) => <RunningCard key={r.id} r={r} />)}
+          </div>
+        </section>
+      )}
+
+      {landed.length > 0 && (
+        <section className="space-y-2" data-testid="mc-landed">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">Landed today</h2>
+            <button onClick={() => nav('/agent/runs')} className="text-xs font-medium text-emerald-600 hover:underline">everything →</button>
+          </div>
+          <div className="space-y-1.5">
+            {landed.slice(0, 5).map((l) => <LandedRow key={l.id} l={l} />)}
+          </div>
+        </section>
       )}
 
       {/* 🗂 Your agents — the shelf (BEA-1083 + BEA-1087 + BEA-1091) */}
@@ -1311,21 +1433,6 @@ export function Agents() {
           onClose={() => setPickerFor(null)}
         />
       )}
-      {/* ⚡ Needs you — kept below the grid (BEA-1181): a job waiting on your answer is a blocker,
-          so it must never be hidden, but the agents themselves are what this page is for.
-          "Running now" and "Landed today" were removed — they live in History. */}
-      {waiting.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400"><PauseCircle className="h-4 w-4" />Needs you<span className="rounded-full bg-amber-100 px-1.5 text-xs font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{waiting.length}</span></h2>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {waiting.map((w) => (
-              <WaitingCard key={w.waitpointId || w.runId} w={w} focus={!!focusId && (w.waitpointId === focusId || w.runId === focusId)} onAnswered={loadHome} />
-            ))}
-          </div>
-        </section>
-      )}
-
-
     </div>
   );
 }
