@@ -177,6 +177,26 @@ export class WorkerRunnerClient {
    * cancel. `stopped:false` means there was nothing of that run running there — which is the normal
    * answer when the work had already finished, and is not a failure.
    */
+  /**
+   * What a build is saying right now (BEA-1545).
+   *
+   * Read-only and never throws: this is watched on a timer while a build runs, and a hiccup must show
+   * as "nothing new yet", never as an error in front of him.
+   */
+  async buildLog(jobId: string): Promise<{ running: boolean; log: string; ranForMs?: number }> {
+    try {
+      const r = await fetch(`${RUNNER}/build-log?jobId=${encodeURIComponent(jobId)}`, {
+        headers: this.headers(),
+        signal: AbortSignal.timeout(SHORT_TIMEOUT_MS),
+      });
+      const json: any = await r.json().catch(() => null);
+      if (!r.ok || !json?.ok) return { running: false, log: '' };
+      return { running: !!json.running, log: String(json.log || ''), ranForMs: Number(json.ranForMs) || 0 };
+    } catch {
+      return { running: false, log: '' };
+    }
+  }
+
   async stop(runId: string): Promise<{ ok: boolean; stopped?: boolean; error?: string }> {
     try {
       const r = await fetch(`${RUNNER}/stop`, {

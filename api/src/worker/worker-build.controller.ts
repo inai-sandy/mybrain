@@ -31,6 +31,19 @@ export class WorkerBuildController {
    * last run cost. The road comes from `WorkerDispatchService`, the same function that dispatches, so
    * what the owner reads here can never disagree with what happens when the job runs.
    */
+  /**
+   * The build's terminal (BEA-1545) — what Codex is saying WHILE it writes the worker, and the stored
+   * log once it has finished.
+   *
+   * His ask: *"During this step, I want to see the terminal, and I also want to see the progress."*
+   * A build takes minutes and said nothing until it ended, so the only signal was a spinner. Polled
+   * by the screen every couple of seconds while a build runs.
+   */
+  @Get('log')
+  buildLog(@Param('id') id: string) {
+    return this.builds.buildLog(id);
+  }
+
   @Get()
   async state(@Param('id') id: string) {
     const state = await this.builds.state(id);

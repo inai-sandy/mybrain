@@ -544,7 +544,7 @@ function noNetworkUrl() {
 const LIVE = new Map(); // runId -> { kill, jobId, startedAt }
 
 /** Run one command in a folder, detached, killed as a group at the timeout. Never throws. */
-function runCommand(cmd, args, cwd, timeoutMs, env) {
+function runCommand(cmd, args, cwd, timeoutMs, env, onData) {
   return new Promise((resolve) => {
     let child;
     try { child = spawn(cmd, args, { cwd, env: env || process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
@@ -556,8 +556,11 @@ function runCommand(cmd, args, cwd, timeoutMs, env) {
       timedOut = true;
       try { process.kill(-child.pid, 'SIGKILL'); } catch (e) { try { child.kill('SIGKILL'); } catch (e2) {} }
     }, timeoutMs);
-    child.stdout.on('data', (d) => { if (stdout.length < 200_000) stdout += d; });
-    child.stderr.on('data', (d) => { if (stderr.length < 100_000) stderr += d; });
+    // `onData` is what makes a build watchable (BEA-1545). Output was accumulated here and handed
+    // back only when the process closed, so for the several minutes a Codex build takes there was
+    // nothing to show and he was left guessing whether it was working or wedged.
+    child.stdout.on('data', (d) => { if (stdout.length < 200_000) stdout += d; try { if (onData) onData(String(d)); } catch (e) {} });
+    child.stderr.on('data', (d) => { if (stderr.length < 100_000) stderr += d; try { if (onData) onData(String(d)); } catch (e) {} });
     child.on('error', (e) => { clearTimeout(killer); resolve({ code: -1, stdout, stderr: String((e && e.message) || e), timedOut }); });
     child.on('close', (code) => { clearTimeout(killer); resolve({ code, stdout, stderr, timedOut }); });
   });
@@ -567,6 +570,9 @@ function runCommand(cmd, args, cwd, timeoutMs, env) {
 // written by the app (BEA-1390), because the app is the only side that knows the plan, the kit it is
 // running and which `ToolSample`s a version was tested against. They arrive as a plain
 // `{ "<relative path>": "<contents>" }` map, and every path is checked as a path, never trusted.
+/** How much of a running build's output is kept for `/build-log` — the newest words only. */
+const BUILD_LOG_TAIL = 20_000;
+
 const MAX_FILES = 200;
 const MAX_FILE_BYTES = 2_000_000;
 const MAX_FILES_BYTES = 6_000_000;
@@ -699,7 +705,12 @@ async function handleBuild(req, res) {
   const log = [];
   /** Stops the keepalive that holds the caller's connection open (BEA-1469). Null until it starts. */
   let stopHolding = null;
-  live.set(jobId, { runId: `build-v${version}`, kind: 'build', startedAt: new Date().toISOString(), kill: () => {} });
+  // A rolling tail of what the build is saying, so `/build-log` can show it while it runs (BEA-1545).
+  const liveEntry = { runId: `build-v${version}`, kind: 'build', startedAt: new Date().toISOString(), kill: () => {}, log: '' };
+  liveEntry.append = (chunk) => {
+    liveEntry.log = (liveEntry.log + chunk).slice(-BUILD_LOG_TAIL); // keep the END: the newest lines are the ones worth reading
+  };
+  live.set(jobId, liveEntry);
   try {
     try { fs.mkdirSync(dir, { recursive: true }); }
     catch (e) {
@@ -765,7 +776,7 @@ async function handleBuild(req, res) {
     // is fast and still answers with a real status code; everything below answers 200 with an
     // `ok:false` body, which is what the client already reads.
     stopHolding = holdOpen(res);
-    const built = await runCommand('codex', args, dir, timeoutMs, buildKey ? { ...process.env, MYBRAIN_BUILD_KEY: buildKey } : process.env);
+    const built = await runCommand('codex', args, dir, timeoutMs, buildKey ? { ...process.env, MYBRAIN_BUILD_KEY: buildKey } : process.env, liveEntry.append);
     const sessionId = sessionIdOf(built.stdout);
     pruneWorkerTrust();
     log.push(built.timedOut ? `codex was stopped after ${Math.round(timeoutMs / 1000)}s` : `codex exited ${built.code}`);
@@ -779,7 +790,7 @@ async function handleBuild(req, res) {
       // something live would be worthless as a promotion gate, and the host's environment is full of
       // real keys. The Codex turn above is a different thing — it is a network process by nature,
       // sandboxed by `-s workspace-write` — and that difference is written down in the README.
-      const ran = await runCommand(process.execPath, ['--import', noNetworkUrl(), '--test', 'worker.test.mjs'], dir, TEST_TIMEOUT, childEnv());
+      const ran = await runCommand(process.execPath, ['--import', noNetworkUrl(), '--test', 'worker.test.mjs'], dir, TEST_TIMEOUT, childEnv(), liveEntry.append);
       tests = parseTap(ran.stdout + ran.stderr) || { passed: 0, failed: ran.code === 0 ? 0 : 1, at: new Date().toISOString() };
       log.push(ran.timedOut ? 'the tests were stopped at the timeout' : `tests exited ${ran.code}`);
       if (ran.stdout.trim()) log.push(ran.stdout.trim().slice(-4000));
@@ -961,6 +972,29 @@ async function handlePromote(req, res) {
  * the worker started dies with it. Answers `ok:true, stopped:false` when there was nothing to stop —
  * a run that already finished is not an error, and the caller should not have to care about the race.
  */
+/**
+ * What a build is saying, WHILE it says it (BEA-1545).
+ *
+ * A build takes minutes and returned nothing until it finished, so his only signal was a spinner and
+ * a guess. This serves the rolling tail the build is writing right now — read-only, no side effects,
+ * and it answers `running:false` once the build is over rather than erroring, because "it finished
+ * while you were watching" is the normal case, not a fault.
+ */
+async function handleBuildLog(req, res) {
+  const url = new URL(req.url, 'http://x');
+  const jobId = String(url.searchParams.get('jobId') || '');
+  if (!jobId) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing jobId' })); return; }
+  const found = live.get(jobId);
+  if (!found || found.kind !== 'build') { res.end(JSON.stringify({ ok: true, running: false, log: '' })); return; }
+  res.end(JSON.stringify({
+    ok: true,
+    running: true,
+    startedAt: found.startedAt,
+    ranForMs: Date.now() - new Date(found.startedAt).getTime(),
+    log: String(found.log || ''),
+  }));
+}
+
 async function handleStop(req, res) {
   let body = {};
   try { body = JSON.parse(await readBody(req)); }
@@ -1040,6 +1074,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/build') { await handleBuild(req, res); return; }
     if (req.method === 'POST' && req.url === '/promote') { await handlePromote(req, res); return; }
     if (req.method === 'POST' && req.url === '/parity') { await handleParity(req, res); return; }
+    if (req.method === 'GET' && String(req.url).startsWith('/build-log')) { await handleBuildLog(req, res); return; }
     if (req.method === 'POST' && req.url === '/stop') { await handleStop(req, res); return; }
     if (req.method === 'POST' && req.url === '/remove') { await handleRemove(req, res); return; }
     res.statusCode = 404;

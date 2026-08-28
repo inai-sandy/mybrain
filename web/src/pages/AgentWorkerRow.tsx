@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Hammer, Loader2, Sparkles, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Hammer, Loader2, Sparkles, Wrench, Terminal } from 'lucide-react';
 
 /**
  * The **Worker** row of the job's Settings accordion (BEA-1394, agent workers 9/10 —
@@ -124,6 +124,33 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
     if (!live && poll.current) { clearInterval(poll.current); poll.current = null; }
     return () => { if (poll.current) { clearInterval(poll.current); poll.current = null; } };
   }, [w?.building, w?.repairing, load]);
+
+  /**
+   * THE TERMINAL (BEA-1545). His ask: "During this step, I want to see the terminal, and I also want
+   * to see the progress." A build takes minutes and showed nothing but a spinner, so there was no way
+   * to tell working from wedged.
+   *
+   * Polled faster than the row itself (2s vs 5s) because this is the part being watched, and it keeps
+   * polling for one beat after the build ends so the last words — and the verdict — actually land.
+   */
+  const [term, setTerm] = useState<{ running: boolean; log: string; ranForMs?: number; status?: string; version?: number } | null>(null);
+  const [showTerm, setShowTerm] = useState(false);
+  const termRef = useRef<HTMLPreElement | null>(null);
+  useEffect(() => {
+    if (!showTerm) return;
+    let live = true;
+    const tick = async () => {
+      const d = await fetch(`/api/agent/agents/${agentId}/worker/log`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (live && d) setTerm(d);
+    };
+    void tick();
+    const t = setInterval(() => void tick(), 2000);
+    return () => { live = false; clearInterval(t); };
+  }, [showTerm, agentId, w?.building]);
+  // Follow the tail, the way a terminal does.
+  useEffect(() => { if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight; }, [term?.log]);
+  // Open it by itself when a build starts — he asked to SEE this step, not to go looking for it.
+  useEffect(() => { if (w?.building || w?.repairing) setShowTerm(true); }, [w?.building, w?.repairing]);
 
   async function build() {
     if (busy) return;
@@ -364,7 +391,38 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
           {w.building ? 'Building…' : w.worker ? 'Rebuild' : 'Build a worker'}
         </button>
         {w.repairing && <span className="text-[11px] text-amber-600 dark:text-amber-400">A repair is running…</span>}
+        <button
+          type="button"
+          data-testid="worker-terminal-toggle"
+          onClick={() => setShowTerm((v) => !v)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300"
+        >
+          <Terminal className="h-3.5 w-3.5" />{showTerm ? 'Hide the terminal' : 'Show the terminal'}
+        </button>
       </div>
+
+      {/* THE TERMINAL (BEA-1545) — what Codex is saying while it writes the worker. */}
+      {showTerm && (
+        <div className="mt-2" data-testid="worker-terminal">
+          <div className="flex items-center gap-2 rounded-t-lg border border-b-0 border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
+            {term?.running
+              ? <><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" /></span><span className="font-medium text-emerald-700 dark:text-emerald-300">Building…</span></>
+              : <span className="font-medium">{term?.status === 'promoted' ? 'Finished — the worker is live' : term?.status === 'failed' ? 'Finished — it did not work' : 'Last build'}</span>}
+            {typeof term?.ranForMs === 'number' && term.ranForMs > 0 && (
+              <span className="tabular-nums">{Math.floor(term.ranForMs / 60000)}m {String(Math.floor((term.ranForMs % 60000) / 1000)).padStart(2, '0')}s</span>
+            )}
+            {!!term?.version && <span className="ml-auto">v{term.version}</span>}
+          </div>
+          <pre
+            ref={termRef}
+            className="max-h-64 overflow-auto rounded-b-lg border border-zinc-200 bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-300 dark:border-zinc-800"
+          >{term?.log?.trim()
+            ? term.log
+            : term?.running
+              ? 'Codex has started. It usually says nothing for the first minute or two…'
+              : 'Nothing yet — this fills in while a build runs, and stays as the record afterwards.'}</pre>
+        </div>
+      )}
       <p className="text-[11px] text-zinc-400">A build takes a few minutes: Codex compiles the plan above into a small program and it only goes live if its own tests pass. Nothing changes while it builds, and a build that fails leaves this job exactly where it is.</p>
     </div>
   );

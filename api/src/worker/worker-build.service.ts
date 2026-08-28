@@ -133,6 +133,24 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
    * owned it is gone with the restart that orphaned it. This corrects the RECORD so the job stops
    * claiming a build is running, and so `Rebuild` is offered again.
    */
+  /**
+   * The build's terminal (BEA-1545): what it is saying now, or what it said when it finished.
+   *
+   * One answer for both states, so the screen never has to ask which one to fetch. While a build runs
+   * the tail comes from the host (the app has nothing until the build returns); once it is over, the
+   * stored log is the record. `running` is what the screen watches to know when to stop polling.
+   */
+  async buildLog(agentId: string): Promise<{ running: boolean; log: string; ranForMs?: number; status?: string; version?: number }> {
+    const live = await this.runner?.buildLog?.(agentId).catch(() => null);
+    if (live?.running) return { running: true, log: live.log || '', ranForMs: live.ranForMs, status: 'building' };
+    const row: any = await this.prisma.workerBuild
+      .findFirst({ where: { agentId }, orderBy: { startedAt: 'desc' }, select: { log: true, status: true, version: true, startedAt: true, finishedAt: true } })
+      .catch(() => null);
+    if (!row) return { running: false, log: '' };
+    const ms = row.finishedAt ? new Date(row.finishedAt).getTime() - new Date(row.startedAt).getTime() : undefined;
+    return { running: false, log: String(row.log || ''), ranForMs: ms, status: String(row.status || ''), version: Number(row.version) || undefined };
+  }
+
   /** Is a build for this job in flight right now? Same staleness rule the Worker row uses. */
   async isBuilding(agentId: string): Promise<boolean> {
     const row: any = await this.prisma.workerBuild
