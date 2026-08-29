@@ -517,7 +517,7 @@ export function AgentApp() {
           const Icon = m.icon;
           return (
             <button key={m.k} onClick={() => setMode(m.k)}
-              className={'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-3 sm:text-sm ' + (on ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
+              className={'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-sm font-semibold transition-colors sm:gap-1.5 sm:px-3 sm:text-sm ' + (on ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
               <Icon className="h-4 w-4 shrink-0" style={on && m.k === 'flow' ? { color } : undefined} /><span className="truncate">{m.label}</span>
             </button>
           );
@@ -622,7 +622,7 @@ export function AgentApp() {
                 {all.length > 3 && (
                   <div className="flex gap-1">
                     {(['all', 'done', 'failed'] as const).map((f) => (
-                      <button key={f} onClick={() => setHistFilter(f)} className={'rounded-full border px-2 py-0.5 text-[11px] font-medium ' + (histFilter === f ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-zinc-200 text-zinc-400 dark:border-zinc-700')}>{f === 'all' ? 'All' : f === 'done' ? 'Done' : 'Failed'}</button>
+                      <button key={f} onClick={() => setHistFilter(f)} className={'rounded-full border px-2 py-0.5 text-xs font-medium ' + (histFilter === f ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-zinc-200 text-zinc-400 dark:border-zinc-700')}>{f === 'all' ? 'All' : f === 'done' ? 'Done' : 'Failed'}</button>
                     ))}
                   </div>
                 )}
@@ -633,7 +633,7 @@ export function AgentApp() {
               {filtered.slice(0, 30).map((r: any) => (
                 <div key={r.id} className="group flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
                   <button onClick={() => nav(`/agent/runs/${r.id}`)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                    <span className="w-[4.6rem] shrink-0 text-[11px] font-bold uppercase tracking-wide" style={{ color }}>{fmtDay(r.endedAt || r.startedAt)}</span>
+                    <span className="w-[4.6rem] shrink-0 text-xs font-bold uppercase tracking-wide" style={{ color }}>{fmtDay(r.endedAt || r.startedAt)}</span>
                     <span className="min-w-0 flex-1 truncate">{r.status === 'failed' ? <span className="text-rose-600 dark:text-rose-400">Failed{r.error ? ` — ${String(r.error).slice(0, 50)}` : ''}</span> : (plainPreview(r.resultText, 140) || r.title || a.name)}</span>
                   </button>
                   {(r.status === 'failed' || r.status === 'done') && (
@@ -680,7 +680,7 @@ export function AgentApp() {
                 ))}
                 {(proposal.changes || []).length === 0 && <li className="text-sm text-zinc-600 dark:text-zinc-300">A small update to this agent.</li>}
               </ul>
-              {proposal.patch?.prompt && <p className="mt-1.5 text-[11px] text-violet-600 dark:text-violet-300">The flow will be re-drawn to match.</p>}
+              {proposal.patch?.prompt && <p className="mt-1.5 text-xs text-violet-600 dark:text-violet-300">The flow will be re-drawn to match.</p>}
               <div className="mt-2 flex gap-2">
                 <button onClick={applyProposal} disabled={chatBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Apply change</button>
                 <button onClick={() => { setProposal(null); setChatLog((p) => [...p, { who: 'ai', text: 'Okay, left as it was.' }]); fetch(`/api/agent/agents/${id}/chat-log`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Okay, left as it was.' }) }).catch(() => undefined); }} disabled={chatBusy} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">Not this</button>
@@ -703,7 +703,7 @@ export function AgentApp() {
               <h2 className="text-base font-semibold">Settings</h2>
               <button onClick={closeSheet} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
             </div>
-            <p className="mb-3 mt-0.5 text-[11px] text-zinc-400">Everything about this job. Closed rows show what's set, so you rarely need to open them.</p>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-400">Everything about this job. Closed rows show what's set, so you rarely need to open them.</p>
             <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-2">
 
               {/* 1 · What it does 🎯 — goal (BEA-1378) + task + good-result */}
@@ -742,7 +742,7 @@ export function AgentApp() {
                     <DictateButton onText={(t) => { markCfgDirty(); setRubric((p) => (p ? p + ' ' : '') + t); }} className="absolute right-2 top-2" />
                   </div>
                 </label>
-                <p className="text-[11px] text-zinc-400">Tip: you can also change all of this by talking to it — try the <button onClick={() => setMode('chat')} className="text-violet-600 hover:underline dark:text-violet-400">💬 Chat</button> tab.</p>
+                <p className="text-xs text-zinc-400">Tip: you can also change all of this by talking to it — try the <button onClick={() => setMode('chat')} className="text-violet-600 hover:underline dark:text-violet-400">💬 Chat</button> tab.</p>
               </SettingsRow>
 
               {/* 2 · Sources 📥 — direct-fetch jobs only (BEA-1357/1374): the "What it fetches" editors */}
@@ -752,7 +752,7 @@ export function AgentApp() {
                   open={openRow === 'sources'} onToggle={toggleRow}>
                   {/* A down source, said inside the row (BEA-1375: the server's own health verdicts). */}
                   {(planCost?.unhealthy || []).map((u) => (
-                    <p key={u.actionId} data-testid="source-unhealthy" className="text-[11px] font-medium text-amber-600 dark:text-amber-400">⚠ {u.name} is down at the vendor right now — kept so it fills in later.</p>
+                    <p key={u.actionId} data-testid="source-unhealthy" className="text-xs font-medium text-amber-600 dark:text-amber-400">⚠ {u.name} is down at the vendor right now — kept so it fills in later.</p>
                   ))}
                   {/* Sources are keyed by their own id (BEA-1374): several may share one action, each with its own arguments and pages. */}
                   {sourcesOf(a.toolArgs).map((src) => (
@@ -771,7 +771,7 @@ export function AgentApp() {
                       onAdd={async (x) => { const rows = [...sourcesOf(a.toolArgs), { id: sourceIdFor(x.tool, Object.keys(a.toolArgs)), actionId: x.tool, value: x.args }]; const d = await patch({ tools: toolsOf(rows), toolArgs: toolArgsOf(rows) }); if (d) { setSourcesDirty(false); toast('success', `Added ${x.label || x.tool}`); setAddingSource(false); } }}
                       onCancel={() => setAddingSource(false)} />
                   )}
-                  <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.{Object.keys(a.toolArgs).length > 1 ? ' Several sources are fetched one after the other and merged into one table.' : ''}{planCost ? ` ${planCost.how}` : ''}</p>
+                  <p className="text-xs text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.{Object.keys(a.toolArgs).length > 1 ? ' Several sources are fetched one after the other and merged into one table.' : ''}{planCost ? ` ${planCost.how}` : ''}</p>
                 </SettingsRow>
               )}
 
@@ -795,7 +795,7 @@ export function AgentApp() {
                 <label className="flex cursor-pointer items-center justify-between gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
                   <span>
                     <span className="block text-sm font-semibold">Send to WhatsApp when it finishes</span>
-                    <span className="block text-[11px] text-zinc-400">One message per finish: name + headline + a private link. Needs your number in Settings → Agent Engine.</span>
+                    <span className="block text-xs text-zinc-400">One message per finish: name + headline + a private link. Needs your number in Settings → Agent Engine.</span>
                   </span>
                   <input type="checkbox" checked={!!a.notifyWhatsApp} onChange={async (e) => { const d = await patch({ notifyWhatsApp: e.target.checked }); if (d) toast('success', e.target.checked ? 'It will WhatsApp you when it finishes' : 'WhatsApp off for this job'); }} className="h-5 w-9 accent-emerald-600" />
                 </label>
@@ -811,7 +811,7 @@ export function AgentApp() {
                       <li key={i} className="flex gap-2 text-sm text-zinc-600 dark:text-zinc-300"><span className="text-emerald-600 dark:text-emerald-400">✓</span><span>{line}</span></li>
                     ))}
                   </ul>
-                  <p className="text-[11px] text-zinc-400">Checked before anything is written. A run that does not pass fails out loud and writes nothing — no half-empty sheet, no "done" with no rows. These checks come from the plan above, so changing the sources or the task changes them too.</p>
+                  <p className="text-xs text-zinc-400">Checked before anything is written. A run that does not pass fails out loud and writes nothing — no half-empty sheet, no "done" with no rows. These checks come from the plan above, so changing the sources or the task changes them too.</p>
                 </SettingsRow>
               )}
 
@@ -865,7 +865,7 @@ export function AgentApp() {
                         >
                           <span aria-hidden>{m.icon}</span>
                           <span className="min-w-0 flex-1 truncate">{m.title}</span>
-                          <span className="shrink-0 text-[11px] text-zinc-400">{timeAgo(m.at)}</span>
+                          <span className="shrink-0 text-xs text-zinc-400">{timeAgo(m.at)}</span>
                         </a>
                       )}
                     />
@@ -875,7 +875,7 @@ export function AgentApp() {
                     type="button"
                     data-testid="export-made"
                     onClick={() => downloadCsv(csvName(`${a.name} outputs`), ['What', 'Kind', 'Link', 'When'], made.map((m) => [m.title, kindOfMade(m), m.href, m.at]))}
-                    className="mt-2 rounded-lg border border-zinc-200 px-2.5 py-1 text-[11px] font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300"
+                    className="mt-2 rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300"
                   >Export CSV</button>
                 </SettingsRow>
               )}
@@ -892,13 +892,13 @@ export function AgentApp() {
                   {cost && !!cost.runs && (
                     <>
                       <div data-testid="cost-all">{costLines(cost)!.all}</div>
-                      <div className="text-[13px] text-zinc-500">{costLines(cost)!.recent}</div>
-                      <div className="text-[13px] text-zinc-500">{costLines(cost)!.per}</div>
-                      {cost.calls > 0 && <div className="text-[12px] text-zinc-400">{cost.calls.toLocaleString('en-IN')} calls to outside services</div>}
+                      <div className="text-sm text-zinc-500">{costLines(cost)!.recent}</div>
+                      <div className="text-sm text-zinc-500">{costLines(cost)!.per}</div>
+                      {cost.calls > 0 && <div className="text-xs text-zinc-400">{cost.calls.toLocaleString('en-IN')} calls to outside services</div>}
                     </>
                   )}
                   {ceilingLine(spend) && (
-                    <div className="mt-2 rounded-lg border border-zinc-200 px-3 py-2 text-[12px] text-zinc-500 dark:border-zinc-800" data-testid="ceiling-line">
+                    <div className="mt-2 rounded-lg border border-zinc-200 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800" data-testid="ceiling-line">
                       {ceilingLine(spend)}
                     </div>
                   )}
@@ -930,7 +930,7 @@ export function AgentApp() {
                     <button onClick={forgetWatch} className="self-start rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300">Forget what it saw</button>
                   )}
                   {(a.mode === 'watch' || a.mode === 'alert') && (
-                    <p className="text-[11px] text-zinc-400" data-testid="watch-since">
+                    <p className="text-xs text-zinc-400" data-testid="watch-since">
                       {watchRows === null ? 'Checking what it last saw…' : watchRows.length === 0 ? 'No baseline yet — the first run stores one and reports nothing as new.' : `Watching since ${new Date(watchRows[watchRows.length - 1].lastAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · last checked ${new Date(watchRows[0].lastAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${watchRows[0].lastAlertedAt ? ` · last alert ${new Date(watchRows[0].lastAlertedAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
                     </p>
                   )}
@@ -961,7 +961,7 @@ export function AgentApp() {
                           );
                         })}
                       </div>
-                      <p className="mt-1 text-[11px] text-zinc-400">Attached skills ride along on every run (up to 3 are used).</p>
+                      <p className="mt-1 text-xs text-zinc-400">Attached skills ride along on every run (up to 3 are used).</p>
                     </>
                   )}
                 </div>
@@ -972,7 +972,7 @@ export function AgentApp() {
                     <button onClick={() => setPickingTools(true)} className="text-xs font-medium text-emerald-600 hover:underline">Choose</button>
                   </div>
                   {(a.tools || []).length === 0 ? (
-                    <p className="mt-1 text-[11px] text-zinc-400">Following the agent's toolbox. Choose here to give this job its own, narrower set.</p>
+                    <p className="mt-1 text-xs text-zinc-400">Following the agent's toolbox. Choose here to give this job its own, narrower set.</p>
                   ) : (
                     <>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -980,10 +980,10 @@ export function AgentApp() {
                           <span key={id} className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{toolNames[id] || id}</span>
                         ))}
                       </div>
-                      <button onClick={async () => { const d = await patch({ tools: [] }); if (d) toast('success', "Back to the agent's toolbox"); }} className="mt-1.5 text-[11px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">Clear — follow the agent's toolbox again</button>
+                      <button onClick={async () => { const d = await patch({ tools: [] }); if (d) toast('success', "Back to the agent's toolbox"); }} className="mt-1.5 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">Clear — follow the agent's toolbox again</button>
                     </>
                   )}
-                  <p className="mt-1 text-[11px] text-zinc-400">A run only gets what is listed here. Anything else is refused.</p>
+                  <p className="mt-1 text-xs text-zinc-400">A run only gets what is listed here. Anything else is refused.</p>
                 </div>
                 {pickingTools && (
                   <ToolPicker
@@ -1009,7 +1009,7 @@ export function AgentApp() {
                       {runModels.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                     </select>
                   )}
-                  <p className="mt-1 text-[11px] text-zinc-400">Overrides the global agent model for this job's runs only.</p>
+                  <p className="mt-1 text-xs text-zinc-400">Overrides the global agent model for this job's runs only.</p>
                 </div>
                 <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
                   <h3 className="text-sm font-semibold">Keep history for</h3>
@@ -1019,7 +1019,7 @@ export function AgentApp() {
                     <option value="90">90 days</option>
                     <option value="365">1 year</option>
                   </select>
-                  <p className="mt-1 text-[11px] text-zinc-400">Only finished entries are cleared. Saved documents are never touched.</p>
+                  <p className="mt-1 text-xs text-zinc-400">Only finished entries are cleared. Saved documents are never touched.</p>
                 </div>
                 <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
                   <h3 className="text-sm font-semibold">Move to another agent</h3>
@@ -1037,7 +1037,7 @@ export function AgentApp() {
                       }} className="shrink-0 rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-40 dark:bg-white dark:text-zinc-900">Move</button>
                     </div>
                   )}
-                  <p className="mt-1 text-[11px] text-zinc-400">All its history and settings travel with it.</p>
+                  <p className="mt-1 text-xs text-zinc-400">All its history and settings travel with it.</p>
                 </div>
               </SettingsRow>
 
@@ -1095,10 +1095,10 @@ function SettingsRow({ k, icon, title, summary, open, onToggle, danger, full, ch
   return (
     <details open={open} data-testid={`srow-${k}`} className={'overflow-hidden rounded-2xl border bg-white dark:bg-zinc-900 ' + (danger ? 'border-rose-200 dark:border-rose-500/30' : 'border-zinc-200 dark:border-zinc-800') + (full ? ' lg:col-span-2' : '')}>
       <summary onClick={(e) => { e.preventDefault(); onToggle(k); }} className="flex cursor-pointer select-none list-none items-center gap-2.5 rounded-2xl px-3.5 py-3 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-emerald-500 [&::-webkit-details-marker]:hidden">
-        <span aria-hidden className={'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[13px] ' + (danger ? 'bg-rose-50 dark:bg-rose-500/10' : 'bg-emerald-50 dark:bg-emerald-500/10')}>{icon}</span>
+        <span aria-hidden className={'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm ' + (danger ? 'bg-rose-50 dark:bg-rose-500/10' : 'bg-emerald-50 dark:bg-emerald-500/10')}>{icon}</span>
         <span className="min-w-0 flex-1">
-          <span className={'block text-[13px] font-semibold ' + (danger ? 'text-rose-600 dark:text-rose-400' : '')}>{title}</span>
-          <span data-testid={`srow-${k}-summary`} className="block truncate text-[11px] text-zinc-400">{summary}</span>
+          <span className={'block text-sm font-semibold ' + (danger ? 'text-rose-600 dark:text-rose-400' : '')}>{title}</span>
+          <span data-testid={`srow-${k}-summary`} className="block truncate text-xs text-zinc-400">{summary}</span>
         </span>
         <ChevronRight className={'h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform motion-reduce:transition-none ' + (open ? 'rotate-90' : '')} />
       </summary>

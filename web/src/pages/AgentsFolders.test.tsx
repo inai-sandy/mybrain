@@ -16,9 +16,12 @@ vi.mock('../ui/push', () => ({ enablePush: async () => ({ ok: true }), pushPermi
 vi.mock('./AgentBuilder', () => ({ AgentBuilder: () => null, withCreatedFlag: (u: string) => u }));
 vi.mock('./social/AddSourcePanel', () => ({ AddSourcePanel: () => null }));
 
+// One job each, because that is what a real area has. An area with NOTHING in it is an unfinished
+// draft and the list deliberately keeps those out (BEA-1564, `isDraftShell`) — these fixtures were
+// written to exercise FOLDERS and had simply left the jobs off.
 const areas = [
-  { id: 'a1', name: 'Radar', description: '', folderId: 'f1', jobs: [], jobCount: 0, tools: [] },
-  { id: 'a2', name: 'Sheets', description: '', folderId: null, jobs: [], jobCount: 0, tools: [] },
+  { id: 'a1', name: 'Radar', description: '', folderId: 'f1', jobs: [{ id: 'j1', name: 'Radar job' }], jobCount: 1, tools: [] },
+  { id: 'a2', name: 'Sheets', description: '', folderId: null, jobs: [{ id: 'j2', name: 'Sheets job' }], jobCount: 1, tools: [] },
 ];
 const folders = { folders: [{ id: 'f1', name: 'Work', order: 1, count: 1 }], all: 2, unfiled: 1 };
 

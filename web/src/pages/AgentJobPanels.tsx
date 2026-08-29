@@ -328,13 +328,13 @@ export function RunsPanel({ id, flow }: { id: string; flow: any }) {
                 provider-measured count. Saying "measured" here would be lying with a confident
                 number; the real per-call counts live in Settings → Usage. */}
             {r.spend?.tokens > 0 && (
-              <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400" title="Budget estimate for this run (flat charge per engine step + size-based charges). Real per-call counts: Settings → Usage.">
+              <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400" title="Budget estimate for this run (flat charge per engine step + size-based charges). Real per-call counts: Settings → Usage.">
                 ≈{r.spend.tokens >= 1000 ? `${Math.round(r.spend.tokens / 1000)}k` : r.spend.tokens} tokens
               </span>
             )}
             {r.spend?.searches > 0 && (
               <span
-                className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                 title={[
                   `${r.spend.searches} searches + ${r.spend.extracts} page reads across ${r.spend.sources} sources`,
                   r.spend.meaningSearches > 0 ? `${r.spend.meaningSearches} on Exa (not billed as Tavily credits)` : '',
