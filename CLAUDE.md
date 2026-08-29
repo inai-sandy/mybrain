@@ -1013,6 +1013,7 @@ change is additive, so no promoted worker is refused. Traps: `WorkerController`'
 - **A job's last run can be an agent run OR a flow run.** Anything deep — and every voice job — runs as a flow. Query both or the UI will say "never ran".
 - **Deploying kills in-flight runs.** `ship.sh` does `docker rm -f`, and the boot reconciler fails anything left `running`. Don't ship while a long run you care about is going.
 - **QA the UI for real.** Playwright-core + cached Chromium at `~/.cache/ms-playwright/chromium-1228/`; log in via `POST /api/auth/login` with the creds in `.claude/checks/secrets.env` and set the `mb_session` cookie. Check **390 and 1180**, and assert `document.documentElement.scrollWidth === window.innerWidth` — a single wide table can push the whole page sideways.
+- **Customer-facing failure words go through `failure-words.ts` — never hand-write them.** `plumbingClassOf`/`customerWords` (BEA-1580) classify every failure as one of the customer's six moves or plumbing-class; plumbing phones home via `ops-alert.ts` (BEA-1581, decided by the classifier alone — a source test rejects hand-named classes) and `model-blank` never queues a repair (BEA-1582). A new failure string belongs in the classifier's data, not inline where it is thrown.
 - Prompts are editable at runtime (Settings → Prompts); defaults live in `api/src/prompts/prompts.service.ts`. Add a key to the union type AND the registry.
 
 <!-- PROJECT-CONTEXT:END -->

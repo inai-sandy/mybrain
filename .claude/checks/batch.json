@@ -1,6 +1,6 @@
 {
   "startedAt": "2026-08-29T17:45:00Z",
-  "status": "running",
+  "status": "complete",
   "note": "Customer-recovery batch: six-moves messages, plumbing phone-home, and (added mid-batch with approval after the 17:36 Daily Email failure) model-hiccup retries. Order: 1580 -> 1581 -> 1582.",
   "issues": [
     {
@@ -20,7 +20,9 @@
     {
       "id": "BEA-1582",
       "title": "a model hiccup is retried like a vendor hiccup; a model outage never queues a repair",
-      "status": "pending"
+      "status": "done",
+      "sha": "5ffc14f",
+      "note": "helper retry at one door, same model; model-blank never queues a repair; interactive helpers fail fast"
     }
   ]
 }
