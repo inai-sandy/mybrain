@@ -123,7 +123,7 @@ export function FolderNav({ folders, counts, active, onSelect, onCreate, onRenam
                     ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
                     : 'border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100')}>
                 {it.label}
-                <span className={'rounded-full px-1.5 tabular-nums text-[10px] ' + (on ? 'bg-white/25' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{it.count}</span>
+                <span className={'rounded-full px-1.5 tabular-nums text-xs ' + (on ? 'bg-white/25' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{it.count}</span>
               </button>
               {it.folder && on && <FolderActions f={it.folder} onRename={onRename} onDelete={onDelete} />}
             </span>
@@ -162,12 +162,12 @@ export function FolderPickerSheet({ folders, title, onPick, onCreate, onClose }:
         </div>
         <div className="max-h-72 space-y-1 overflow-y-auto">
           <button onClick={() => onPick(null)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <span aria-hidden>📄</span>Unfiled <span className="ml-auto text-[11px] text-zinc-400">no folder</span>
+            <span aria-hidden>📄</span>Unfiled <span className="ml-auto text-xs text-zinc-400">no folder</span>
           </button>
           {folders.map((f) => (
             <button key={f.id} onClick={() => onPick(f.id)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
               <span aria-hidden>📁</span><span className="min-w-0 flex-1 truncate">{f.name}</span>
-              {typeof f.count === 'number' && <span className="text-[11px] text-zinc-400">{f.count}</span>}
+              {typeof f.count === 'number' && <span className="text-xs text-zinc-400">{f.count}</span>}
             </button>
           ))}
           {folders.length === 0 && <p className="px-3 py-1 text-xs text-zinc-400">No folders yet — make the first one below.</p>}

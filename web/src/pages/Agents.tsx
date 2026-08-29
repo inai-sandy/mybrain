@@ -160,7 +160,7 @@ function LandedRow({ l }: { l: LandedItem }) {
         <span className="block truncate text-sm font-medium">{l.title}</span>
         {l.error && <span className="block truncate text-xs text-rose-600 dark:text-rose-400">{l.error}</span>}
       </span>
-      <span className={'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ' + (ok
+      <span className={'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ' + (ok
         ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
         : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300')}>
         {ok ? 'done' : l.status}{at ? ` \u00B7 ${at}` : ''}
@@ -199,61 +199,75 @@ function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; on
   const choices: string[] = Array.isArray(w.options) ? w.options.filter((o: any) => typeof o === 'string') : [];
   const isApprove = w.kind === 'approve_edit_reject';
   const draft = !isApprove ? '' : typeof w.options === 'object' && w.options && !Array.isArray(w.options) ? String((w.options as any).description || (w.options as any).command || '') : '';
-  // The four clear kinds of ask (BEA-1067) — the tag tells you at a glance what's being asked of you.
+  // The four clear kinds of ask (BEA-1067) — it still tells you at a glance what is being asked of
+  // you, but as a quiet word beside the title rather than a fourth coloured pill (BEA-1564). Four
+  // different accent colours on a card that is already amber is what made it shout.
   const tag = isApprove
-    ? { label: 'Check before it acts', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
-    : w.kind === 'choice'
-      ? { label: 'Pick one', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' }
-      : w.kind === 'form'
-        ? { label: 'Fill this in', cls: 'bg-violet-500/15 text-violet-700 dark:text-violet-300' }
-        : { label: 'Answer a question', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
+    ? { label: 'Check before it acts' }
+    : w.kind === 'choice' ? { label: 'Pick one' }
+      : w.kind === 'form' ? { label: 'Fill this in' }
+        : { label: 'Answer a question' };
 
   return (
+    /**
+     * CALM, NOT LOUD (BEA-1564). His words: *"that particular window is popping out, and it's too
+     * ugly."* It was an amber card, holding an amber pill, a coloured icon, a white inner box and a
+     * second inner box — on a page that is otherwise quiet zinc, so the one thing asking for a
+     * decision looked like an error state.
+     *
+     * Now it is an ordinary card with ONE accent: a 3px amber rail down the left edge. That still
+     * makes it the only amber thing on the page, so it is found instantly, without shouting. The
+     * question sits at body size on the card's own surface — no nested boxes — because the question
+     * IS the content here, not a quote inside something else.
+     */
     <div ref={ref} id={w.waitpointId ? `wp-${w.waitpointId}` : `fw-${w.runId}`}
-      className={'rounded-2xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/25 dark:bg-amber-500/5 ' + (focus ? 'ring-2 ring-amber-400' : '')}>
-      <span className={'mb-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ' + tag.cls}>{tag.label}</span>
-      <div className="flex items-center gap-2">
-        <span className="text-xl leading-none">{w.icon}</span>
-        <button onClick={() => nav(runUrl(w.source, w.runId))} className="min-w-0 truncate text-sm font-semibold hover:text-amber-700 dark:hover:text-amber-300">{w.title}</button>
-        <span className="ml-auto shrink-0 text-[11px] text-amber-700/80 dark:text-amber-300/80">asked {timeAgo(w.askedAt)}</span>
-      </div>
-      <p className="mt-2 whitespace-pre-wrap rounded-xl bg-white/70 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">{w.question}</p>
-      {isApprove && draft && <p className="mt-2 rounded-lg border-l-2 border-amber-400 bg-white/50 px-3 py-1.5 text-xs text-zinc-600 dark:bg-zinc-900/40 dark:text-zinc-300">{draft}</p>}
-      {/* The quiet double-check's warning (BEA-1078) — only shows when something looked off. */}
-      {isApprove && typeof w.options === 'object' && w.options && (w.options as any).validatorNote && (
-        <p className="mt-2 rounded-lg bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-700 dark:text-rose-300">⚠️ Check closely: {(w.options as any).validatorNote}</p>
-      )}
+      className={'overflow-hidden rounded-xl border border-zinc-200 border-l-[3px] border-l-amber-400 bg-white dark:border-zinc-800 dark:border-l-amber-400/70 dark:bg-zinc-900 ' + (focus ? 'ring-2 ring-amber-400/60' : '')}>
+      <div className="p-4">
+        <div className="flex items-baseline gap-2">
+          <button onClick={() => nav(runUrl(w.source, w.runId))} className="min-w-0 truncate text-sm font-semibold text-zinc-900 hover:text-amber-700 dark:text-zinc-100 dark:hover:text-amber-300">{w.title}</button>
+          <span className="shrink-0 text-xs text-zinc-400">{tag.label.toLowerCase()}</span>
+          <span className="ml-auto shrink-0 text-xs tabular-nums text-zinc-400">{timeAgo(w.askedAt)}</span>
+        </div>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">{w.question}</p>
+        {isApprove && draft && <p className="mt-2 border-l-2 border-zinc-200 pl-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">{draft}</p>}
+        {/* The quiet double-check's warning (BEA-1078) — only shows when something looked off. */}
+        {isApprove && typeof w.options === 'object' && w.options && (w.options as any).validatorNote && (
+          <p className="mt-2 rounded-lg bg-rose-500/10 px-3 py-2 text-sm font-medium text-rose-700 dark:text-rose-300">Check closely: {(w.options as any).validatorNote}</p>
+        )}
 
-      {editing || (!choices.length && !isApprove) ? (
-        <div className="mt-3 flex gap-2">
-          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) answer(text.trim()); }} autoFocus={editing}
-            placeholder={editing ? 'Your version…' : 'Type your answer…'}
-            className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500 dark:border-amber-500/40 dark:bg-zinc-900" />
-          <button onClick={() => text.trim() && answer(text.trim())} disabled={busy || !text.trim()}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-400 disabled:opacity-50">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Send
-          </button>
-        </div>
-      ) : isApprove ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button onClick={() => answer('approve')} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Approve</button>
-          <button onClick={() => { setEditing(true); setText(draft); }} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3.5 py-2 text-sm font-medium hover:border-amber-400 dark:border-zinc-700"><Pencil className="h-4 w-4" />Edit first</button>
-          <button onClick={() => answer('reject')} disabled={busy} className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10">Don't</button>
-        </div>
-      ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {choices.map((c) => (
-            <button key={c} onClick={() => answer(c)} disabled={busy}
-              className="rounded-full border border-amber-300 bg-white px-3.5 py-1.5 text-sm font-medium text-zinc-700 hover:border-amber-500 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/40 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-amber-500/10">{c}</button>
-          ))}
-          <button onClick={() => setEditing(true)} disabled={busy} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">something else…</button>
-        </div>
-      )}
-      {w.paused ? (
-        <div className="mt-2 text-[11px] text-amber-600/80 dark:text-amber-400/70">⏸ it waited a while and paused itself — answering continues it from where it stopped</div>
-      ) : w.expiresAt ? (
-        <div className="mt-2 text-[11px] text-amber-600/80 dark:text-amber-400/70">⏳ falls back to the safe default {timeAgo(w.expiresAt).includes('ago') ? 'soon' : 'by ' + new Date(w.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-      ) : null}
+        {/* Every control on one height (h-9) and one type size, so the row reads as a set of
+            answers rather than a pile of differently-sized buttons. */}
+        {editing || (!choices.length && !isApprove) ? (
+          <div className="mt-3 flex gap-2">
+            <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) answer(text.trim()); }} autoFocus={editing}
+              placeholder={editing ? 'Your version…' : 'Type your answer…'}
+              className="h-9 min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-amber-500 dark:border-zinc-700 dark:bg-zinc-950" />
+            <button onClick={() => text.trim() && answer(text.trim())} disabled={busy || !text.trim()}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 text-sm font-semibold text-white hover:bg-amber-400 disabled:opacity-50">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Send
+            </button>
+          </div>
+        ) : isApprove ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={() => answer('approve')} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Approve</button>
+            <button onClick={() => { setEditing(true); setText(draft); }} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 px-3.5 text-sm font-medium hover:border-amber-400 dark:border-zinc-700"><Pencil className="h-4 w-4" />Edit first</button>
+            <button onClick={() => answer('reject')} disabled={busy} className="inline-flex h-9 items-center rounded-lg px-3.5 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10">Don't</button>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {choices.map((c) => (
+              <button key={c} onClick={() => answer(c)} disabled={busy}
+                className="inline-flex h-9 items-center rounded-lg border border-zinc-300 bg-white px-3.5 text-sm font-medium text-zinc-700 hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-amber-500/50 dark:hover:bg-amber-500/10">{c}</button>
+            ))}
+            <button onClick={() => setEditing(true)} disabled={busy} className="inline-flex h-9 items-center rounded-lg px-3 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">something else…</button>
+          </div>
+        )}
+        {w.paused ? (
+          <div className="mt-2.5 text-xs text-zinc-500 dark:text-zinc-400">It waited a while and paused itself — answering continues it from where it stopped.</div>
+        ) : w.expiresAt ? (
+          <div className="mt-2.5 text-xs text-zinc-500 dark:text-zinc-400">Falls back to the safe default {timeAgo(w.expiresAt).includes('ago') ? 'soon' : 'by ' + new Date(w.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.</div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -407,7 +421,7 @@ function ImportGithubModal({ onDone, onClose }: { onDone: (url?: string) => void
                     <span className="min-w-0">
                       <span className="block truncate font-medium">{a.name}</span>
                       <span className="block text-xs text-zinc-500">{a.description}</span>
-                      {a.tools?.length > 0 && <span className="mt-0.5 block truncate text-[11px] text-zinc-400">tools: {a.tools.join(', ')}</span>}
+                      {a.tools?.length > 0 && <span className="mt-0.5 block truncate text-xs text-zinc-400">tools: {a.tools.join(', ')}</span>}
                     </span>
                   </label>
                 ))}
@@ -424,12 +438,12 @@ function ImportGithubModal({ onDone, onClose }: { onDone: (url?: string) => void
                   <input type="checkbox" checked={installDeps} onChange={(e) => setInstallDeps(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
                   Install these on my server
                 </label>
-                <p className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/70">Only these exact items are installed — the repo's own install scripts are never run.</p>
+                <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/70">Only these exact items are installed — the repo's own install scripts are never run.</p>
               </div>
             ) : (
               <div className="rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:bg-zinc-800/60">Nothing extra to install — these agents run on your existing tools.</div>
             )}
-            {deps?.notes?.length > 0 && <div className="text-[11px] text-zinc-400">{deps.notes.map((n: string, i: number) => <div key={i}>ℹ️ {n}</div>)}</div>}
+            {deps?.notes?.length > 0 && <div className="text-xs text-zinc-400">{deps.notes.map((n: string, i: number) => <div key={i}>ℹ️ {n}</div>)}</div>}
             <button onClick={doImport} disabled={busy || !picked.size} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Import {picked.size} agent{picked.size === 1 ? '' : 's'}{hasDeps && installDeps ? ' + install the plan' : ''}
             </button>
@@ -680,17 +694,17 @@ function StarterCard({ s, onPick }: { s: Starter; onPick: (s: Starter) => void }
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg" style={{ background: s.color + '22' }}>{s.icon}</span>
         <span className="min-w-0">
           <span className="block truncate text-sm font-semibold">{s.name}</span>
-          <span className="block truncate text-[11px] text-zinc-500">{s.blurb}</span>
+          <span className="block truncate text-xs text-zinc-500">{s.blurb}</span>
         </span>
       </div>
       {s.examples?.length > 0 && (
         <div className="mt-2 space-y-0.5">
-          {s.examples.slice(0, 2).map((ex, i) => <div key={i} className="truncate text-[11px] italic text-zinc-400">{ex}</div>)}
+          {s.examples.slice(0, 2).map((ex, i) => <div key={i} className="truncate text-xs italic text-zinc-400">{ex}</div>)}
         </div>
       )}
       <div className="mt-2 flex flex-wrap gap-1">
-        {s.every && s.every !== 'manual' && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{s.every === 'day' ? `daily ${s.at}` : s.every === 'week' ? `Sundays ${s.at}` : s.every === 'weekday' ? `weekdays ${s.at}` : 'hourly'}</span>}
-        <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] capitalize text-zinc-500 dark:bg-zinc-800">{s.category}</span>
+        {s.every && s.every !== 'manual' && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">{s.every === 'day' ? `daily ${s.at}` : s.every === 'week' ? `Sundays ${s.at}` : s.every === 'weekday' ? `weekdays ${s.at}` : 'hourly'}</span>}
+        <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-xs capitalize text-zinc-500 dark:bg-zinc-800">{s.category}</span>
       </div>
     </button>
   );
@@ -723,6 +737,67 @@ function schedOf(ar: any): string {
   const t = j?.scheduleText ? String(j.scheduleText) : '';
   // "Manual only. Runs when you press Run." is not a schedule — saying it on a row is noise.
   return /manual only/i.test(t) ? '' : t;
+}
+
+/**
+ * An area with nothing inside it is an unfinished draft, not an agent (BEA-1564).
+ *
+ * `agent.controller.ts` creates the area first and writes the goal second, so any failure in
+ * between leaves a shell. It is safe to keep these out of the list precisely BECAUSE they are
+ * empty: there is no job, no run and no history in one, which is exactly what he found when he
+ * tapped one — *"nothing is there inside"*.
+ *
+ * Deliberately NOT time-based. A shell created ten seconds ago and one created last week are the
+ * same thing, and a clock here would make the list flicker as a draft aged past the threshold.
+ * The builder navigates straight into the new area, so an in-progress build never needs to be
+ * findable in this list.
+ */
+export function isDraftShell(ar: any): boolean {
+  return (ar?.jobCount || 0) === 0 && !(ar?.jobs || []).length;
+}
+
+/**
+ * THE MOST RECENT RUN, whatever happened in it (BEA-1564).
+ *
+ * The list used to reach for the last run that SUCCEEDED, which meant a failing agent wore the
+ * timestamp of its last good day and looked healthy. This takes the newest run of any status, so a
+ * failure is visible on the row it belongs to.
+ *
+ * Exported because the card view and the list must agree — the same bug in two renderers is this
+ * module's most repeated mistake (`CLAUDE.md`: "a rule with two call sites should be a function
+ * with one").
+ */
+export function latestRun(ar: any): { status: string; at: string } | undefined {
+  return (ar?.jobs || [])
+    .map((j: any) => j.lastRun)
+    .filter((r: any) => r?.at)
+    .sort((x: any, y: any) => new Date(y.at).getTime() - new Date(x.at).getTime())[0];
+}
+
+/** How a run's status reads on a row — one definition for every surface that shows one. */
+export const RUN_TONE: Record<string, { label: string; cls: string }> = {
+  done: { label: 'ok', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' },
+  failed: { label: 'failed', cls: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300' },
+  running: { label: 'running', cls: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300' },
+  awaiting_input: { label: 'needs you', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300' },
+  paused: { label: 'needs you', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300' },
+  cancelled: { label: 'stopped', cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' },
+};
+
+/**
+ * What this agent actually does, in one line (BEA-1564).
+ *
+ * The list showed the name and nothing else, so twelve rows of "GitHub top 5" / "Daily Email Agent"
+ * told him only what he already named them. The area's own description is the best line; failing
+ * that, the single job's name, which for a built agent is the goal it was built from — but never the
+ * area's own name echoed straight back.
+ */
+function whatItDoes(ar: any): string {
+  const d = String(ar?.description || '').trim();
+  if (d) return d;
+  const jobs = ar?.jobs || [];
+  const n = jobs.length === 1 ? String(jobs[0]?.name || '').trim() : '';
+  return n && n !== String(ar?.name || '').trim() ? n : '';
 }
 
 /** Is anything in this agent switched on? Off means nothing in it will fire on its own. */
@@ -919,8 +994,54 @@ export function Agents() {
   const agents = home?.agents || null;
   // Areas (BEA-1098): the home now shows agents-as-areas; jobs live inside each area's page.
   const [areasList, setAreasList] = useState<any[] | null>(null);
-  const loadAreas = useCallback(() => fetch('/api/agent/areas').then((r) => r.json()).then((d) => setAreasList(Array.isArray(d) ? d : [])).catch(() => setAreasList([])), []);
+  // Unfinished drafts, kept aside rather than deleted (BEA-1564) — see `isDraftShell`.
+  const [drafts, setDrafts] = useState<any[]>([]);
+  const [clearingDrafts, setClearingDrafts] = useState(false);
+  /**
+   * NO GHOST ROWS (BEA-1564). His words: *"Even after deleting an agent, it is showing in the list
+   * of agents, but when I click on it, nothing is there inside."*
+   *
+   * The shells are real. `builder/send-to-codex` creates the area BEFORE the goal is written, so a
+   * goal that fails — his AI budget ran out on 28 Aug — strands an area with no jobs in it; four of
+   * them were sitting in his list. `deleteAgent` never removes the area it emptied either.
+   *
+   * The split happens HERE, at the one place the data arrives, so the header count, the folder
+   * counts, the tab counts and the table can never disagree about how many agents he has. Nothing
+   * is deleted behind his back — the drafts are counted below the list and he taps to clear them.
+   */
+  const loadAreas = useCallback(() => fetch('/api/agent/areas')
+    .then((r) => r.json())
+    .then((d) => {
+      const all = Array.isArray(d) ? d : [];
+      setAreasList(all.filter((a: any) => !isDraftShell(a)));
+      setDrafts(all.filter(isDraftShell));
+    })
+    .catch(() => { setAreasList([]); setDrafts([]); }), []);
   useEffect(() => { loadAreas(); }, [loadAreas]);
+
+  /**
+   * Clear the unfinished drafts — only the ones just counted, one id at a time (BEA-1564).
+   *
+   * His standing rule is that the app deletes what he pointed at and nothing else, so this walks
+   * the exact `drafts` array the line above him was drawn from. It never asks the server for
+   * "everything empty", which could sweep up a shell created in the seconds since the page loaded.
+   */
+  async function clearDrafts() {
+    if (clearingDrafts || !drafts.length) return;
+    setClearingDrafts(true);
+    const ids = drafts.map((d: any) => d.id);
+    let gone = 0;
+    for (const id of ids) {
+      const r = await fetch(`/api/agent/areas/${id}`, { method: 'DELETE' }).catch(() => null);
+      if (r?.ok) gone++;
+    }
+    setClearingDrafts(false);
+    toast(gone === ids.length ? 'success' : 'error',
+      gone === ids.length
+        ? `Cleared ${gone} unfinished draft${gone === 1 ? '' : 's'}`
+        : `Cleared ${gone} of ${ids.length} — try the rest again`);
+    loadAreas();
+  }
 
   // ---- Folders (BEA-1380) ----
   const realFolderId = folderSel && folderSel !== 'unfiled' ? folderSel : null; // where a new agent lands
@@ -1146,12 +1267,15 @@ export function Agents() {
       {waiting.length > 0 && (
         <section className="space-y-2" data-testid="mc-waiting">
           <div className="flex items-baseline justify-between">
-            <h2 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400">
+            <h2 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400">
               <PauseCircle className="h-3.5 w-3.5" />Waiting on you
-              <span className="rounded-full bg-amber-100 px-1.5 text-[11px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{waiting.length}</span>
+              <span className="rounded-full bg-amber-100 px-1.5 text-xs font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{waiting.length}</span>
             </h2>
           </div>
-          <div className="grid gap-3 lg:grid-cols-2">
+          {/* Two abreast only when there are two (BEA-1564). A lone question in a half-width cell
+              left the other half empty beside the full-width strips below it, which read as a
+              layout that had not finished loading rather than as the page's most urgent item. */}
+          <div className={'grid gap-3 ' + (waiting.length > 1 ? 'lg:grid-cols-2' : '')}>
             {waiting.map((w) => (
               <WaitingCard key={w.waitpointId || w.runId} w={w} focus={!!focusId && (w.waitpointId === focusId || w.runId === focusId)} onAnswered={loadHome} />
             ))}
@@ -1162,7 +1286,7 @@ export function Agents() {
       {running.length > 0 && (
         <section className="space-y-2" data-testid="mc-running">
           <div className="flex items-baseline justify-between">
-            <h2 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-400">
+            <h2 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-400">
               <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" /></span>
               Running now
             </h2>
@@ -1182,8 +1306,8 @@ export function Agents() {
               that is the one case you want in front of you rather than behind a tap. */}
           <details open={landed.some((l) => l.status !== 'done')} className="group rounded-2xl border border-zinc-200 dark:border-zinc-800">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2">
-              <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">Landed today</h2>
-              <span className="text-[11px] text-zinc-400">
+              <h2 className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">Landed today</h2>
+              <span className="text-xs text-zinc-400">
                 {landed.length}
                 {landed.some((l) => l.status !== 'done') && <span className="ml-1 font-semibold text-rose-600 dark:text-rose-400">· {landed.filter((l) => l.status !== 'done').length} failed</span>}
               </span>
@@ -1293,7 +1417,7 @@ export function Agents() {
                             : 'border-b-2 border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
                       }
                     >
-                      {t.label}<span className="ml-1.5 text-[10px] font-bold text-zinc-400">{n}</span>
+                      {t.label}<span className="ml-1.5 text-xs font-bold text-zinc-400">{n}</span>
                     </button>
                   );
                 })}
@@ -1354,21 +1478,68 @@ export function Agents() {
                   // keyed on `search`, not `name`, so the search box matches the SAME text in both
                   // views — name, description and the names of the jobs inside. It sorts sensibly too,
                   // because that string starts with the name.
+                  /**
+                   * A LIST THAT CARRIES INFORMATION (BEA-1564). His words: *"The list view should
+                   * have a lot of information. It's not there."* He was right twice over — two of
+                   * the five columns said the same thing on nearly every row ("when you run it",
+                   * "1"), and the one column that mattered was actively wrong.
+                   *
+                   * Everything below is already in `GET /api/agent/areas`. No API change.
+                   */
                   { key: 'search', label: 'Agent', sortable: true, width: '38%', render: (ar: any) => (
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span aria-hidden className="shrink-0">{ar.icon || '\u{1F916}'}</span>
-                      <span className="min-w-0 truncate font-medium">{ar.name}</span>
-                      <span aria-hidden title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}>{areaKind(ar) === 'tools' ? '\u{1F527}' : '\u{1F50E}'}</span>
+                    <span className="flex min-w-0 items-start gap-2">
+                      <span aria-hidden className="shrink-0 leading-5">{ar.icon || '\u{1F916}'}</span>
+                      <span className="min-w-0">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="min-w-0 truncate font-semibold text-zinc-900 dark:text-zinc-100">{ar.name}</span>
+                          <span aria-hidden className="shrink-0" title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}>{areaKind(ar) === 'tools' ? '\u{1F527}' : '\u{1F50E}'}</span>
+                        </span>
+                        {/* What it actually does — the single most useful thing a list of agents can
+                            carry, and it was not shown at all. */}
+                        {whatItDoes(ar) && <span className="mt-0.5 block truncate text-xs font-normal text-zinc-500" title={whatItDoes(ar)}>{whatItDoes(ar)}</span>}
+                      </span>
                     </span>
                   ) },
-                  { key: 'lastAtNum', label: 'Last run', sortable: true, width: '14%', render: (ar: any) => {
-                    const done = (ar.jobs || []).map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((x: any, y: any) => new Date(y.at).getTime() - new Date(x.at).getTime())[0];
-                    return <span className="whitespace-nowrap text-zinc-500">{done ? timeAgo(done.at) : 'never'}</span>;
+                  /**
+                   * THE LAST RUN, INCLUDING WHEN IT FAILED (BEA-1564).
+                   *
+                   * This column used to filter to `status === 'done'`, so an agent whose last run
+                   * FAILED showed the timestamp of its last SUCCESS — or "never" if it had never
+                   * had one. His ESP32 agent failed at 03:00 and this column said "1d ago". A list
+                   * whose health column cannot show ill health is worse than no column.
+                   */
+                  { key: 'lastAtNum', label: 'Last run', sortable: true, width: '17%', render: (ar: any) => {
+                    const r = latestRun(ar);
+                    if (!r) return <span className="whitespace-nowrap text-zinc-400">never run</span>;
+                    const t = RUN_TONE[r.status] || RUN_TONE.done;
+                    return (
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className={'w-fit max-w-full truncate rounded px-1.5 py-0.5 text-xs font-medium ' + t.cls}>{t.label}</span>
+                        <span className="truncate text-xs text-zinc-400">{timeAgo(r.at)}</span>
+                      </span>
+                    );
                   } },
-                  { key: 'schedKey', label: 'When', width: '28%', render: (ar: any) => <span className="block truncate text-zinc-500" title={schedOf(ar) || 'when you run it'}>{schedOf(ar) || 'when you run it'}</span> },
-                  { key: 'jobsNum', label: 'Jobs', sortable: true, width: '9%', align: 'right' as const },
-                  { key: 'onKey', label: 'On', width: '11%', align: 'right' as const, render: (ar: any) => (
-                    <span className={'rounded-full px-2 py-0.5 text-[10px] font-semibold ' + (anyOn(ar)
+                  // Real schedules only. "when you run it" on ten of twelve rows is not information,
+                  // so a manual agent now says so once, quietly, and the eye skips it.
+                  { key: 'schedKey', label: 'Schedule', width: '18%', render: (ar: any) => {
+                    const s = schedOf(ar);
+                    return s
+                      ? <span className="block truncate text-zinc-600 dark:text-zinc-300" title={s}>{s}</span>
+                      : <span className="text-zinc-400">Manual</span>;
+                  } },
+                  // Jobs and tools together: "1 job" alone was constant, but the toolbox varies and
+                  // is the other half of "how big is this thing".
+                  { key: 'jobsNum', label: 'Contents', sortable: true, width: '15%', render: (ar: any) => {
+                    const jobs = ar.jobCount || 0;
+                    const tools = (ar.tools || []).length;
+                    return (
+                      <span className="block truncate text-xs text-zinc-500">
+                        {jobs} job{jobs === 1 ? '' : 's'}{tools ? ` · ${tools} tool${tools === 1 ? '' : 's'}` : ''}
+                      </span>
+                    );
+                  } },
+                  { key: 'onKey', label: 'On', width: '12%', align: 'right' as const, render: (ar: any) => (
+                    <span className={'rounded px-1.5 py-0.5 text-xs font-medium ' + (anyOn(ar)
                       ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
                       : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{anyOn(ar) ? 'on' : 'off'}</span>
                   ) },
@@ -1407,7 +1578,7 @@ export function Agents() {
                   const color = ar.color || '#818cf8';
                   const runningJob = ar.jobs.find((j: any) => j.lastRun?.status === 'running');
                   const waitingJob = waitingJobOf(ar);
-                  const lastDone = ar.jobs.map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
+                  const lastRun = latestRun(ar);
                   const isSel = selected.has(ar.id);
                   const selectMode = selected.size > 0;
                   return (
@@ -1433,14 +1604,14 @@ export function Agents() {
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: color + '22' }}>{ar.icon || '🤖'}</span>
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-1.5">
-                            <span className="min-w-0 truncate font-medium group-hover:text-emerald-600">{ar.name}</span>
+                            <span className="min-w-0 truncate text-sm font-semibold group-hover:text-emerald-600">{ar.name}</span>
                             {/* Which kind, on the tile itself (BEA-1506) — so the two are told apart
                                 without reaching for a tab. */}
                             <span
                               data-testid={`area-kind-${areaKind(ar)}`}
                               title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}
                               className={
-                                'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' +
+                                'shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ' +
                                 (areaKind(ar) === 'tools'
                                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
                                   : 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300')
@@ -1454,7 +1625,15 @@ export function Agents() {
                         <span className="font-medium">{ar.jobCount} job{ar.jobCount === 1 ? '' : 's'}</span>
                         {waitingJob && <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><PauseCircle className="h-3 w-3" />needs you</span>}
                         {runningJob && <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"><Loader2 className="h-3 w-3 animate-spin" />running</span>}
-                        {!runningJob && !waitingJob && lastDone && <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" />ran {timeAgo(lastDone.at)}</span>}
+                        {/* The newest run of ANY status (BEA-1564) — this used to reach for the last
+                            SUCCESS, so a card whose agent failed this morning wore a green tick and
+                            the time of its last good day. Same bug as the list column, same fix, and
+                            both now call `latestRun`. */}
+                        {!runningJob && !waitingJob && lastRun && (
+                          lastRun.status === 'done'
+                            ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" />ran {timeAgo(lastRun.at)}</span>
+                            : <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 font-medium text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">{(RUN_TONE[lastRun.status] || RUN_TONE.failed).label} {timeAgo(lastRun.at)}</span>
+                        )}
                         {/* WHEN IT RUNS, AND WHETHER IT IS ON (BEA-1535). The approved mockup reads
                             "ran 3h ago · every day at 22:00" with an on/off pill — the two facts that
                             let you judge a row without opening it. Both were already on every job in
@@ -1462,7 +1641,7 @@ export function Agents() {
                         {schedOf(ar) && <span className="inline-flex items-center gap-1 text-zinc-400"><CalendarClock className="h-3 w-3" />{schedOf(ar)}</span>}
                         <span className="ml-auto flex items-center gap-1.5">
                           {(ar.tools || []).length > 0 && <span>🔧 {ar.tools.length}</span>}
-                          <span className={'rounded-full px-2 py-0.5 text-[10px] font-semibold ' + (anyOn(ar)
+                          <span className={'rounded-full px-2 py-0.5 text-xs font-semibold ' + (anyOn(ar)
                             ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
                             : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{anyOn(ar) ? 'on' : 'off'}</span>
                         </span>
@@ -1478,6 +1657,21 @@ export function Agents() {
               {narrowed && (
                 <div className="pt-1 text-center">
                   <button onClick={() => { setQ(''); setAgentFilter('all'); setKindTab('all'); }} className="text-xs font-medium text-emerald-600 hover:underline">Clear search and filters</button>
+                </div>
+              )}
+              {/* The unfinished drafts, counted rather than hidden (BEA-1564). They are out of the
+                  list because they are empty, but saying nothing at all would be its own kind of
+                  lie — and deleting them unasked breaks his standing rule that the app never
+                  removes anything he did not point at. So: one quiet line, and he taps. */}
+              {drafts.length > 0 && !narrowed && (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-xs text-zinc-400">
+                  <span>{drafts.length} unfinished draft{drafts.length === 1 ? '' : 's'} — a build that stopped before the agent was made.</span>
+                  <button
+                    data-testid="clear-drafts"
+                    disabled={clearingDrafts}
+                    onClick={clearDrafts}
+                    className="font-medium text-zinc-500 underline underline-offset-2 hover:text-rose-600 disabled:opacity-50 dark:hover:text-rose-400"
+                  >{clearingDrafts ? 'Clearing…' : drafts.length === 1 ? 'Clear it' : 'Clear them'}</button>
                 </div>
               )}
               </>

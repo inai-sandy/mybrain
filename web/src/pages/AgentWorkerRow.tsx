@@ -227,7 +227,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
     }
   }
 
-  if (!w) return <p className="text-[11px] text-zinc-400">Checking this job’s worker…</p>;
+  if (!w) return <p className="text-xs text-zinc-400">Checking this job’s worker…</p>;
   if (!w.compilable) return <p className="text-sm text-zinc-500 dark:text-zinc-400" data-testid="worker-not-compilable">{w.reason || 'This job runs on the engine, so there is nothing to compile into a worker.'}</p>;
 
   const repairs = (w.builds || []).filter((b) => b.origin === 'repair');
@@ -242,16 +242,16 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
           <>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-sm font-semibold" data-testid="worker-version">Worker v{w.worker.version}</span>
-              <span className="text-[11px] text-zinc-500">built {dt(w.worker.finishedAt || w.worker.startedAt)}</span>
+              <span className="text-xs text-zinc-500">built {dt(w.worker.finishedAt || w.worker.startedAt)}</span>
               {w.worker.tests ? (
-                <span className={'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ' + (w.worker.tests.failed ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300')} data-testid="worker-tests">
+                <span className={'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ' + (w.worker.tests.failed ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300')} data-testid="worker-tests">
                   <CheckCircle2 className="h-3 w-3" />{w.worker.tests.passed} passed{w.worker.tests.failed ? ` · ${w.worker.tests.failed} failed` : ''}
                 </span>
               ) : (
-                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-800">no test record</span>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">no test record</span>
               )}
             </div>
-            <p className="mt-1 text-[11px] text-zinc-400">Codex compiled this from the plan above and it only went live because its own tests passed against saved answers.</p>
+            <p className="mt-1 text-xs text-zinc-400">Codex compiled this from the plan above and it only went live because its own tests passed against saved answers.</p>
           </>
         ) : (
           <p className="text-sm text-zinc-600 dark:text-zinc-300" data-testid="worker-none">No worker has been built for this job yet. It runs the old way — the plan runner — exactly as it always has.</p>
@@ -260,7 +260,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
 
       {/* 2 · stale */}
       {w.stale && (
-        <p className="flex items-start gap-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400" data-testid="worker-stale">
+        <p className="flex items-start gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400" data-testid="worker-stale">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>Your plan changed since v{w.worker?.version} was built, so this worker is out of date. Rebuild it to use it again — until then this job runs the old way.</span>
         </p>
@@ -272,7 +272,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
               was never told about" — it still runs correctly, it is just missing what came later.
               Blue, not amber: nothing is wrong, something is available. */}
       {w.partsBoxOld && !w.stale && (
-        <p className="flex items-start gap-1.5 text-[11px] font-medium text-sky-700 dark:text-sky-300" data-testid="worker-parts-box">
+        <p className="flex items-start gap-1.5 text-xs font-medium text-sky-700 dark:text-sky-300" data-testid="worker-parts-box">
           <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{w.partsBoxNote}</span>
         </p>
@@ -282,7 +282,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
       <label className="flex cursor-pointer items-center justify-between gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
         <span className="min-w-0">
           <span className="block text-sm font-semibold">Run this job on its worker</span>
-          <span className="block text-[11px] text-zinc-400">
+          <span className="block text-xs text-zinc-400">
             {w.useWorker
               ? 'On. Turn it off to run it the old way again — that takes effect on the next run and needs no rebuild.'
               : 'Off — it runs the old way, on the plan runner. Nothing ever switches this on by itself.'}
@@ -291,9 +291,9 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
         <input type="checkbox" data-testid="worker-use" checked={!!w.useWorker} disabled={busy || (!w.worker && !w.useWorker)}
           onChange={(e) => setUseWorker(e.target.checked)} className="h-5 w-9 shrink-0 accent-emerald-600 disabled:opacity-40" />
       </label>
-      {!w.worker && !w.useWorker && <p className="-mt-1 text-[11px] text-zinc-400">Build a worker first, then this switch turns on.</p>}
+      {!w.worker && !w.useWorker && <p className="-mt-1 text-xs text-zinc-400">Build a worker first, then this switch turns on.</p>}
       {w.useWorker && (
-        <p className={'text-[11px] ' + (w.road?.use ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')} data-testid="worker-road">
+        <p className={'text-xs ' + (w.road?.use ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')} data-testid="worker-road">
           {w.road?.use ? `Next run: on worker v${w.road.version}.` : w.road?.say || 'Next run: the old way.'}
         </p>
       )}
@@ -304,18 +304,18 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
           <h3 className="text-sm font-semibold">What this worker must produce</h3>
           <ul className="mt-1.5 space-y-1" data-testid="worker-contract">
             {contractWords.map((line, i) => (
-              <li key={i} className="flex gap-2 text-[13px] text-zinc-600 dark:text-zinc-300"><span className="text-emerald-600 dark:text-emerald-400">✓</span><span>{line}</span></li>
+              <li key={i} className="flex gap-2 text-sm text-zinc-600 dark:text-zinc-300"><span className="text-emerald-600 dark:text-emerald-400">✓</span><span>{line}</span></li>
             ))}
           </ul>
-          <p className="mt-1 text-[11px] text-zinc-400">Checked before anything is written. A run that does not pass fails out loud and writes nothing.</p>
+          <p className="mt-1 text-xs text-zinc-400">Checked before anything is written. A run that does not pass fails out loud and writes nothing.</p>
         </div>
       )}
 
       {/* 5 · a repair the promotion guard held back for you (BEA-1393) */}
       {w.held && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10" data-testid="worker-held">
-          <p className="text-[13px] font-medium text-amber-900 dark:text-amber-100">A repair (v{w.held.version}) passed its tests but changes what this job returns, so it was NOT put live.</p>
-          {w.held.error && <p className="mt-1 text-[11px] text-amber-800/80 dark:text-amber-200/70">{w.held.error}</p>}
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-100">A repair (v{w.held.version}) passed its tests but changes what this job returns, so it was NOT put live.</p>
+          {w.held.error && <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/70">{w.held.error}</p>}
           <div className="mt-2 flex flex-wrap gap-2">
             <button disabled={busy} onClick={() => decide(w.held!.id, true)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">Put it live</button>
             <button disabled={busy} onClick={() => decide(w.held!.id, false)} className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-amber-300 hover:bg-amber-100 disabled:opacity-50 dark:bg-zinc-800 dark:ring-amber-500/30 dark:hover:bg-zinc-700">Leave it alone</button>
@@ -327,12 +327,12 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
       <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
         <h3 className="text-sm font-semibold">What the last run cost</h3>
         {w.lastRun ? (
-          <p className="mt-1 text-[13px] text-zinc-600 dark:text-zinc-300" data-testid="worker-last-cost">
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300" data-testid="worker-last-cost">
             {dt(w.lastRun.startedAt)} · {w.lastRun.status} · {costLine(w.lastRun.cost)}
             {w.lastRun.runKind === 'worker' ? ' · on its worker' : w.lastRun.runKind === 'plan' ? ' · the old way' : ''}
           </p>
         ) : (
-          <p className="mt-1 text-[11px] text-zinc-400">It has not run yet.</p>
+          <p className="mt-1 text-xs text-zinc-400">It has not run yet.</p>
         )}
       </div>
 
@@ -342,21 +342,21 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
           <h3 className="text-sm font-semibold">Builds and repairs <span className="font-normal text-zinc-400">({w.builds.length}{repairs.length ? `, ${repairs.length} repair${repairs.length === 1 ? '' : 's'}` : ''})</span></h3>
           <ul className="mt-1.5 space-y-1.5" data-testid="worker-history">
             {shown.map((b) => (
-              <li key={b.id} className="flex items-start gap-2 text-[12px] text-zinc-600 dark:text-zinc-300">
+              <li key={b.id} className="flex items-start gap-2 text-xs text-zinc-600 dark:text-zinc-300">
                 <span className="mt-0.5 shrink-0">{b.origin === 'repair' ? <Wrench className="h-3.5 w-3.5 text-amber-500" /> : <Hammer className="h-3.5 w-3.5 text-zinc-400" />}</span>
                 <span className="min-w-0">
                   <span className="font-medium">v{b.version || '—'} {b.origin === 'repair' ? 'repair' : b.origin}</span>
                   {' · '}{b.status}
                   {b.tests ? ` · ${b.tests.passed} passed${b.tests.failed ? `, ${b.tests.failed} failed` : ''}` : ''}
                   {' · '}{dt(b.finishedAt || b.startedAt)}
-                  {b.error && <span className="block text-[11px] text-zinc-400">{b.error}</span>}
-                  {b.cause && b.origin === 'repair' && <span className="block text-[11px] text-zinc-400">what broke: {b.cause}</span>}
+                  {b.error && <span className="block text-xs text-zinc-400">{b.error}</span>}
+                  {b.cause && b.origin === 'repair' && <span className="block text-xs text-zinc-400">what broke: {b.cause}</span>}
                   {/* WHEN THE GOAL CHANGED (BEA-1509). Editing a goal rebuilds the program, so the
                       build history is also the goal's history — every build stamps the goal it was
                       compiled from (`planHash`). Marking where that stamp changed answers "did it get
                       worse because I changed what I asked for, or on its own?" with no new table. */}
                   {goalChangedAt.has(b.id) && (
-                    <span className="mt-0.5 block text-[11px] font-medium text-sky-600 dark:text-sky-400">&#9998; built from a changed goal</span>
+                    <span className="mt-0.5 block text-xs font-medium text-sky-600 dark:text-sky-400">&#9998; built from a changed goal</span>
                   )}
                   {/* PUT AN OLDER VERSION BACK (BEA-1506). The route existed (BEA-1494) and nothing
                       called it, so restoring a working version meant a terminal. Offered only on a
@@ -368,7 +368,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
                       disabled={busy}
                       data-testid={`rollback-v${b.version}`}
                       onClick={() => rollback(b.version!)}
-                      className="mt-1 rounded-lg border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-emerald-300"
+                      className="mt-1 rounded-lg border border-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-emerald-300"
                     >Put v{b.version} back</button>
                   )}
                 </span>
@@ -376,7 +376,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
             ))}
           </ul>
           {w.builds.length > 3 && (
-            <button type="button" onClick={() => setShowAll((p) => !p)} className="mt-1.5 text-[11px] font-medium text-emerald-600 hover:underline dark:text-emerald-400">
+            <button type="button" onClick={() => setShowAll((p) => !p)} className="mt-1.5 text-xs font-medium text-emerald-600 hover:underline dark:text-emerald-400">
               {showAll ? 'Show fewer' : `Show all ${w.builds.length}`}
             </button>
           )}
@@ -390,7 +390,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
           {(busy || w.building) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Hammer className="h-4 w-4" />}
           {w.building ? 'Building…' : w.worker ? 'Rebuild' : 'Build a worker'}
         </button>
-        {w.repairing && <span className="text-[11px] text-amber-600 dark:text-amber-400">A repair is running…</span>}
+        {w.repairing && <span className="text-xs text-amber-600 dark:text-amber-400">A repair is running…</span>}
         <button
           type="button"
           data-testid="worker-terminal-toggle"
@@ -404,7 +404,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
       {/* THE TERMINAL (BEA-1545) — what Codex is saying while it writes the worker. */}
       {showTerm && (
         <div className="mt-2" data-testid="worker-terminal">
-          <div className="flex items-center gap-2 rounded-t-lg border border-b-0 border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex items-center gap-2 rounded-t-lg border border-b-0 border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
             {term?.running
               ? <><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" /></span><span className="font-medium text-emerald-700 dark:text-emerald-300">Building…</span></>
               : <span className="font-medium">{term?.status === 'promoted' ? 'Finished — the worker is live' : term?.status === 'failed' ? 'Finished — it did not work' : 'Last build'}</span>}
@@ -415,7 +415,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
           </div>
           <pre
             ref={termRef}
-            className="max-h-64 overflow-auto rounded-b-lg border border-zinc-200 bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-300 dark:border-zinc-800"
+            className="max-h-64 overflow-auto rounded-b-lg border border-zinc-200 bg-zinc-950 px-3 py-2 font-mono text-xs leading-relaxed text-zinc-300 dark:border-zinc-800"
           >{term?.log?.trim()
             ? term.log
             : term?.running
@@ -423,7 +423,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
               : 'Nothing yet — this fills in while a build runs, and stays as the record afterwards.'}</pre>
         </div>
       )}
-      <p className="text-[11px] text-zinc-400">A build takes a few minutes: Codex compiles the plan above into a small program and it only goes live if its own tests pass. Nothing changes while it builds, and a build that fails leaves this job exactly where it is.</p>
+      <p className="text-xs text-zinc-400">A build takes a few minutes: Codex compiles the plan above into a small program and it only goes live if its own tests pass. Nothing changes while it builds, and a build that fails leaves this job exactly where it is.</p>
     </div>
   );
 }
