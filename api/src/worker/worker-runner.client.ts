@@ -116,7 +116,12 @@ export class WorkerRunnerClient {
    * `{type:'result'}`. `waiting` means the worker parked on a question and exited; the run is
    * already `awaiting_input` by then, and nothing here has to do anything about it.
    */
-  async run(input: { jobId: string; runId: string; token: string; seed?: { now: number; random: number }; kit?: string; timeoutMs?: number }): Promise<RunnerRunResult> {
+  /**
+   * `version` runs ONE named build instead of the live one (BEA-1570) — what the pre-flight check
+   * needs, because the version it just built is by definition not the one `current` points at yet.
+   * Omitted, the runner behaves exactly as before.
+   */
+  async run(input: { jobId: string; runId: string; token: string; seed?: { now: number; random: number }; kit?: string; timeoutMs?: number; version?: number }): Promise<RunnerRunResult> {
     try {
       const r = await fetch(`${RUNNER}/run`, {
         method: 'POST',

@@ -109,6 +109,30 @@ function currentDirOf(jobDir) {
   return real;
 }
 
+/**
+ * ONE NAMED VERSION, proved to be inside the job's own folder (BEA-1570).
+ *
+ * The pre-flight check has to run the version it has just BUILT, which by definition is not the one
+ * `current` points at — promotion is what moves that symlink, and it happens after the check. Asking
+ * for "whatever is live" meant a first build had nothing to run at all ("No worker is installed for
+ * this job yet.", which killed every new agent) and a rebuild quietly ran the PREVIOUS version, so
+ * the check had never once exercised the worker it was judging.
+ *
+ * The version comes off a request, so it is proved the same way `currentDirOf` proves the symlink:
+ * digits only, then `realpath` compared against the job's own folder. Both guards are needed — the
+ * pattern stops `../` and the realpath stops a planted symlink pointing out of the folder.
+ */
+function versionDirOf(jobDir, version) {
+  if (!/^\d{1,9}$/.test(String(version))) return null;
+  const dir = path.join(jobDir, `v${Number(version)}`);
+  let real;
+  try { real = fs.realpathSync(dir); } catch (e) { return null; }
+  let base;
+  try { base = fs.realpathSync(jobDir); } catch (e) { return null; }
+  if (!real.startsWith(base + path.sep)) return null;
+  return real;
+}
+
 function readMeta(dir) {
   try { return JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch (e) { return null; }
 }
@@ -427,8 +451,21 @@ async function handleRun(req, res) {
     return;
   }
 
-  const dir = currentDirOf(jobDir);
-  if (!dir) { finish({ status: 'failed', rows: null, error: 'No worker is installed for this job yet.', notStarted: true }); return; }
+  // An explicit `version` runs THAT program; without one this is exactly as it always was — the
+  // live worker via `current` — so nothing that already works changes (BEA-1570).
+  const wantVersion = body.version == null || body.version === '' ? null : body.version;
+  const dir = wantVersion === null ? currentDirOf(jobDir) : versionDirOf(jobDir, wantVersion);
+  if (!dir) {
+    finish({
+      status: 'failed',
+      rows: null,
+      error: wantVersion === null
+        ? 'No worker is installed for this job yet.'
+        : `This job has no version v${String(wantVersion).slice(0, 12)} to run.`,
+      notStarted: true,
+    });
+    return;
+  }
   if (!fs.existsSync(path.join(dir, 'worker.mjs'))) { finish({ status: 'failed', rows: null, error: `The installed worker has no worker.mjs (${path.basename(dir)}).`, notStarted: true }); return; }
 
   // The worker folders outlive the app image: `deploy.sh` rolls back by re-tagging `mybrain-app:prev`
