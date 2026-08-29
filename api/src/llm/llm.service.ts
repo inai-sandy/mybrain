@@ -18,6 +18,12 @@ const LLM_TIMEOUT_MAX_MS = 300_000;
 
 /** Per-call knobs a caller may pass; everything is optional and the defaults are the old behaviour. */
 export type LlmCallOpts = { timeoutMs?: number };
+
+/**
+ * Extra tries a run-side helper call gets when the model answers nothing (BEA-1582). Small on
+ * purpose — this covers a blip, not an outage. 1 first try + 2 retries = at most 3 calls.
+ */
+export const HELPER_RETRIES = 2;
 const CODEX_RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
 const GEMINI_RUNNER = process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767';
 const CLAUDE_RUNNER = process.env.CLAUDE_RUNNER_URL || 'http://172.18.0.1:8768';
@@ -171,6 +177,32 @@ export class LlmService {
    * screen said.
    */
   static readonly FOLLOW_ENGINE: LlmConfig = { provider: 'engine', model: 'engine' };
+
+  /**
+   * Wait before each helper retry (BEA-1582). The same shape as BEA-1496's BACKOFF_MS — short
+   * enough that a run does not stall, long enough to clear a blip. Assignable on purpose so a spec
+   * can zero it, and ALREADY zero under Jest (JEST_WORKER_ID): the suite must never sleep on a
+   * scripted blank (the brief's own rule).
+   */
+  static HELPER_RETRY_BACKOFF_MS: number[] = process.env.JEST_WORKER_ID ? [0, 0] : [1200, 3500];
+
+  /**
+   * Helpers where a PERSON is sitting in a chat waiting on the reply — the two chat builders and
+   * their kin (BEA-1582). These fail FAST: a 5-second retry dance in a chat is worse than an honest
+   * "say it again", and every one of these already tells the owner what to do next in its own words
+   * (CHAT_EDIT_WORDS, the builder's budget lines). Decided HERE, in one place, never per caller —
+   * a caller must not grow its own retry or its own exemption (`NO_PRIVATE_CLOCK_RULE`).
+   */
+  static readonly INTERACTIVE_HELPERS: ReadonlySet<string> = new Set([
+    'chat-edit', // editing a job by chat — he is watching the thread
+    'agent-builder', // the thinking builder's design turns
+    'agent-goal', // the goal card he approves, written while he waits
+    'draft', // the builder form's draft turn
+    'draft-check',
+    'ui-spec',
+    'sync-words', // the copyable prompt, re-written under his eyes after a canvas edit
+    'suggest-evals', // a button in the builder UI
+  ]);
 
   static readonly HELPERS: Record<string, LlmConfig | null> = {
     'chat-edit': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }, // BEA-1094
@@ -348,10 +380,47 @@ export class LlmService {
   async completeHelper(key: string, prompt: string, maxTokens = 400, label = 'other', opts: LlmCallOpts = {}): Promise<string | null> {
     const cfg = await this.helperModel(key);
     if (cfg) {
-      const { text } = await this.completeWithModel(cfg, prompt, maxTokens, label, opts);
-      return text || null;
+      // A MODEL HICCUP IS RETRIED LIKE A VENDOR HICCUP (BEA-1582).
+      //
+      // 2026-08-29, live: the Daily Email Agent's run died on "the worker-think model returned
+      // nothing" — one transient blank at OpenRouter, which answered the same call fine minutes
+      // later. BEA-1496 already decided this class for vendors: a blip is not a failed run, and it
+      // is handled at the ONE call site, never in each program. This is the model's one call site,
+      // so the retry lives here.
+      //
+      // The SAME model every try — never a cheaper fallback (the owner's rule), and BEA-1248's
+      // verdict stands untouched: a helper whose model still answers nothing returns null, never
+      // the general model. Every failure `completeWith()` can meet — an empty answer, 429, 5xx,
+      // the network — is swallowed there and surfaces HERE as a blank, so blank IS the retry
+      // condition. A TokenBudgetError still throws straight through: a budget stop is a real
+      // answer, and retrying it would be asking the same "no" three times.
+      const tries = 1 + this.retriesFor(key, cfg);
+      let text: string | null = null;
+      for (let attempt = 0; attempt < tries; attempt++) {
+        if (attempt > 0) {
+          // Said out loud, the BEA-1496 pattern: "it worked, eventually" is a different fact from
+          // "it worked", and a silent retry would hide a provider that is degrading.
+          this.log.warn(`↻ the ${key} model answered nothing — trying again (${attempt} of ${HELPER_RETRIES})`);
+          await new Promise((r) => setTimeout(r, LlmService.HELPER_RETRY_BACKOFF_MS[attempt - 1] ?? 0));
+        }
+        text = (await this.completeWithModel(cfg, prompt, maxTokens, label, opts)).text || null;
+        if (text && text.trim()) return text;
+      }
+      return null;
     }
     return this.complete(prompt, maxTokens, label, opts);
+  }
+
+  /**
+   * How many EXTRA tries this helper call gets (BEA-1582). Zero while a person is waiting on the
+   * reply (the INTERACTIVE_HELPERS set above), and zero on a flat-rate engine turn — the engine
+   * road has its own chain, budget and messages (BEA-1243), and a retry here would multiply engine
+   * turns behind its back. Everything else — the run-side helpers — gets the small retry.
+   */
+  private retriesFor(key: string, cfg: LlmConfig): number {
+    if (LlmService.INTERACTIVE_HELPERS.has(key)) return 0;
+    if (isFlatRate(cfg.provider)) return 0;
+    return HELPER_RETRIES;
   }
 
   /** Single-shot completion via the app's default provider+model. Returns text, or null if unavailable. */

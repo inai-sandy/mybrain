@@ -13,7 +13,9 @@
     {
       "id": "BEA-1581",
       "title": "plumbing failures phone home (opsAlert seam, Telegram today)",
-      "status": "pending"
+      "status": "done",
+      "sha": "ebeb4ec",
+      "note": "ops-alert seam, 9 detection points, dedupe per class+agent+day, Telegram transport swappable at boot"
     },
     {
       "id": "BEA-1582",

@@ -3,6 +3,7 @@ import { RunJournalService } from './run-journal.service';
 import { WorkerBuildService } from './worker-build.service';
 import { COUNTED, WorkerRepairService } from './worker-repair.service';
 import { MAX_ATTEMPTS } from './repair';
+import { customerWords, plumbingClassOf } from '../agent/failure-words';
 import { SampleFixture, makeWorld, spawnKit } from './worker-harness.testing';
 
 /**
@@ -473,5 +474,48 @@ describe('self-heal: two tries, and then it stops (BEA-1393)', () => {
     expect(w.runner.builds).toHaveLength(0);
     expect(queued.status).toBe('failed');
     expect(w.prisma.agents).toHaveLength(0); // it was stopped once; it is not paused twice
+  });
+});
+
+/**
+ * A MODEL BLANK REPAIRS NOTHING (BEA-1582).
+ *
+ * 2026-08-29, live: one transient blank at OpenRouter ("the worker-think model returned nothing")
+ * failed the Daily Email Agent's run AND spent a real Codex session repairing a worker that was
+ * never broken — a promotion (v10) with no parity baseline, all for weather. The retry against the
+ * blink lives in `completeHelper` (the other half of BEA-1582); this half locks the repair loop
+ * out: a provider outage is not a crash in the worker's own code, and BEA-1580's classifier is the
+ * one that decides — never a second list here.
+ */
+describe('a model blank is not a defect to repair (BEA-1582)', () => {
+  const MODEL_BLANK = 'the worker-think model returned nothing';
+
+  it('a run that finally failed because the model answered nothing queues NO repair', async () => {
+    const w = await setUp();
+    const runId = await failedRun(w.world);
+    expect(await w.repairs.onRunFailed(runId, { agentId: 'ag1', error: MODEL_BLANK, runKind: 'worker' })).toBeNull();
+    expect(w.prisma.builds.filter((b: any) => b.status === 'queued')).toHaveLength(0);
+    // …and no Codex was asked anything, ever.
+    expect(w.runner.builds).toHaveLength(0);
+  });
+
+  it('the ONE classifier made that call, and the same class carries the calm customer words', () => {
+    // The sentence the kit really writes (kit.js: `the ${helper} model returned nothing`) is
+    // plumbing-class — so the run's failure reads calm on the screen while the honest sentence
+    // stays stored on the row, and BEA-1581's ops alert fires on exactly this id for free.
+    expect(plumbingClassOf(MODEL_BLANK)).toBe('model-blank');
+    expect(plumbingClassOf('the shaping model could not be reached — fetch failed')).toBe('model-blank');
+    expect(customerWords(MODEL_BLANK)).toBe('The AI could not be reached just now — nothing was lost; it will work on the next run. It has been noted.');
+  });
+
+  it('a real crash still queues a repair exactly as before — only the model blank is exempt', async () => {
+    const w = await setUp();
+    const runId = await failedRun(w.world);
+    // A plumbing-class sentence too ('worker-crash') — but a crash in the worker's own program IS
+    // something a repair can fix, so it must keep queueing. The exemption is model-blank alone.
+    await w.repairs.onRunFailed(runId, { agentId: 'ag1', error: 'worker exited with code 1', runKind: 'worker' });
+    const queued = w.prisma.builds.filter((b: any) => b.status === 'queued');
+    expect(queued).toHaveLength(1);
+    expect(queued[0].origin).toBe('repair');
   });
 });
