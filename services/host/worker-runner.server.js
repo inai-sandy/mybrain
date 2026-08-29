@@ -798,6 +798,26 @@ async function handleBuild(req, res) {
         log.push('no kit in the request and no WORKER_KIT_DIR — this build has no parts box');
       }
     }
+    /**
+     * THE FOLDER DESCRIBES ITSELF AS SOON AS IT EXISTS (BEA-1570).
+     *
+     * `meta.json` used to be written only by `/promote`, which made it the second half of the same
+     * chicken-and-egg as the `current` symlink: the pre-flight check runs BEFORE promotion, so it
+     * met a folder with no `meta.json`, could not read its kit version, and refused to start it —
+     * *"has no readable meta.json, so its kit version is unknown"*. A first build could still never
+     * go live, just one step further along than before.
+     *
+     * The kit is pinned into the folder right above, so the version already KNOWS its kit here.
+     * Writing it now is simply telling the truth earlier. `/promote` still merges whatever the app
+     * sends, so nothing it recorded is lost — this only fills in what was missing.
+     */
+    if (!fs.existsSync(path.join(dir, 'meta.json'))) {
+      try {
+        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+          jobId, version, kit: String(body.kit || KIT_VERSION), builtAt: new Date().toISOString(), promoted: false,
+        }, null, 2));
+      } catch (e) { log.push(`could not write meta.json: ${String((e && e.message) || e)}`); }
+    }
     fs.writeFileSync(path.join(dir, 'BRIEF.md'), brief);
 
     const args = ['exec', '--json', '--skip-git-repo-check', '--color', 'never', '-s', 'workspace-write', '-C', dir];
