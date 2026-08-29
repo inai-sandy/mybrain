@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { normaliseToolArgs, toolsFor } from '../social/tool-args';
 import { RunLockService } from './run-lock.service';
 import { customerWords } from './failure-words';
+import { opsAlertIfPlumbing } from '../push/ops-alert';
 
 /** The shape of a mid-task question the agent can ask. */
 export type WaitKind = 'choice' | 'free_text' | 'approve_edit_reject' | 'form';
@@ -194,13 +195,16 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // Only runs with no way to advance are failed:
     //   'running' + no sessionId        → mid-turn when the process died
     //   'awaiting_input' + no sessionId → an old in-memory wait whose poll loop died
-    const orphans = await this.prisma.agentRun.findMany({ where: { status: { in: ['running', 'awaiting_input'] }, sessionId: null }, select: { id: true, status: true, stepLog: true, runKind: true } });
+    const orphans = await this.prisma.agentRun.findMany({ where: { status: { in: ['running', 'awaiting_input'] }, sessionId: null }, select: { id: true, agentId: true, status: true, stepLog: true, runKind: true } });
     if (!orphans.length) return 0;
     const now = new Date();
     for (const o of orphans) {
       const msg = o.status === 'awaiting_input'
         ? 'This run was waiting for your answer when the engine restarted — please run it again.'
         : 'Interrupted by an engine restart — please run it again.';
+      // An orphaned run means OUR restart/deploy killed it mid-flight — the app-restart plumbing
+      // class — so it phones home (BEA-1581). The classifier decides, same rule as every site.
+      opsAlertIfPlumbing(msg, { agentId: o.agentId, runId: o.id });
       const log = this.parse(o.stepLog, [] as any[]);
       log.push({ label: 'Interrupted by a restart', status: 'failed', detail: msg, at: now.toISOString() });
       await this.prisma.waitpoint.updateMany({ where: { runId: o.id, status: 'pending' }, data: { status: 'cancelled' } }).catch(() => undefined);

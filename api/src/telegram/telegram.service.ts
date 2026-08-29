@@ -13,6 +13,7 @@ import { VoiceService } from '../voice/voice.service';
 import { AgentService } from '../agent/agent.service';
 import { clampTitle } from '../common/clamp-title';
 import { setOwnerAlertTelegram } from '../contacts/owner-alert';
+import { setOpsAlertTransport } from '../push/ops-alert';
 
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
@@ -182,6 +183,19 @@ export class TelegramService implements OnModuleInit {
     return r?.ok ? { sent: true } : { sent: false, why: r?.description || 'Telegram did not accept the message' };
   }
 
+  /**
+   * A plumbing-class failure phoned home (BEA-1581) — the ops transport registered at boot via
+   * `setOpsAlertTransport` (push/ops-alert.ts). The text arrives pre-formed (instance id, class,
+   * agent/run id, the honest internal sentence); this only carries it. On myemo the control plane
+   * swaps this transport out without touching a single call site.
+   */
+  async sendOps(text: string): Promise<{ sent: boolean; why?: string }> {
+    const owner = await this.ownerChatId();
+    if (!owner) return { sent: false, why: 'no Telegram chat is linked in Settings' };
+    const r = await this.send(owner, this.esc(String(text).slice(0, 1500)));
+    return r?.ok ? { sent: true } : { sent: false, why: r?.description || 'Telegram did not accept the message' };
+  }
+
   private agentBtnLabel(o: any): string {
     const s = typeof o === 'string' ? o : o?.label || o?.text || o?.value || JSON.stringify(o);
     return String(s).slice(0, 60);
@@ -194,6 +208,8 @@ export class TelegramService implements OnModuleInit {
     // The refused-by-Meta fallback road (BEA-1379): owner-alert.ts is plain functions, so handing
     // ourselves over here creates no module cycle — PushModule/ContactsModule never import Telegram.
     setOwnerAlertTelegram(this);
+    // …and the ops road (BEA-1581): plumbing failures phone home on the same pattern.
+    setOpsAlertTransport(this);
     // If a token is already configured, make sure the webhook + command menu are registered.
     if (await this.token()) this.setup().catch((e) => this.log.warn(`setup on boot failed: ${e?.message}`));
     // Outbound nudges: morning dump, evening story, task reminders, mid-day motivation, nightly summary.

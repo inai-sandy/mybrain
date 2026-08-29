@@ -35,6 +35,9 @@ const PLUMBING_FROM_THE_AUDIT: Array<[string, string]> = [
   ['The worker stopped without saying why.', 'worker-crash'],
   ['the worker exited with code 1', 'worker-crash'],
   ['The app stopped listening, so the worker was stopped.', 'app-restart'],
+  // The boot reconciler's own words for the SAME event (BEA-1581) — orphans swept are our restart.
+  ['Interrupted by an engine restart — please run it again.', 'app-restart'],
+  ['This run was waiting for your answer when the engine restarted — please run it again.', 'app-restart'],
   ['The worker runner cannot use its workers folder, so nothing was started — EACCES on /srv/mybrain-workers.', 'runner-root-unusable'],
   // 2026-08-29 17:36 live: a transient OpenRouter blank — the run self-repaired minutes later.
   ['the worker-think model returned nothing', 'model-blank'],

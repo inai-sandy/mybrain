@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
 import { plumbingClassOf } from '../agent/failure-words';
 import { isJobBusy } from '../agent/run-lock.service';
+import { opsAlert, opsAlertIfPlumbing } from '../push/ops-alert';
 import { PrismaService } from '../prisma/prisma.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 
@@ -182,6 +183,8 @@ export class WorkerDispatchService implements OnModuleInit {
       // only mean somebody else took it over — which is not a road problem, and the plan runner would
       // hit the same wall. Say it plainly and let the ordinary road refuse it the ordinary way.
       if (isJobBusy(e)) return { fallback: 'Another run of this job is holding it, so its worker was not started.' };
+      // A plumbing-class mint failure phones home (BEA-1581) — the classifier decides, never a list.
+      opsAlertIfPlumbing(String(e?.message || e), { agentId, runId });
       return { fallback: `The worker could not be started (${String(e?.message || e).slice(0, 160)}).` };
     }
 
@@ -218,9 +221,15 @@ export class WorkerDispatchService implements OnModuleInit {
       // only NAMES the class here, which is the hook BEA-1581's alert reads the log by.
       const cls = plumbingClassOf(why);
       this.log.warn(`run ${runId}: worker road unavailable — ${why}${cls ? ` [plumbing:${cls}]` : ''}`);
+      // The run carried on the old way, but a plumbing-class reason (runner unreachable, kit
+      // refused, broken install) is OURS to hear about before a customer writes in (BEA-1581).
+      if (cls) void opsAlert({ klass: cls, agentId, runId, message: why }).catch(() => undefined);
       return { fallback: `Ran it the old way for this run — ${why}.` };
     }
-    await this.agent.finishRun(runId, { status: 'failed', error: r.error || 'The worker stopped without saying why.' }).catch(() => undefined);
+    const failedWhy = r.error || 'The worker stopped without saying why.';
+    // A worker that ran and died of OUR plumbing (worker-crash, app-restart…) phones home too.
+    opsAlertIfPlumbing(failedWhy, { agentId, runId });
+    await this.agent.finishRun(runId, { status: 'failed', error: failedWhy }).catch(() => undefined);
     return {};
   }
 

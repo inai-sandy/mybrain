@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
 import { RunLockService } from '../agent/run-lock.service';
 import { AlertsService } from '../push/alerts.service';
+import { opsAlertIfPlumbing } from '../push/ops-alert';
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { planFromAgent, sourceActionId } from '../social/plan';
 import { contractFromPlan } from './contract';
@@ -312,6 +313,9 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
           // no attempt was used, and the cause is simply tried again on a later tick — the same
           // reading as an app lock that could not be claimed.
           this.log.log(`job ${agentId}: the runner refused before Codex started (${done.why}) — the repair stays queued and no attempt was used`);
+          // A repair that could not even start on OUR plumbing phones home (BEA-1581). This path
+          // re-queues and re-runs every tick — the seam's per-day dedupe holds it to one alert.
+          opsAlertIfPlumbing(done.why, { agentId });
           return { outcome: 'busy', why: done.why };
         }
         tried.push(done.why || 'it did not say why');
@@ -325,6 +329,8 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
       return { outcome: 'stopped', why: tried[tried.length - 1] };
     } catch (e: any) {
       this.log.error(`repair of ${agentId} broke: ${e?.message || e}`);
+      // The repair itself breaking on a plumbing-class reason is ours to hear about (BEA-1581).
+      opsAlertIfPlumbing(String(e?.message || e), { agentId });
       await this.finish(queuedRow.id, { status: 'failed', error: `The repair itself could not run: ${String(e?.message || e).slice(0, 300)}` });
       return { outcome: 'skipped', why: String(e?.message || e) };
     } finally {
