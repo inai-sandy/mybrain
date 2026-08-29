@@ -166,7 +166,9 @@ describe('the agents home offers both views', () => {
   // the title, like Documents' row), rather than DataTable's whole-row handler.
   it('a list row opens the agent', () => {
     const s = src();
-    expect(s).toMatch(/<AgentListRow key=\{ar\.id\} ar=\{ar\} onOpen=/);
+    // Structural, not formatting: this pinned the one-line JSX and broke the moment BEA-1576 added
+    // the row menu and prettier wrapped the call across lines.
+    expect(s).toMatch(/<AgentListRow[\s\S]{0,200}onOpen=/);
     expect(s).toMatch(/<button onClick=\{onOpen\}/);
   });
 });
