@@ -252,6 +252,9 @@ async function status() {
     engine: 'worker-runner',
     kit: KIT_VERSION,
     api: API,
+    // The runner's own body limits, DECLARED so the app can trim to fit before sending (BEA-1577).
+    // These numbers live here and only here — the app reads them off /status, never restates them.
+    limits: { fileBytes: MAX_FILE_BYTES, filesBytes: MAX_FILES_BYTES },
     workers,
     running: [...live.values()].map((r) => ({ runId: r.runId, kind: r.kind, startedAt: r.startedAt })),
   };
@@ -718,24 +721,29 @@ function holdOpen(res) {
 }
 
 async function handleBuild(req, res) {
+  // EVERY refusal below happens BEFORE any Codex session exists, and says so: `notStarted: true`,
+  // the same fact `/run` already carries for its own pre-spawn refusals (BEA-1394). The repair loop
+  // counts attempts against a cause, and a refusal in which Codex was never asked anything must not
+  // use one up — the app reads this field instead of parsing error prose (BEA-1577).
+  const refuse = (code, error) => { res.statusCode = code; res.end(JSON.stringify({ ok: false, error, notStarted: true })); };
   let body = {};
   try { body = JSON.parse(await readBody(req)); }
   catch (e) {
     const msg = String((e && e.message) || '');
-    if (/too large/.test(msg)) { res.statusCode = 413; try { res.end(JSON.stringify({ ok: false, error: 'request body too large (8MB max)' }), () => req.destroy()); } catch (e2) { try { req.destroy(); } catch (e3) {} } return; }
+    if (/too large/.test(msg)) { res.statusCode = 413; try { res.end(JSON.stringify({ ok: false, error: 'request body too large (8MB max)', notStarted: true }), () => req.destroy()); } catch (e2) { try { req.destroy(); } catch (e3) {} } return; }
     if (/socket|aborted|ECONN|hang up/i.test(msg)) return;
-    res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad body' })); return;
+    refuse(400, 'bad body'); return;
   }
   const jobId = String(body.jobId || '');
   const brief = String(body.brief || '');
   const jobDir = jobDirOf(jobId);
-  if (!jobDir) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad or missing jobId' })); return; }
-  if (!brief.trim()) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'no brief' })); return; }
-  if (live.has(jobId)) { res.statusCode = 409; res.end(JSON.stringify({ ok: false, error: `This job is busy here (${live.get(jobId).kind}) — try again when it settles.` })); return; }
+  if (!jobDir) { refuse(400, 'bad or missing jobId'); return; }
+  if (!brief.trim()) { refuse(400, 'no brief'); return; }
+  if (live.has(jobId)) { refuse(409, `This job is busy here (${live.get(jobId).kind}) — try again when it settles.`); return; }
   // Checked before the folder is made: a bad file map must not leave a junk version behind.
   let files = [];
   try { files = checkFiles(body.files); }
-  catch (e) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) })); return; }
+  catch (e) { refuse(400, String((e && e.message) || e)); return; }
 
   // A repair starts from the version that broke (BEA-1393): its worker.mjs and its tests are copied
   // into the new folder first, and the app's files land on top. Only a version of THIS job may be
@@ -747,9 +755,9 @@ async function handleBuild(req, res) {
   // because it is caller text that becomes an environment variable.
   const buildKey = String(body.buildKey || '').replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 64);
   const copyFrom = body.copyFrom === undefined || body.copyFrom === null ? null : Math.floor(Number(body.copyFrom));
-  if (copyFrom !== null && (!Number.isFinite(copyFrom) || copyFrom < 1)) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad copyFrom' })); return; }
+  if (copyFrom !== null && (!Number.isFinite(copyFrom) || copyFrom < 1)) { refuse(400, 'bad copyFrom'); return; }
   const fromDir = copyFrom === null ? null : path.join(jobDir, `v${copyFrom}`);
-  if (fromDir && !fs.existsSync(path.join(fromDir, 'worker.mjs'))) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: `v${copyFrom} has no worker.mjs — there is nothing to start from.` })); return; }
+  if (fromDir && !fs.existsSync(path.join(fromDir, 'worker.mjs'))) { refuse(400, `v${copyFrom} has no worker.mjs — there is nothing to start from.`); return; }
 
   const version = nextVersion(jobDir);
   const dir = path.join(jobDir, `v${version}`);
@@ -763,10 +771,11 @@ async function handleBuild(req, res) {
   };
   live.set(jobId, liveEntry);
   try {
+    // These three are still BEFORE any Codex session, so they carry `notStarted` too (BEA-1577).
     try { fs.mkdirSync(dir, { recursive: true }); }
     catch (e) {
       res.statusCode = 500;
-      res.end(JSON.stringify({ ok: false, version, error: `could not create ${dir}: ${String((e && e.message) || e)}` }));
+      res.end(JSON.stringify({ ok: false, version, error: `could not create ${dir}: ${String((e && e.message) || e)}`, notStarted: true }));
       return;
     }
     if (fromDir) {
@@ -775,7 +784,7 @@ async function handleBuild(req, res) {
         log.push(`started from v${copyFrom}`);
       } catch (e) {
         res.statusCode = 500;
-        res.end(JSON.stringify({ ok: false, version, error: `could not copy v${copyFrom}: ${String((e && e.message) || e)}` }));
+        res.end(JSON.stringify({ ok: false, version, error: `could not copy v${copyFrom}: ${String((e && e.message) || e)}`, notStarted: true }));
         return;
       }
     }
@@ -785,7 +794,7 @@ async function handleBuild(req, res) {
       if (written.length) log.push(`wrote ${written.length} file${written.length === 1 ? '' : 's'} from the app: ${written.slice(0, 12).join(', ')}${written.length > 12 ? `, +${written.length - 12} more` : ''}`);
     } catch (e) {
       res.statusCode = 500;
-      res.end(JSON.stringify({ ok: false, version, error: `could not write the build's files: ${String((e && e.message) || e)}` }));
+      res.end(JSON.stringify({ ok: false, version, error: `could not write the build's files: ${String((e && e.message) || e)}`, notStarted: true }));
       return;
     }
     // A kit copy on the host is the fallback for a hand-driven build; the app normally sends its own,
@@ -1146,14 +1155,16 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
     if (req.method === 'GET' && req.url === '/status') { res.end(JSON.stringify(await status())); return; }
-    if (!TOKEN) { res.statusCode = 401; res.end(JSON.stringify({ error: NO_TOKEN_REASON })); return; }
-    if (!allowed(req)) { res.statusCode = 401; res.end(JSON.stringify({ error: 'this runner needs its shared token' })); return; }
+    // A closed door refused this request before anything at all ran — `notStarted`, so the app can
+    // tell it from work that ran and failed (BEA-1577; `/run` says the same inside its own stream).
+    if (!TOKEN) { res.statusCode = 401; res.end(JSON.stringify({ error: NO_TOKEN_REASON, notStarted: true })); return; }
+    if (!allowed(req)) { res.statusCode = 401; res.end(JSON.stringify({ error: 'this runner needs its shared token', notStarted: true })); return; }
     if (req.method === 'POST' && req.url === '/run') { await handleRun(req, res); return; }
     // Everything below writes to the workers root, so a root it cannot use is a plain refusal with
     // the reason in it — never a half-made version folder, and never a silent success (BEA-1401).
     if (req.method === 'POST' && ['/build', '/promote', '/parity', '/remove'].indexOf(String(req.url)) >= 0) {
       const root = rootState();
-      if (!root.ok) { res.statusCode = 503; res.end(JSON.stringify({ ok: false, error: `The worker runner cannot use its workers folder — ${root.reason}.` })); return; }
+      if (!root.ok) { res.statusCode = 503; res.end(JSON.stringify({ ok: false, error: `The worker runner cannot use its workers folder — ${root.reason}.`, notStarted: true })); return; }
     }
     if (req.method === 'POST' && req.url === '/build') { await handleBuild(req, res); return; }
     if (req.method === 'POST' && req.url === '/promote') { await handlePromote(req, res); return; }

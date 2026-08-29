@@ -762,4 +762,38 @@ exit 0
     const firstLines = await ndjson(await first);
     expect(firstLines[firstLines.length - 1].line).toMatchObject({ status: 'done', rows: 1 });
   });
+
+  // A repair attempt only counts when Codex actually tried (BEA-1577): every way `/build` refuses
+  // BEFORE a Codex session exists says `notStarted`, and the body limits the refusals are judged by
+  // are DECLARED on /status — the numbers live in this runner and nowhere else.
+  it('declares its body limits on /status, and refuses an over-cap /build file with notStarted', async () => {
+    const s = await (await fetch(`${runner.url}/status`)).json();
+    expect(s.limits).toMatchObject({ fileBytes: expect.any(Number), filesBytes: expect.any(Number) });
+    expect(s.limits.fileBytes).toBeGreaterThan(0);
+    expect(s.limits.filesBytes).toBeGreaterThanOrEqual(s.limits.fileBytes);
+
+    // One byte over the runner's OWN declared cap — the test never restates the number.
+    const res = await fetch(`${runner.url}/build`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ jobId: 'capped', brief: 'fix it', files: { 'samples/failing.json': 'x'.repeat(s.limits.fileBytes + 1) } }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, notStarted: true, error: expect.stringMatching(/bytes/) });
+    expect(fs.existsSync(path.join(root, 'capped'))).toBe(false); // and no junk folder was left behind
+  });
+
+  it('a /build while the job is busy is refused with notStarted — tellable from a Codex attempt that ran and failed', async () => {
+    install(root, 'buildbusy', `
+      await new Promise((r) => setTimeout(r, 2500));
+      process.stdout.write(JSON.stringify({ type: 'result', status: 'done', rows: 1 }) + '\\n');
+    `);
+    const running = run({ jobId: 'buildbusy', runId: 'run-bb', token: 'tb', timeoutMs: 6000 });
+    await new Promise((r) => setTimeout(r, 400));
+    const res = await fetch(`${runner.url}/build`, { method: 'POST', headers: headers(), body: JSON.stringify({ jobId: 'buildbusy', brief: 'fix it' }) });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, notStarted: true, error: expect.stringMatching(/busy here/) });
+    const lines = await ndjson(await running);
+    expect(lines[lines.length - 1].line).toMatchObject({ status: 'done', rows: 1 }); // the run was untouched
+  });
 });
