@@ -1369,7 +1369,33 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // answering a paused run revives it too). If it already finished (e.g. the Codex turn hit its
     // cap and failed while the question was open), answering must NOT flip a terminal run back to
     // 'running' with no driver — that leaves it stuck forever. (BEA-794)
-    await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: { in: ['awaiting_input', 'paused'] } }, data: { status: 'running' } });
+    const revived = await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: { in: ['awaiting_input', 'paused'] } }, data: { status: 'running' } });
+    /**
+     * THE ANSWER IS ACTIVITY, AND IT RESTARTS THE STALL CLOCK (BEA-1565).
+     *
+     * His words: *"and recent run also failed"*. It had not. Run `9f5a84d7` fetched 242 Reddit posts
+     * over 36 pages, wrote and verified a 100-row sheet and sent his WhatsApp — all by 19:58:05 —
+     * then asked whether the message arrived and parked. He answered at 03:00:39, seven hours later,
+     * and the run was dead within seconds.
+     *
+     * The mechanism is this line. The stall watchdog measures `lastActivityAt()` = the newest step's
+     * timestamp, which was still 19:58. Flipping the row back to `running` handed the sweeper a run
+     * that was, by its only measure, seven hours stale — so the very next tick failed it for
+     * "nothing was written for 20 minutes". The hours it spent legitimately waiting for him counted
+     * against it, and the worker was never even given the chance to respawn.
+     *
+     * Writing a step here fixes both halves at once: it restarts the clock (a step IS the clock),
+     * and it tells him on the run screen that his answer landed and the work is going again. The
+     * step is only written when this answer actually revived a parked run — answering something
+     * already finished must stay the no-op BEA-794 made it.
+     */
+    if (revived.count > 0) {
+      await this.appendStep(wp.runId, {
+        label: 'Your answer arrived — carrying on',
+        status: 'done',
+        detail: typeof answer === 'string' && answer.trim() ? `You said: ${answer.trim().slice(0, 200)}` : undefined,
+      }).catch(() => undefined);
+    }
     // Whatever else this answer settles — today, a can't-undo call a worker parked on (BEA-1392).
     // Never throws: an answer that was applied must stay applied.
     try {
