@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { CHOOSE_TOOLS_RULE } from './prompt-rules';
-import { SANDBOX_RULE } from '../worker/brief-rules';
+import { SANDBOX_RULE, TRIAL_RULE } from '../worker/brief-rules';
 
 /**
  * A rule lives in ONE place (BEA-1544).
@@ -55,6 +55,14 @@ describe('a shared prompt rule is written once', () => {
     expect(files.map((f) => path.basename(f))).toEqual(['brief-rules.ts']);
   });
 
+  // The check's contract (BEA-1578). A build that meets the trial blind gropes toward how the check
+  // behaves — one worker asked for a held sheet's link 1,610 times. The rule that ends that must
+  // never fork into two wordings.
+  it('the trial rule exists in exactly one file', () => {
+    const files = filesContaining(TRIAL_RULE);
+    expect(files.map((f) => path.basename(f))).toEqual(['brief-rules.ts']);
+  });
+
   // Both prompts must actually USE it — a shared constant nobody imports is worse than a copy, because
   // it looks deduplicated and isn't.
   it('both prompts that need the tool rule import it', () => {
@@ -68,6 +76,13 @@ describe('a shared prompt rule is written once', () => {
     for (const f of ['worker/build-brief.ts', 'worker/repair.ts']) {
       const s = fs.readFileSync(path.join(SRC, f), 'utf8');
       expect(s).toContain('SANDBOX_RULE');
+    }
+  });
+
+  it('both briefs that need the trial rule import it', () => {
+    for (const f of ['worker/build-brief.ts', 'worker/repair.ts']) {
+      const s = fs.readFileSync(path.join(SRC, f), 'utf8');
+      expect(s).toContain('TRIAL_RULE');
     }
   });
 });

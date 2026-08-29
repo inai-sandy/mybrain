@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { RANK_AT_THE_SOURCE_RULE, FETCH_EVERYTHING_RULE, NO_PRIVATE_CLOCK_RULE } from '../agent/prompt-rules';
-import { SANDBOX_RULE } from './brief-rules';
+import { SANDBOX_RULE, TRIAL_RULE } from './brief-rules';
 import { AgentPlan, PlanBlock, sourceLabel, sourceActionId } from '../social/plan';
 import { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { cardText } from '../agent/thinking-builder';
@@ -537,6 +537,7 @@ moving a field, and it is the one that lets this worker repair itself later with
 5. **The call order never depends on what came back** — the same calls, in the same order, whatever the answers hold.
 6. **The BEA-1377 shape fails loudly**: a source that answers \`{ ok:true, empty:true, unrecognised:true, why:'fetched 90 answers but recognised 0 rows — this is a My Brain bug, not the vendor', table:null }\` must end the run **failed**, with that reason on it, and **no \`output\` call at all**. Assert the \`output\` route was never called.
 7. **Every source genuinely empty still finishes \`done\`**: sources answering \`{ ok:true, empty:true, unrecognised:false, table:null }\` write nothing, message nobody, and the run finishes \`done\` with 0 rows. Assert \`finish\` was called with \`status:'done'\`.
+8. ${TRIAL_RULE}
 
 Use \`node:test\` and \`node:assert/strict\`. Keep the tests readable: an owner may open them.
 

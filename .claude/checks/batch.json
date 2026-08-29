@@ -13,7 +13,9 @@
     {
       "id": "BEA-1577",
       "title": "a repair attempt only counts when Codex actually tried",
-      "status": "pending"
+      "status": "done",
+      "sha": "a110056",
+      "note": "notStarted on /build refusals; queued-not-counted; evidence trimmed to the runner-declared caps; the 08-28 incident is a locking test"
     },
     {
       "id": "BEA-1578",

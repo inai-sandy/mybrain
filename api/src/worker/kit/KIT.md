@@ -186,6 +186,13 @@ The sheet writer is the app's: it creates the sheet, or appends under the sheet'
 skips rows the sheet already has. Never write the same rows twice "to be safe" — a replayed call
 returns the recorded answer, and a second write with different arguments really would write twice.
 
+**In a check (the one trial run a new agent gets before going live) the app holds these three
+instead of doing them.** `writeSheet` and `writeDocument` then answer `{ trial: true, url: null,
+id: null }`, and `notify` answers `{ trial: true }`. That answer is the step succeeding — the write
+was held on purpose, so there is no url and no id, and there never will be one during the check. Do
+not verify anything about it, do not ask anyone for the link, carry on to `finish`. A real run
+never answers `trial: true`.
+
 ## The contract — what "it worked" means
 
 ```js

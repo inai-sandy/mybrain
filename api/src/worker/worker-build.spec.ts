@@ -2,6 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { planFromAgent } from '../social/plan';
 import { buildRequest, planHashOf, sampleFileName, stable } from './build-brief';
+import { TRIAL_RULE } from './brief-rules';
 import { WorkerBuildService } from './worker-build.service';
 
 /**
@@ -176,6 +177,20 @@ describe('the build brief — what Codex is handed', () => {
     // and the two tests that ARE this piece's acceptance
     expect(req.brief).toContain('The BEA-1377 shape fails loudly');
     expect(req.brief).toContain('Every source genuinely empty still finishes');
+  });
+
+  /**
+   * The check's contract lands in the rendered brief (BEA-1578) — inside "What the tests must
+   * prove", so writing the trial-shape test is named work, not a hope. A build that meets the
+   * trial blind gropes toward how the check behaves: one real worker's v3 asked for a held
+   * sheet's link 1,610 times and then failed the check. The words come from the ONE constant in
+   * brief-rules.ts (one-rule-one-home.spec guards that), so they are asserted by import here,
+   * never quoted.
+   */
+  it('carries the trial rule, from the shared constant, among the tests Codex must write', () => {
+    const req = buildRequest(inputs());
+    const tests = req.brief.slice(req.brief.indexOf('## What the tests must prove'));
+    expect(tests).toContain(TRIAL_RULE);
   });
 
   it('says out loud when a source has no saved answer yet, instead of inventing one quietly', () => {

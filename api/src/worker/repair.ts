@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { SANDBOX_RULE } from './brief-rules';
+import { SANDBOX_RULE, TRIAL_RULE } from './brief-rules';
 import { WorkerContract, contractInWords } from './contract';
 
 /**
@@ -416,6 +416,8 @@ ${contractInWords(inp.contract).map((l) => `  - ${l}`).join('\n')}
   instead of going live. Fixing the plumbing is your job; changing his answer is not.
 - Read \`kit/KIT.md\` again if you touch anything to do with the call order — it still has to be the
   same calls in the same order whatever the answers hold.
+- ${TRIAL_RULE} Keep that test passing — a repair that starts asking the check for a link
+  is not a repair.
 
 ## The plan the worker runs (unchanged)
 
