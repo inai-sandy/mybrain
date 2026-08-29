@@ -169,6 +169,62 @@ function LandedRow({ l }: { l: LandedItem }) {
   );
 }
 
+/**
+ * ONE AGENT, AS A ROW (BEA-1564, second pass).
+ *
+ * His words: *"this design has to be list view, not table view … check the link
+ * https://mybrain.1site.ai/documents?folder=others … it has to follow the same design language."*
+ *
+ * So this is `/documents`' own list row, wearing an agent's facts: the tinted icon square, the
+ * title that turns emerald on hover, one dot-separated meta line, and the row itself a bordered
+ * card in a `space-y-2` stack. A column-headed table was the wrong instrument twice over — it made
+ * this page look unlike the rest of the app, and it forced every agent's facts into the same five
+ * boxes whether or not it had anything to put in them.
+ *
+ * The information from the first pass all survives the change: what it does, the last run's status
+ * AND time, the real schedule, jobs and tools, on or off.
+ */
+function AgentListRow({ ar, onOpen }: { ar: any; onOpen: () => void }) {
+  const r = latestRun(ar);
+  const tone = r ? (RUN_TONE[r.status] || RUN_TONE.done) : null;
+  const sched = schedOf(ar);
+  const jobs = ar.jobCount || 0;
+  const tools = (ar.tools || []).length;
+  const does = whatItDoes(ar);
+  const on = anyOn(ar);
+  // The facts that vary, in one line. A manual agent says so once and the eye moves past it.
+  const facts = [
+    r ? timeAgo(r.at) : 'never run',
+    sched || 'Manual',
+    `${jobs} job${jobs === 1 ? '' : 's'}`,
+    tools ? `${tools} tool${tools === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <div className="group flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 transition-all hover:border-emerald-500/40 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="mt-0.5 shrink-0 rounded-lg p-1.5 text-sm leading-none" style={{ backgroundColor: (ar.color || '#818cf8') + '1f' }}>
+        <span aria-hidden>{ar.icon || '\u{1F916}'}</span>
+      </div>
+      <button onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <div className="flex items-center gap-1.5">
+          <h3 className="min-w-0 truncate font-semibold leading-tight group-hover:text-emerald-600">{ar.name}</h3>
+          <span aria-hidden className="shrink-0 text-xs" title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}>{areaKind(ar) === 'tools' ? '\u{1F527}' : '\u{1F50E}'}</span>
+        </div>
+        <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-zinc-400">
+          {/* The status of the LAST run, whatever happened in it — the whole point of the first
+              pass, and it survives the change of instrument. */}
+          {tone && <span className={'shrink-0 rounded px-1.5 py-0.5 font-medium ' + tone.cls}>{tone.label}</span>}
+          <span className="truncate">{facts}</span>
+        </p>
+        {does && <p className="mt-1 truncate text-xs text-zinc-500">{does}</p>}
+      </button>
+      <span className={'mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ' + (on
+        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+        : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{on ? 'on' : 'off'}</span>
+    </div>
+  );
+}
+
 function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; onAnswered: () => void }) {
   const nav = useNavigate();
   const toast = useToast();
@@ -1474,76 +1530,20 @@ export function Agents() {
               ) : (
               <>
               <DataTable<any>
-                columns={view === 'list' ? [
-                  // keyed on `search`, not `name`, so the search box matches the SAME text in both
-                  // views — name, description and the names of the jobs inside. It sorts sensibly too,
-                  // because that string starts with the name.
-                  /**
-                   * A LIST THAT CARRIES INFORMATION (BEA-1564). His words: *"The list view should
-                   * have a lot of information. It's not there."* He was right twice over — two of
-                   * the five columns said the same thing on nearly every row ("when you run it",
-                   * "1"), and the one column that mattered was actively wrong.
-                   *
-                   * Everything below is already in `GET /api/agent/areas`. No API change.
-                   */
-                  { key: 'search', label: 'Agent', sortable: true, width: '38%', render: (ar: any) => (
-                    <span className="flex min-w-0 items-start gap-2">
-                      <span aria-hidden className="shrink-0 leading-5">{ar.icon || '\u{1F916}'}</span>
-                      <span className="min-w-0">
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="min-w-0 truncate font-semibold text-zinc-900 dark:text-zinc-100">{ar.name}</span>
-                          <span aria-hidden className="shrink-0" title={areaKind(ar) === 'tools' ? 'Acts in your accounts' : 'Reads the web and writes it up'}>{areaKind(ar) === 'tools' ? '\u{1F527}' : '\u{1F50E}'}</span>
-                        </span>
-                        {/* What it actually does — the single most useful thing a list of agents can
-                            carry, and it was not shown at all. */}
-                        {whatItDoes(ar) && <span className="mt-0.5 block truncate text-xs font-normal text-zinc-500" title={whatItDoes(ar)}>{whatItDoes(ar)}</span>}
-                      </span>
-                    </span>
-                  ) },
-                  /**
-                   * THE LAST RUN, INCLUDING WHEN IT FAILED (BEA-1564).
-                   *
-                   * This column used to filter to `status === 'done'`, so an agent whose last run
-                   * FAILED showed the timestamp of its last SUCCESS — or "never" if it had never
-                   * had one. His ESP32 agent failed at 03:00 and this column said "1d ago". A list
-                   * whose health column cannot show ill health is worse than no column.
-                   */
-                  { key: 'lastAtNum', label: 'Last run', sortable: true, width: '17%', render: (ar: any) => {
-                    const r = latestRun(ar);
-                    if (!r) return <span className="whitespace-nowrap text-zinc-400">never run</span>;
-                    const t = RUN_TONE[r.status] || RUN_TONE.done;
-                    return (
-                      <span className="flex min-w-0 flex-col gap-0.5">
-                        <span className={'w-fit max-w-full truncate rounded px-1.5 py-0.5 text-xs font-medium ' + t.cls}>{t.label}</span>
-                        <span className="truncate text-xs text-zinc-400">{timeAgo(r.at)}</span>
-                      </span>
-                    );
-                  } },
-                  // Real schedules only. "when you run it" on ten of twelve rows is not information,
-                  // so a manual agent now says so once, quietly, and the eye skips it.
-                  { key: 'schedKey', label: 'Schedule', width: '18%', render: (ar: any) => {
-                    const s = schedOf(ar);
-                    return s
-                      ? <span className="block truncate text-zinc-600 dark:text-zinc-300" title={s}>{s}</span>
-                      : <span className="text-zinc-400">Manual</span>;
-                  } },
-                  // Jobs and tools together: "1 job" alone was constant, but the toolbox varies and
-                  // is the other half of "how big is this thing".
-                  { key: 'jobsNum', label: 'Contents', sortable: true, width: '15%', render: (ar: any) => {
-                    const jobs = ar.jobCount || 0;
-                    const tools = (ar.tools || []).length;
-                    return (
-                      <span className="block truncate text-xs text-zinc-500">
-                        {jobs} job{jobs === 1 ? '' : 's'}{tools ? ` · ${tools} tool${tools === 1 ? '' : 's'}` : ''}
-                      </span>
-                    );
-                  } },
-                  { key: 'onKey', label: 'On', width: '12%', align: 'right' as const, render: (ar: any) => (
-                    <span className={'rounded px-1.5 py-0.5 text-xs font-medium ' + (anyOn(ar)
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                      : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{anyOn(ar) ? 'on' : 'off'}</span>
-                  ) },
-                ] : [{ key: 'search', label: 'Agent' }]}
+                /**
+                 * ONE COLUMN, BOTH VIEWS (BEA-1564, second pass).
+                 *
+                 * His words: *"this design has to be list view, not table view … it has to follow
+                 * the same design language"*, pointing at `/documents`. Documents draws its list as
+                 * a stack of bordered rows through `renderCard` + `space-y-2` — never an HTML table
+                 * with column headers — and Agents now does the same, so the two pages read as one
+                 * product.
+                 *
+                 * The `search` column stays because `DataTable` matches the search box against its
+                 * COLUMNS: this one string is name + description + the names of the jobs inside,
+                 * which is exactly what this screen has always searched.
+                 */
+                columns={[{ key: 'search', label: 'Agent' }]}
                 rows={rows}
                 filters={[
                   { key: 'kind', label: 'Kind', options: [], match: (row: any, v: string) => (v === 'needs' ? areaNeedsYou(row) : areaKind(row) === v) },
@@ -1564,17 +1564,19 @@ export function Agents() {
                   sort: agentSort === 'name' ? { key: 'nameKey', dir: 1 } : agentSort === 'jobs' ? { key: 'jobsNum', dir: -1 } : { key: 'lastAtNum', dir: -1 },
                 }}
                 pageSize={PER}
-                cardsOnly={view === 'cards'}
-                tableLayoutFixed
-                onRowClick={view === 'list' ? ((ar: any) => nav(`/agent/a/${ar.jobCount === 1 && ar.jobs?.[0]?.id ? ar.jobs[0].id : ar.id}`)) : undefined}
+                // Both views are drawn by `renderCard` now — the list is a STACK OF ROWS, exactly
+                // as `/documents` draws its list, never an HTML table (BEA-1564, second pass).
+                cardsOnly
                 // `[&>*]:min-w-0` below is load-bearing (BEA-1531). DataTable wraps each card in a
                 // div of its own, so THAT wrapper is the grid item, not the card — and a grid item
                 // defaults to `min-width:auto` and refuses to shrink. Without it the conversion
                 // silently reintroduced BEA-1525: agent names cut mid-word at 390. The ship gate
                 // caught it and rolled the deploy back.
-                gridClassName="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0"
+                gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0'}
                 emptyText={`Nothing matches${needle ? ` \u201C${q}\u201D` : ' that filter'}${folderSel ? ' in this folder' : ''}.`}
-                renderCard={(ar: any) => {
+                renderCard={view === 'list'
+                  ? ((ar: any) => <AgentListRow key={ar.id} ar={ar} onOpen={() => nav(`/agent/a/${ar.jobCount === 1 && ar.jobs?.[0]?.id ? ar.jobs[0].id : ar.id}`)} />)
+                  : ((ar: any) => {
                   const color = ar.color || '#818cf8';
                   const runningJob = ar.jobs.find((j: any) => j.lastRun?.status === 'running');
                   const waitingJob = waitingJobOf(ar);
@@ -1649,7 +1651,7 @@ export function Agents() {
                     </button>
                     </div>
                   );
-                }}
+                })}
               />
               {/* The way out of a narrowed list (BEA-1531). It used to live inside the empty state;
                   the shared table renders that, so the button sits under the list instead — where it
