@@ -20,7 +20,9 @@
     {
       "id": "BEA-1578",
       "title": "a worker is told what a check is (trial contract in every brief)",
-      "status": "pending"
+      "status": "done",
+      "sha": "068417a",
+      "note": "TRIAL_RULE shared in brief-rules.ts, carried by build+repair briefs and KIT.md; kept OUT of the goal-trial brief where writes are real; zero review findings"
     },
     {
       "id": "BEA-1403",

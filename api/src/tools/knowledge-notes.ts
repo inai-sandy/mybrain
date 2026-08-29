@@ -175,6 +175,10 @@ export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
   {
     match: 'svc:gmail.fetch_emails',
     notes: [
+      // Recorded on the owner's own inbox, 2026-08-22 (BEA-1403): the same query answered 1 message
+      // with no max_results, 6 with max_results:25, 14 with max_results:500 — and his "Nightly
+      // Important Email Summary" reported a 1-email day as done, twice. Verified, not guessed.
+      'With no max_results the vendor returns exactly ONE message — a silent data-loss default, not a page size. The same query answered 1 message bare, 6 with max_results:25 and 14 with max_results:500 on the same day (recorded live). ALWAYS pass max_results explicitly, and page beyond it when you need everything.',
       'The list comes back in ARRIVAL order, not date order — re-sort on messageTimestamp.',
       // Recorded from a real build (BEA-1473): a program asked for a whole day of mail with full
       // bodies in one call and the vendor refused the lot with HTTP 413 — no rows, no partial
