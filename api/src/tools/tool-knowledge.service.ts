@@ -321,8 +321,33 @@ export function pagingOfSchema(schema: any): { how: 'cursor' | 'page' | 'none'; 
     const n = lower.get(p);
     if (n) return { how: 'page', field: n, cap: capOf(n) };
   }
+  /**
+   * THEN BY SHAPE — the vendor's own schema is the best evidence there is (BEA-1574).
+   *
+   * His YouTube agent asked for "as many videos as possible" and got 20, reporting "this endpoint
+   * does not page". `svc:youtube.search` takes a parameter called `continuationToken`, described by
+   * the vendor as *"Continuation token to get more videos. Get 'continuationToken' from previous
+   * response."* — and the card still said `paging: none`, because the list above has `page_token`
+   * and `next_page_token` and neither is `continuationtoken`.
+   *
+   * A hand-kept list of every vendor's spelling is a race nobody wins; this is the third time it has
+   * cost a real run (Reddit's `after`, then this, twice). Matching the SHAPE of a paging parameter
+   * closes the class, and it stays evidence rather than guesswork because the name is the vendor's
+   * own. Exact names still win, so nothing already working changes meaning.
+   */
+  for (const n of names) {
+    if (CURSOR_SHAPE.test(n)) return { how: 'cursor', field: n, cap: capOf(n) };
+  }
+  for (const n of names) {
+    if (PAGE_SHAPE.test(n)) return { how: 'page', field: n, cap: capOf(n) };
+  }
   return { how: 'none' };
 }
+
+/** A next-page handle, however the vendor spells it: `continuationToken`, `pageCursor`, `nextKey`… */
+export const CURSOR_SHAPE = /^(next[_-]?)?(cursor|continuation)([_-]?(token|id|key|cursor))?$|^(next|page)[_-]?(token|cursor|key)$/i;
+/** A page NUMBER, as opposed to a handle. */
+export const PAGE_SHAPE = /^(page[_-]?(num|number|no|index|idx)?|p)$/i;
 
 /** The number in the vendor's cost sentence — "Each successful request costs 1 credit." → 1. */
 export function creditsFromProse(hint?: string): number | undefined {

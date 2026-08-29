@@ -25,7 +25,13 @@ const ctl = () => fs.readFileSync(path.join(__dirname, 'worker.controller.ts'), 
 describe('a trial never reaches his phone', () => {
   it('takes its own default instead of asking', () => {
     const s = ctl();
-    expect(s).toMatch(/if \(trial\) \{[\s\S]{0,400}return \{ answered: true, answer: taken, trial: true, asked: false \}/);
+    // Sliced rather than measured. This used to pin a 400-character distance between the two lines,
+    // which broke the moment BEA-1571 added the repeat-question guard inside the same branch — a
+    // test that fails when a branch grows is measuring the wrong thing. What is asserted is
+    // unchanged: inside `if (trial)`, it takes its OWN default and returns without asking him.
+    const branch = s.slice(s.indexOf('if (trial) {', s.indexOf('async ask')), s.indexOf('const deadlineHours'));
+    expect(branch).toContain('const taken = ifNoAnswer ?? (choices[0] ?? \'\')');
+    expect(branch).toContain('return { answered: true, answer: taken, trial: true, asked: false }');
   });
 
   // It must still learn what it exists to learn: needing to ask is not a failure of the check.
@@ -91,5 +97,53 @@ describe('the gate judges only what it can', () => {
 
   it('says why this is not a loophole', () => {
     expect(svc()).toMatch(/at all means the worker started, fetched/);
+  });
+});
+
+/**
+ * A check that answers itself must not answer for ever (BEA-1571).
+ *
+ * The pre-flight check of his YouTube agent asked the SAME question 1,610 times in 150 seconds —
+ * 3,227 steps, 764KB of step log — and every one was answered here in microseconds. Both halves
+ * were individually right: a trial holds the sheet write, so there is genuinely no link to hand
+ * back, and a trial never reaches his phone, so it answers itself at once. Together they spin,
+ * because a worker quite reasonably retries when the answer does not solve its problem.
+ */
+describe('a check stops a worker that keeps asking the same thing', () => {
+  const src = () => require('fs').readFileSync(__dirname + '/worker.controller.ts', 'utf8');
+
+  it('counts the repeats per run and per question', () => {
+    const s = src();
+    expect(s).toMatch(/private readonly trialAsks = new Map<string, Map<string, number>>/);
+    expect(s).toMatch(/const seen = \(asked\.get\(key\) \|\| 0\) \+ 1/);
+  });
+
+  it('gives up after a small number of tries, not a large one', () => {
+    const s = src();
+    const m = s.match(/const TRIAL_ASK_LIMIT = (\d+)/);
+    expect(m).toBeTruthy();
+    expect(Number(m![1])).toBeLessThanOrEqual(5);
+  });
+
+  // The message must name the real cause. "Your worker is broken" would be wrong — it is asking a
+  // perfectly sensible question that a CHECK, by design, can never answer.
+  it('says why the question cannot be answered in a check', () => {
+    const s = src();
+    const stop = s.slice(s.indexOf('if (seen > TRIAL_ASK_LIMIT)'), s.indexOf('const taken = ifNoAnswer'));
+    expect(stop).toMatch(/holds every write/i);
+    expect(stop).toMatch(/real run/i);
+  });
+
+  // A REAL run still waits for him as long as it takes — BEA-1565 is not touched by this.
+  it('caps only a check, never a real run', () => {
+    const s = src();
+    const guard = s.slice(s.indexOf('if (trial) {', s.indexOf('async ask')), s.indexOf('const deadlineHours'));
+    expect(guard).toMatch(/TRIAL_ASK_LIMIT/);
+    // The limit is inside the `if (trial)` branch and appears nowhere else.
+    expect((s.match(/TRIAL_ASK_LIMIT/g) || []).length).toBe(2); // the constant, and this one use
+  });
+
+  it('forgets the tally when the run ends', () => {
+    expect(src()).toMatch(/this\.trialAsks\.delete\(runId\)/);
   });
 });

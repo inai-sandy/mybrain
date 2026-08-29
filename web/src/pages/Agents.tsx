@@ -192,13 +192,22 @@ function AgentListRow({ ar, onOpen }: { ar: any; onOpen: () => void }) {
   const tools = (ar.tools || []).length;
   const does = whatItDoes(ar);
   const on = anyOn(ar);
-  // The facts that vary, in one line. A manual agent says so once and the eye moves past it.
-  const facts = [
-    r ? timeAgo(r.at) : 'never run',
-    sched || 'Manual',
-    `${jobs} job${jobs === 1 ? '' : 's'}`,
-    tools ? `${tools} tool${tools === 1 ? '' : 's'}` : '',
-  ].filter(Boolean).join(' · ');
+  /**
+   * An empty agent SAYS it is empty (BEA-1573).
+   *
+   * His first complaint about this list was tapping a row and finding *"nothing is there inside"*.
+   * The four placeholder shells are kept out of the list entirely, but one he NAMED stays — and it
+   * has to be honest on the row, or he taps into the same emptiness for the same reason.
+   */
+  const empty = jobs === 0;
+  const facts = empty
+    ? 'Nothing built yet — the build stopped before it finished'
+    : [
+      r ? timeAgo(r.at) : 'never run',
+      sched || 'Manual',
+      `${jobs} job${jobs === 1 ? '' : 's'}`,
+      tools ? `${tools} tool${tools === 1 ? '' : 's'}` : '',
+    ].filter(Boolean).join(' · ');
 
   return (
     <div className="group flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 transition-all hover:border-emerald-500/40 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -809,8 +818,22 @@ function schedOf(ar: any): string {
  * findable in this list.
  */
 export function isDraftShell(ar: any): boolean {
-  return (ar?.jobCount || 0) === 0 && !(ar?.jobs || []).length;
+  const empty = (ar?.jobCount || 0) === 0 && !(ar?.jobs || []).length;
+  return empty && PLACEHOLDER_NAME.test(String(ar?.name || '').trim());
 }
+
+/**
+ * The names the builder leaves behind, and nothing else (BEA-1573).
+ *
+ * "No jobs = a draft" was too blunt and it cost him two agents. `ESP32 Reddit Weekly Search` and
+ * `ESP32 Weekly Reddit` are also empty — abandoned builds, so also junk — but he NAMED them, they
+ * were in his list yesterday, and the rule made them vanish without a word. His standing rule is
+ * that nothing disappears unless he pointed at it, and hiding is just deleting with extra steps.
+ *
+ * So a shell must be empty AND still be wearing the name the builder gave it. Anything he named
+ * stays on the list, empty and visible, for him to rename, rebuild or delete.
+ */
+const PLACEHOLDER_NAME = /^(new agent)?$/i;
 
 /**
  * THE MOST RECENT RUN, whatever happened in it (BEA-1564).

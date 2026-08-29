@@ -454,11 +454,21 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
    * applies through the normal agent-update endpoint only when the owner confirms.
    */
   async chatEdit(agentId: string, message: string): Promise<{ patch: any; changes: string[]; note: string }> {
-    const cantDo = { patch: {}, changes: [] as string[], note: "I couldn't work that one out — try saying it another way." };
+    /**
+     * SAY WHICH THING WENT WRONG (BEA-1575).
+     *
+     * His words: *"when I am trying to chat again to edit the agent, I received this message. I
+     * couldn't work that one out — try saying it another way."* That one sentence was every
+     * outcome: no prompt template, a model that answered nothing (the daily AI budget is the
+     * common one), a reply that was not JSON, or a genuine "I did not understand you". Only the
+     * last is his fault to fix, and it was the only one the wording described — so on any of the
+     * others he rephrases a question that was never the problem.
+     */
+    const cantDo = (why = "I couldn't work that one out — try saying it another way.") => ({ patch: {}, changes: [] as string[], note: why });
     const a: any = await this.agent.getAgent(agentId);
     try {
       const tpl = (await this.prompts?.get('agent.chatEdit').catch(() => '')) || '';
-      if (!tpl) return cantDo;
+      if (!tpl) return cantDo('Editing by chat is switched off — its prompt is missing in Settings → Prompts.');
       const current = JSON.stringify({
         name: a.name, description: a.description || '', task: a.prompt || '', outcome: a.rubric || '',
         autonomy: a.autonomy || 'cautious', depth: a.defaultDepth || 'standard',
@@ -472,8 +482,12 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       const out = (this.llm as any).completeHelper
         ? await (this.llm as any).completeHelper('chat-edit', filled, 900, 'agent-chat-edit')
         : await this.llm.complete(filled, 900, 'agent-chat-edit');
-      const m = (out || '').match(/\{[\s\S]*\}/);
-      if (!m) return cantDo;
+      // Nothing back at all is almost always the day's AI budget (BEA-1248: a named helper returns
+      // null rather than quietly finishing on the app's general model). Say so — rephrasing cannot
+      // help, and waiting or raising the budget can.
+      if (!out || !String(out).trim()) return cantDo('The AI could not be reached just now — usually the day\'s AI budget is used up. Nothing was changed; try again later.');
+      const m = String(out).match(/\{[\s\S]*\}/);
+      if (!m) return cantDo("The AI answered, but not in a form I could read. Nothing was changed — say it another way and I'll try again.");
       const g = JSON.parse(m[0]);
       const p = g.patch && typeof g.patch === 'object' ? g.patch : {};
       // whitelist + clamp — the model's field names are the friendly ones (task/outcome/depth)
@@ -495,8 +509,9 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       if (!Object.keys(patch).length) return { patch: {}, changes: [], note };
       return { patch, changes, note };
     } catch {
-      await (this.agent as any).appendChat?.(agentId, [{ who: 'you', text: message }, { who: 'ai', text: cantDo.note }]).catch(() => undefined);
-      return cantDo;
+      const fail = cantDo();
+      await (this.agent as any).appendChat?.(agentId, [{ who: 'you', text: message }, { who: 'ai', text: fail.note }]).catch(() => undefined);
+      return fail;
     }
   }
 
