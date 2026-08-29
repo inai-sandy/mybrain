@@ -129,8 +129,31 @@ describe('the agents home offers both views', () => {
     expect(s).toMatch(/localStorage\.setItem\('agents\.view', v\)/);
   });
 
-  it('only forces cards in card view, so the table can render in list view', () => {
-    expect(src()).toMatch(/cardsOnly=\{view === 'cards'\}/);
+  /**
+   * The list is a LIST, not a table (BEA-1564, second pass).
+   *
+   * This used to assert `cardsOnly={view === 'cards'}` — i.e. that list view fell through to a
+   * column-headed HTML table. He rejected that: *"this design has to be list view, not table view …
+   * check the link https://mybrain.1site.ai/documents?folder=others … it has to follow the same
+   * design language."* `/documents` draws its list as a stack of bordered rows through
+   * `renderCard` + `space-y-2`, and this page now does the same, so the assertion is inverted.
+   */
+  it('draws both views as rows, never as a column-headed table', () => {
+    const s = src();
+    expect(s).toMatch(/\n\s*cardsOnly\n/);                       // always on — no table road left
+    expect(s).not.toMatch(/cardsOnly=\{view === 'cards'\}/);
+    expect(s).not.toMatch(/tableLayoutFixed/);
+  });
+
+  // The same stack `/documents` uses for its list, so the two pages read as one product.
+  it('stacks the list rows the way Documents does', () => {
+    expect(src()).toMatch(/view === 'list' \? 'space-y-2'/);
+  });
+
+  it('gives the list its own row renderer', () => {
+    const s = src();
+    expect(s).toContain('function AgentListRow(');
+    expect(s).toMatch(/renderCard=\{view === 'list'/);
   });
 
   // The search box must find the same agents in both views. Keying the first column on `search`
@@ -139,8 +162,12 @@ describe('the agents home offers both views', () => {
     expect(src()).toMatch(/\{ key: 'search', label: 'Agent'/);
   });
 
+  // Still true, by a different mechanism: the row owns its own click now (a real <button> around
+  // the title, like Documents' row), rather than DataTable's whole-row handler.
   it('a list row opens the agent', () => {
-    expect(src()).toMatch(/onRowClick=\{view === 'list'/);
+    const s = src();
+    expect(s).toMatch(/<AgentListRow key=\{ar\.id\} ar=\{ar\} onOpen=/);
+    expect(s).toMatch(/<button onClick=\{onOpen\}/);
   });
 });
 
