@@ -2,11 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
 import { DocumentsService } from '../documents/documents.service';
 import { LlmService } from '../llm/llm.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { AlertsService } from '../push/alerts.service';
 import { whatsappStepLabel } from '../contacts/owner-alert';
 import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
+import { contractFromPlan } from '../worker/contract';
+import { HISTORY_DAYS, HISTORY_ROWS, HistoryRow, doubtHeadline, doubtLine, doubtShort, historyShowsMany } from './run-doubt';
 import { Diff, KEY_FIELDS, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
 import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
 import { AgentPlan, planFromAgent, sourceActionId, sourceHint, sourceLabel, thresholdOf } from './plan';
@@ -98,6 +101,9 @@ export class SocialAgentRunService {
     private readonly watches?: SocialWatchStore, // what a Watch/Alert saw last time (BEA-1358)
     private readonly knowledge?: ToolKnowledgeService, // the know-how cards: how an action pages, which field is the date (BEA-1369)
     sources?: SourceFetchService, // the shared fetcher (BEA-1387)
+    // The job's OWN ToolCall history, for the "is this obviously wrong?" doubt (BEA-1403). Optional
+    // + LAST like the rest: a harness without it never doubts, and behaves exactly as before.
+    private readonly prisma?: PrismaService,
   ) {
     this.sources = sources || new SourceFetchService(actions, knowledge);
   }
@@ -211,9 +217,32 @@ export class SocialAgentRunService {
       };
       if (!fetched.length) return await nothingFound();
 
+      // ---- is this obviously wrong? (BEA-1403) --------------------------------------------------
+      // A source that came back with ONE item where this job's OWN recorded calls got many for the
+      // same ask (same action, same non-count arguments) is said LOUDLY on the run and carried into
+      // the owner's notification — never reported as a clean success. His "Nightly Important Email
+      // Summary" read ONE email twice (Gmail's fetch with no `max_results` answers exactly 1) and
+      // WhatsApped him "done". A genuinely quiet day is untouched: no history of many → no doubt,
+      // and the BEA-1359 honest-empty road above never reaches here.
+      const doubts: { line: string; short: string }[] = [];
+      for (const f of fetched) {
+        const src = plan.sources.find((s) => s.id === f.id);
+        if (!src || src.kind !== 'source') continue; // a creators block's table is not one call's answer
+        if (tableOf(f.r.data).itemCount !== 1) continue;
+        const history = await this.jobHistory(agent.id, f.actionId, runId);
+        const many = historyShowsMany(history, src.args);
+        if (!many) continue;
+        const name = [f.r.serviceName, f.r.actionName].filter(Boolean).join(' · ') || f.label;
+        const line = doubtLine(name, many.max);
+        doubts.push({ line, short: doubtShort(name, many.max) });
+        await step({ label: line, status: 'info', nodeId: `src:${f.id}` });
+      }
+
       // A Watch / Alert (BEA-1358) says only what changed since last time, then stores the new result.
+      // The doubt rides along (BEA-1403): a watch whose source silently starved must not read as a
+      // calm "nothing changed" on the run or on the owner's phone.
       const mode = plan.mode;
-      if (mode === 'watch' || mode === 'alert') return await this.watch(runId, agent, title, mode, fetched, credits, step, fail, args);
+      if (mode === 'watch' || mode === 'alert') return await this.watch(runId, agent, title, mode, fetched, credits, step, fail, args, doubts);
 
       // ---- 2. rows — as fetched, or shaped the way the owner asked ----------------------------
       const tables = fetched.map((f) => ({ id: f.label, table: tableOf(f.r.data) }));
@@ -239,6 +268,7 @@ export class SocialAgentRunService {
 
       let aiTokens = 0; // what the shaping step really spent — said on the run beside the credits (BEA-1373)
       if (plan.shape) {
+        const itemsFetched = table.rows.length; // non-empty here — the 0-row road returned above
         const shapeStart = new Date();
         await step({ label: 'Shaping the rows the way you asked', status: 'running', kind: 'log', nodeId: 'shape' });
         const shaped = await this.shape(plan.shape.prompt, table, existing?.header?.length ? existing.header : null, (n, of) => progress(`shaping batch ${n} of ${of}`));
@@ -246,6 +276,20 @@ export class SocialAgentRunService {
         // …and onto the run itself, so the run screen can show what this run cost (BEA-1394 §I).
         await this.agent.addAiTokens?.(runId, aiTokens)?.catch?.(() => undefined);
         if (!shaped.ok) { await step({ label: `Could not shape the rows: ${shaped.error}`, status: 'failed', nodeId: 'shape' }); return fail(`Could not shape the rows: ${shaped.error}`); }
+        // Shaping kept 0 rows out of a NON-EMPTY fetch → the run FAILS (BEA-1403), with the BEA-1377
+        // wording, judged against the ONE contract (`contractFromPlan`, BEA-1391 — never a second
+        // one): data arrived and nothing here could read a row out of it, which is our bug, not a
+        // quiet day. A genuinely empty day never reaches this line — it finished above, honestly.
+        // DELIBERATELY stricter than the worker road's BEA-1456 "nothing matched what he asked to
+        // keep": that escape is read out of the owner's OWN brief lines (`contractFromBrief`), and a
+        // plan-road job has no brief to read — while the shaping prompt says "recall over precision,
+        // when unsure keep it", so 0 kept from real data is a bug signal here, per the issue's own
+        // acceptance. The night this failing loudly would have saved is the reason this issue exists.
+        if (shaped.rows!.length < contractFromPlan(plan).minRows) {
+          const bug = `fetched ${itemsFetched} answer${itemsFetched === 1 ? '' : 's'} but recognised 0 rows — this is a My Brain bug, not the vendor`;
+          await step({ label: bug, status: 'failed', nodeId: 'shape' });
+          return fail(bug);
+        }
         table = { columns: shaped.columns!, rows: shaped.rows!, itemCount: table.itemCount };
         await step({ label: `Shaped ${shaped.rows!.length} row${shaped.rows!.length === 1 ? '' : 's'} into ${shaped.columns!.length} columns${shaped.note ? ` · ${shaped.note}` : ''}${aiTokens ? ` · ${fmtTokens(aiTokens)} AI tokens` : ''}`, status: 'done', nodeId: 'shape' });
       }
@@ -272,7 +316,11 @@ export class SocialAgentRunService {
         headline = `${table.rows.length} row${table.rows.length === 1 ? '' : 's'} saved to Documents`;
       }
 
+      // The doubt (BEA-1403) leads the result — a run that may have read almost nothing must never
+      // read as a clean success, on the run screen or on the owner's phone.
+      const doubtBlock = doubts.length ? `${doubts.map((d) => d.line).join('\n\n')}\n\n` : '';
       const resultText =
+        doubtBlock +
         `**${table.rows.length} row${table.rows.length === 1 ? '' : 's'}** · ${credits} credit${credits === 1 ? '' : 's'}${aiTokens ? ` · ${fmtTokens(aiTokens)} AI tokens` : ''}` +
         (outputUrl ? ` · [Open the Google Sheet](${outputUrl})` : '') +
         `\n\n${markdownTable(table.columns, table.rows, 10)}`;
@@ -280,7 +328,9 @@ export class SocialAgentRunService {
 
       // ---- 4. WhatsApp — the link, through the one path; silence is never an option ------------
       if (plan.notify.whatsapp) {
-        const r = await this.alerts?.runFinished?.(title, headline, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+        const note = doubtHeadline(doubts);
+        const said = note ? `${note} · ${headline}` : headline;
+        const r = await this.alerts?.runFinished?.(title, said, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
         await step({ ...whatsappStepLabel(r), nodeId: 'notify' }); // "WhatsApp sent (template)" / "WhatsApp failed: <reason>" (BEA-1362)
       }
     } catch (e: any) {
@@ -332,6 +382,8 @@ export class SocialAgentRunService {
     fail: (error: string) => Promise<void>,
     /** The arguments each source is remembered by, keyed by SOURCE id — always the plan's, never raw `toolArgs` (BEA-1374: the stored shape is not the plain args). */
     args: Record<string, any>,
+    /** The BEA-1403 doubt: a source answered 1 item where this job's own history shows many. Carried into the result and every push — never a false all-clear. */
+    doubts: { line: string; short: string }[] = [],
   ): Promise<void> {
     if (!this.watches) return fail('Watching is not available on this server (no watch store).');
     const threshold = thresholdOf(agent.threshold);
@@ -401,14 +453,18 @@ export class SocialAgentRunService {
         : `Nothing changed ${sinceText}.`;
     const detail = changedDiffs.map((p) => (changedDiffs.length > 1 ? `### ${nameOf(p)}\n\n` : '') + p.diff.detail).filter(Boolean).join('\n\n');
     const creditsLine = `${credits} credit${credits === 1 ? '' : 's'}`;
+    // The doubt (BEA-1403) rides on every road out of a watch: a source that answered 1 item where
+    // this job's own history shows many must never let "nothing changed" read as an all-clear.
+    const doubtNote = doubtHeadline(doubts);
+    const doubtBlock = doubts.length ? `${doubts.map((d) => d.line).join('\n\n')}\n\n` : '';
 
     // ---- the push (an Alert that fired) comes FIRST: Telegram, and WhatsApp through the one path.
     // Nothing is written until the owner has been reached — an alert nobody received must not leave a
     // Document behind on every retry.
     if (fired) {
-      const text = `${summary}${why ? `\n${why}` : ''}${detail ? `\n\n${detail.replace(/[*`>#|]/g, '').slice(0, 600)}` : ''}`;
+      const text = `${doubtNote ? `${doubtNote}\n` : ''}${summary}${why ? `\n${why}` : ''}${detail ? `\n\n${detail.replace(/[*`>#|]/g, '').slice(0, 600)}` : ''}`;
       const tg = await this.budget?.pushAlert?.(agent, text, runId).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
-      const wa = await this.alerts?.runFinished?.(`🔔 ${title}`, `${summary}${why ? ` — ${why}` : ''}`, `/agent/runs/${runId}`, { kind: 'alert' }).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+      const wa = await this.alerts?.runFinished?.(`🔔 ${title}`, `${doubtNote ? `${doubtNote} · ` : ''}${summary}${why ? ` — ${why}` : ''}`, `/agent/runs/${runId}`, { kind: 'alert' }).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
       const tgSent = !!tg?.sent;
       const waSent = !!wa?.sent;
       await step({ label: tgSent ? 'Alert sent on Telegram' : `⚠️ Not sent on Telegram — ${tg?.why || 'Telegram is not set up'}`, status: tgSent ? 'done' : 'info', nodeId: 'notify' });
@@ -469,6 +525,7 @@ export class SocialAgentRunService {
     if (baselines.length && !diffs.length) await step({ label: 'Baseline stored — nothing is "new" on a first run', status: 'done', kind: 'log' });
 
     const resultText =
+      doubtBlock +
       (fired ? `🔔 **Alert fired** — ` : mode === 'alert' && changedDiffs.length ? `**Alert not fired** — ` : '**') +
       `${summary}${fired || (mode === 'alert' && changedDiffs.length) ? '' : '**'}` +
       (why ? `\n\n_${why}_` : '') +
@@ -479,7 +536,7 @@ export class SocialAgentRunService {
 
     // A Watch that found something goes out on WhatsApp like any finished job, when the job asks.
     if (mode === 'watch' && changedDiffs.length && agent.notifyWhatsApp) {
-      const r = await this.alerts?.runFinished?.(title, summary, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+      const r = await this.alerts?.runFinished?.(title, doubtNote ? `${doubtNote} · ${summary}` : summary, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
       await step({ ...whatsappStepLabel(r), nodeId: 'notify' });
     }
   }
@@ -513,6 +570,25 @@ export class SocialAgentRunService {
     try { parsed = m ? JSON.parse(m[0]) : null; } catch { parsed = null; }
     if (!parsed || typeof parsed.fires !== 'boolean') return { ok: false, error: 'the alert model did not answer yes or no (its reply was not the JSON asked for)' };
     return { ok: true, fires: parsed.fires, why: String(parsed.why || '').slice(0, 300) };
+  }
+
+  /**
+   * This job's OWN recorded calls of one action (BEA-1403) — the doubt's evidence, never a global
+   * average. Best-effort on purpose: a harness or a server without the flight recorder simply never
+   * doubts, and a read that fails must not fail the run it was trying to protect.
+   */
+  private async jobHistory(agentId: string, actionId: string, runId: string): Promise<HistoryRow[]> {
+    try {
+      const rows = await this.prisma?.toolCall?.findMany?.({
+        where: { agentId, action: actionId, ok: true, createdAt: { gte: new Date(Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000) }, NOT: { runId } },
+        orderBy: { createdAt: 'desc' },
+        take: HISTORY_ROWS,
+        select: { arguments: true, result: true, ok: true, createdAt: true },
+      });
+      return rows || [];
+    } catch {
+      return [];
+    }
   }
 
   // ---- the sheet -----------------------------------------------------------------------------
