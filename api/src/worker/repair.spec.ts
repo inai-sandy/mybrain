@@ -1,5 +1,6 @@
 import { NOT_REPEATABLE } from './run-journal.service';
 import { MAX_ATTEMPTS, PARITY_TOLERANCE, causeOf, driftOf, failingFile, fixedWords, heldWords, repairBrief, signature, stopWords } from './repair';
+import { TRIAL_RULE } from './brief-rules';
 import { WorkerContract } from './contract';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -160,6 +161,15 @@ describe('what Codex is told, and what the owner is told (BEA-1393)', () => {
     fromVersion: 3,
     previousTries: ['the tests did not pass'],
   };
+
+  // The check's contract rides in the repair brief too (BEA-1578): a repair is often what a first
+  // build becomes, and a repair that meets the trial blind gropes exactly the same way — one real
+  // worker's v3 asked for a held sheet's link 1,610 times in a check and then failed it. The words
+  // come from the ONE constant in brief-rules.ts (one-rule-one-home.spec guards that), never quoted
+  // here.
+  it('the repair brief carries the trial rule, from the shared constant', () => {
+    expect(repairBrief(inputs)).toContain(TRIAL_RULE);
+  });
 
   it('the repair brief carries the failure, the evidence, the tolerance and the two hard rules', () => {
     const brief = repairBrief(inputs);
