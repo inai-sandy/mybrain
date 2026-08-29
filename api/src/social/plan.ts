@@ -513,7 +513,30 @@ export function nextCursorOf(data: any, preferredKey?: string | null): { key: st
   }
   for (const k of ['cursor', 'next_cursor', 'nextCursor', 'after', 'next_max_id', 'end_cursor', 'endCursor', 'next_page_token', 'nextPageToken', 'max_cursor', 'next_page_id', 'continuation']) {
     const v = (data as any)[k];
-    if (v !== undefined && v !== null && v !== '' && v !== false) return { key: k, value: v };
+    // A cursor is a SCALAR you hand back in the next request. An object or an array under one of
+    // these names is a page of results that happens to share the word — sending it as a cursor
+    // would be nonsense (BEA-1574, found by the test for the shape rule below).
+    if (v !== undefined && v !== null && v !== '' && v !== false && typeof v !== 'object') return { key: k, value: v };
+  }
+  /**
+   * THEN BY SHAPE, because the list will always be incomplete (BEA-1574).
+   *
+   * The comment above already says this, and it happened again on the next vendor. His YouTube
+   * agent asked for "as many videos as possible", fetched ONE page of 20 and reported *"this
+   * endpoint does not page"* — while the very same answer carried `continuationToken`. The list has
+   * `continuation`, and `nextPageToken`, and neither matches `continuationToken`.
+   *
+   * Naming every vendor's spelling is a race nobody wins, so anything that reads like a
+   * next-page handle and holds a usable scalar counts. Keys are checked in the answer's own order,
+   * after every exact name above, so a vendor that carries two never changes meaning.
+   */
+  const SHAPE = /^(next[_-]?)?(cursor|continuation|page)([_-]?(token|id|cursor|key))?$|^continuation[_-]?token$|^next[_-]?(token|id|key)$/i;
+  for (const k of Object.keys(data as any)) {
+    if (!SHAPE.test(k)) continue;
+    const v = (data as any)[k];
+    // A cursor is a scalar you can hand back. An object or an array is a page of results, not a handle.
+    if (v === undefined || v === null || v === '' || v === false || typeof v === 'object') continue;
+    return { key: k, value: v };
   }
   return null;
 }

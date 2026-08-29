@@ -39,6 +39,15 @@ export const WORKER_HELPERS = ['social-shape', 'social-alert', 'worker-think'];
 const AI_MAX_TOKENS = SHAPE_MAX_TOKENS;
 
 /**
+ * How many times a CHECK may auto-answer the same question before it gives up (BEA-1571).
+ *
+ * Three is enough to let a worker retry a transient thing and few enough that a loop costs almost
+ * nothing. It applies only to a trial: a real run parks on a question for as long as the owner
+ * takes (BEA-1565), and that is never touched by this.
+ */
+const TRIAL_ASK_LIMIT = 3;
+
+/**
  * How much of the agent's own message may go out (BEA-1407). WhatsApp's own limit for a free-text
  * body is 4,096 characters; this leaves room and keeps one runaway job from writing an essay.
  */
@@ -77,6 +86,13 @@ export const UNGUARDED = true;
 @UseGuards(WorkerTokenGuard)
 @Controller('worker') // the app prefixes every route with /api (`main.ts`), so this IS /api/worker/*
 export class WorkerController {
+  /**
+   * What a CHECK has already been asked, per run (BEA-1571). In memory on purpose: it only has to
+   * outlive one smoke run, which is a single process and a couple of minutes, and a token is
+   * revoked the moment that run settles. Cleared when the run finishes.
+   */
+  private readonly trialAsks = new Map<string, Map<string, number>>();
+
   constructor(
     private readonly journal: RunJournalService,
     private readonly tokens: WorkerTokenService,
@@ -646,6 +662,28 @@ export class WorkerController {
     // meet the vendor — which is the only thing it exists to find out. Needing to ask is not a
     // failure, and it is recorded on the run so it is visible without anyone being disturbed.
     if (trial) {
+      /**
+       * AN INSTANT ANSWER PLUS A RETRY IS A LOOP (BEA-1571).
+       *
+       * His YouTube check asked the same question **1,610 times in 150 seconds** — 764KB of step
+       * log — and every one was answered here in microseconds. Both halves were individually right:
+       * a trial holds the sheet write (so there is genuinely no link to give), and a trial never
+       * reaches his phone (so it answers itself at once). Together they spin, because the worker
+       * quite reasonably retries when the answer does not solve its problem.
+       *
+       * Nothing bounded it. So: the same question, three times, and the check stops — with a
+       * sentence that names the real cause rather than blaming the worker for asking.
+       */
+      const asked = this.trialAsks.get(runId) || new Map<string, number>();
+      const key = question.slice(0, 200);
+      const seen = (asked.get(key) || 0) + 1;
+      asked.set(key, seen);
+      this.trialAsks.set(runId, asked);
+      if (seen > TRIAL_ASK_LIMIT) {
+        throw new BadRequestException(
+          `This check stopped: the worker asked "${question.slice(0, 120)}" ${seen} times. A check holds every write, so there is no sheet link to give it — that question can only be answered on a real run.`,
+        );
+      }
       const taken = ifNoAnswer ?? (choices[0] ?? '');
       await this.stepper(runId)({
         label: `Not asked — this is a check, not a real run: "${question.slice(0, 120)}"`,
@@ -792,6 +830,7 @@ export class WorkerController {
   @Post('finish')
   async finish(@Req() req: any, @Body() body: any) {
     const { runId } = who(req);
+    this.trialAsks.delete(runId); // the check's repeat-question tally dies with the run (BEA-1571)
     const status = body?.status === 'failed' ? 'failed' : body?.status === 'cancelled' ? 'cancelled' : 'done';
     const error = body?.error ? String(body.error).slice(0, 2000) : undefined;
     if (status === 'failed' && error) await this.agent.appendStep(runId, { label: error, status: 'failed' }).catch(() => undefined);

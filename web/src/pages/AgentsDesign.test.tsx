@@ -73,6 +73,33 @@ describe('an empty area is a draft, not an agent', () => {
     expect(isDraftShell({})).toBe(true);
   });
 
+  /**
+   * ONLY THE BUILDER'S OWN PLACEHOLDER (BEA-1573).
+   *
+   * "No jobs = a draft" was too blunt and it cost him two agents: `ESP32 Reddit Weekly Search` and
+   * `ESP32 Weekly Reddit` are also empty — abandoned builds, so also junk — but he NAMED them, they
+   * were in his list, and the rule made them vanish without a word. Hiding something he named is
+   * deleting it with extra steps, which his standing rule forbids.
+   */
+  it('never hides an empty area he gave a name to', () => {
+    expect(isDraftShell({ jobCount: 0, jobs: [], name: 'ESP32 Reddit Weekly Search' })).toBe(false);
+    expect(isDraftShell({ jobCount: 0, jobs: [], name: 'ESP32 Weekly Reddit' })).toBe(false);
+  });
+
+  it('still hides the builder placeholder, whatever its case or spacing', () => {
+    for (const name of ['New agent', 'new agent', '  New agent  ', '', undefined]) {
+      expect(isDraftShell({ jobCount: 0, jobs: [], name })).toBe(true);
+    }
+  });
+
+  // And an empty agent he named must SAY it is empty, or he taps into nothing for the same reason
+  // he complained about in the first place.
+  it('an empty row says there is nothing built yet', () => {
+    const s = fs.readFileSync(AGENTS, 'utf8');
+    const row = s.slice(s.indexOf('function AgentListRow('), s.indexOf('function WaitingCard('));
+    expect(row).toMatch(/Nothing built yet/);
+  });
+
   it('never treats an area that holds a job as a draft', () => {
     expect(isDraftShell({ jobCount: 1, jobs: [{ id: 'j1' }] })).toBe(false);
     // Belt and braces: either field alone proving there is something inside is enough.
