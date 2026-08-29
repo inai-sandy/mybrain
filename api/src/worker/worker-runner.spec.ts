@@ -306,6 +306,26 @@ describe('the worker runner (BEA-1389)', () => {
     expect(named[named.length - 1].line).toMatchObject({ type: 'result', status: 'done', rows: 7 });
   });
 
+  /**
+   * The same chicken-and-egg, one step along (BEA-1570). `meta.json` used to be written only by
+   * `/promote`, so the pre-flight check met a folder whose kit version it could not read and refused
+   * to start it. The build writes it now, because the kit is pinned in the folder at build time —
+   * the version already knows its own kit there.
+   */
+  it('a freshly built version carries its own meta.json, before any promotion', async () => {
+    const res = await fetch(`${runner.url}/build`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ jobId: 'selfdescribing', brief: 'write it', kit: '1' }),
+    });
+    expect(res.status).toBeLessThan(500);
+    const metaPath = path.join(root, 'selfdescribing', 'v1', 'meta.json');
+    expect(fs.existsSync(metaPath)).toBe(true);
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    expect(meta).toMatchObject({ jobId: 'selfdescribing', version: 1, kit: '1', promoted: false });
+    // …and nothing is live yet: describing itself is not the same as being promoted.
+    expect(fs.existsSync(path.join(root, 'selfdescribing', 'current'))).toBe(false);
+  });
+
   // The version comes off a request, so it may never reach outside the job's own folder.
   it('refuses a version that is not a plain number, or does not exist', async () => {
     install(root, 'guarded', `process.stdout.write(JSON.stringify({ type: 'result', status: 'done', rows: 1 }) + '\\n');`);
@@ -594,9 +614,15 @@ exit 0
       expect(fs.readFileSync(path.join(v2, 'notes.txt'), 'utf8')).toBe('something only v1 has');
       expect(fs.existsSync(path.join(v2, 'kit', 'kit.js'))).toBe(true); // the kit came from v1, not the request
       expect(fs.existsSync(path.join(v2, 'samples', 'failing.json'))).toBe(true);
-      // v1's meta must NOT ride along: v2 has not been promoted, and a copied meta would make the
-      // runner's kit check read the wrong worker's number.
-      expect(fs.existsSync(path.join(v2, 'meta.json'))).toBe(false);
+      // v1's meta must NOT ride along — a copied meta would make the runner's kit check read the
+      // WRONG worker's number, which is the whole reason for this assertion. Since BEA-1570 the
+      // build writes v2 its OWN meta instead of leaving none: that serves the same reason (the
+      // number is v2's) and fixes the bug leaving it absent caused — the pre-flight check could not
+      // read the kit of the version it was about to run, so no first build could ever go live.
+      const v2meta = JSON.parse(fs.readFileSync(path.join(v2, 'meta.json'), 'utf8'));
+      expect(v2meta.version).toBe(2);
+      expect(v2meta.promoted).toBe(false);
+      expect(v2meta.planHash).toBeUndefined(); // nothing of v1's rode along
       // …and the live worker is still v1 until something promotes v2.
       expect(fs.realpathSync(path.join(root, 'repairme', 'current'))).toBe(fs.realpathSync(path.join(root, 'repairme', 'v1')));
       expect((await build({ jobId: 'repairme', brief: 'x', files: {}, copyFrom: 9 })).error).toMatch(/v9 has no worker\.mjs/);

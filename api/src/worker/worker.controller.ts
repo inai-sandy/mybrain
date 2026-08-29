@@ -258,7 +258,7 @@ export class WorkerController {
     // held, and the answer says so plainly rather than pretending to be the vendor's.
     if (trial && !(await this.isRead(actionId))) {
       const held = { ok: true, credits: 0, error: null, notFound: false, stop: null, table: null, trial: true, held: true, why: `This is a trial, so ${actionId} was not really called. Nothing was written and nothing was sent.` };
-      await this.stepper(runId)({ label: `Held back — ${actionId}`, status: 'info', detail: 'a trial writes nothing and sends nothing', nodeId: nodeIdOf(seq) });
+      await this.stepper(runId)({ label: `Held back — ${actionId}`, status: 'info', kind: 'held', detail: 'a trial writes nothing and sends nothing', nodeId: nodeIdOf(seq) });
       return { ...held, replayed: false };
     }
 
@@ -495,6 +495,11 @@ export class WorkerController {
           ? `Trial — ${table.rows.length} row${table.rows.length === 1 ? '' : 's'} ready for your sheet. Nothing was written.`
           : 'Trial — the document is ready. Nothing was saved.',
         status: 'done',
+        // A HELD WRITE IS A FACT, NOT A FORM OF WORDS (BEA-1570). The pre-flight check has to tell
+        // "the trial stopped this" from "the worker broke", and it used to do that by matching the
+        // prose of the OTHER held-write path ("Held back — …"). This road writes a friendlier
+        // sentence, so his agent's held sheet read as a real failure and the build was refused.
+        kind: 'held',
         nodeId: 'output',
       });
       return { ok: true, trial: true, url: null, id: null, created: false, skipped: 0, nothingNew: false, rows: table.rows.length, docId: null };
@@ -553,7 +558,7 @@ export class WorkerController {
     // and drawn on screen; sending it is his tap, to his own number, and nowhere else.
     if (trial) {
       await this.trials?.holdMessage?.(runId, message || `${headline}${detail ? `\n\n${detail}` : ''}`);
-      await step({ label: 'Trial — your message is ready. It was NOT sent.', status: 'done', nodeId: 'notify' });
+      await step({ label: 'Trial — your message is ready. It was NOT sent.', status: 'done', kind: 'held', nodeId: 'notify' });
       return { ok: true, trial: true, whatsapp: null, telegram: null };
     }
 

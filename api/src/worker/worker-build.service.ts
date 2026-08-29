@@ -213,6 +213,24 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
   private async reachedAHeldWrite(runId: string): Promise<boolean> {
     const run: any = await this.prisma.agentRun.findUnique({ where: { id: runId }, select: { stepLog: true } }).catch(() => null);
     if (!run?.stepLog) return false;
+    /**
+     * ASK THE FACT, NOT THE WORDING (BEA-1570).
+     *
+     * This used to match the sentence `Held back — …`, which only ONE of the three held-write paths
+     * writes. His agent held its sheet through the `/output` road, whose step reads *"Trial — 20
+     * rows ready for your sheet. Nothing was written."* — a held write by any honest reading, and
+     * invisible to a regex looking for the other road's words. So the check called a working worker
+     * broken and refused to promote it.
+     *
+     * Every path that holds something now stamps `kind: 'held'` on its step, and this reads that.
+     * A new held-write road gets the allowance by stating the fact, not by matching this prose —
+     * which is the rule `CLAUDE.md` has been asking for since BEA-1462.
+     */
+    try {
+      const steps = JSON.parse(String(run.stepLog));
+      if (Array.isArray(steps) && steps.some((s: any) => s?.kind === 'held')) return true;
+    } catch { /* an unreadable log falls through to the old marker */ }
+    // Runs recorded before the stamp existed still read correctly.
     return /Held back —/.test(String(run.stepLog));
   }
 
