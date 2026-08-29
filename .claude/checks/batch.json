@@ -1,6 +1,6 @@
 {
   "startedAt": "2026-08-29T16:00:00Z",
-  "status": "running",
+  "status": "complete",
   "note": "Agents reliability batch \u2014 from the full failure record (24 failed runs, 14 failed builds, audited 2026-08-29). Goal: a new agent works first time with no Claude Code in the loop. Gate fix first because every later ship leans on it.",
   "issues": [
     {
@@ -27,7 +27,10 @@
     {
       "id": "BEA-1403",
       "title": "plan runner gets the loud is-this-obviously-wrong check (Gmail read ONE email)",
-      "status": "pending"
+      "status": "done",
+      "sha": "85f92eb",
+      "note": "plan road loud check via run-doubt.ts reusing contractFromPlan; Gmail trap note; doubt reaches WhatsApp headline incl. Watch/Alert; honest empties untouched"
     }
-  ]
+  ],
+  "proof": "PASSED 2026-08-29T17:30Z \u2014 new agent created through the UI as a customer: Codex goal first try, ONE build (v1, tests 6/6), check ran the real source with held writes honoured and no loop, promoted first try, supervised first run fetched 246 Reddit posts over 36 pages and prepared the 20-row sheet, verdict asked once on WhatsApp, owner answered Keep it from his phone, agent live. Zero hand-fixes."
 }
