@@ -6,6 +6,7 @@ import { AgentService } from '../agent/agent.service';
 import { RunLockService } from '../agent/run-lock.service';
 import { AlertsService } from '../push/alerts.service';
 import { opsAlertIfPlumbing } from '../push/ops-alert';
+import { isModelBlank } from '../agent/failure-words';
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { planFromAgent, sourceActionId } from '../social/plan';
 import { contractFromPlan } from './contract';
@@ -138,6 +139,18 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
     try {
       const agentId = ctx.agentId;
       if (!agentId || !String(ctx.error || '').trim()) return null;
+
+      // A MODEL BLANK REPAIRS NOTHING (BEA-1582). One transient blank at the provider failed the
+      // Daily Email Agent's run AND spent a Codex session repairing a worker that was never broken
+      // — a promotion (v10) with no parity baseline, all for weather. The run's failure is real and
+      // stays failed (the retry against the blink lives in `completeHelper`, BEA-1582's other
+      // half); what must NOT happen is the repair loop treating a provider outage as a crash in the
+      // worker's own code. BEA-1580's classifier decides — the one list, never a second one here.
+      if (isModelBlank(ctx.error)) {
+        this.log.log(`run ${runId} failed because a model answered nothing — a provider blink, not a broken worker; no repair queued`);
+        return null;
+      }
+
       const job = await this.agent.getAgent(agentId).catch(() => null);
       if (!job) return null;
 

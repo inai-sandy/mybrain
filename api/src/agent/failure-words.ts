@@ -91,6 +91,18 @@ export const PLUMBING_CLASSES: PlumbingClass[] = [
   },
 ];
 
+/**
+ * Is this the model-blank class — an AI helper that answered nothing or was unreachable (BEA-1582)?
+ *
+ * The repair loop asks: a run that finally failed on a provider blink must NOT enter the repair
+ * queue as a crash, because a model outage repairs nothing. The class ID stays IN this file on
+ * purpose — BEA-1581's own lock forbids any call site testing for a class id by hand, so the
+ * question is asked of the classifier, never of a string.
+ */
+export function isModelBlank(error: unknown): boolean {
+  return plumbingClassOf(error) === 'model-blank';
+}
+
 /** Which plumbing class this failure belongs to, or null = customer-actionable. */
 export function plumbingClassOf(error: unknown): string | null {
   const s = String(error ?? '');
