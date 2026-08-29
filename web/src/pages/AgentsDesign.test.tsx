@@ -128,6 +128,34 @@ describe('an empty area is a draft, not an agent', () => {
   });
 });
 
+describe('a list row can be acted on, not just opened', () => {
+  /**
+   * His question, straight after the list shipped: *"Can I rename the agent?"* — and the answer was
+   * no (BEA-1576). Rename, duplicate, move-to-folder and delete all live in `AgentCardMenu`, which
+   * was only ever drawn on the CARD. Rebuilding the list as rows therefore took every one of them
+   * away in the view he had specifically asked for, leaving a row you could only open.
+   *
+   * `/documents` — the design he pointed at — puts its actions on the right of every row, which is
+   * where these now are.
+   */
+  it('draws the same menu the card has', () => {
+    const s = fs.readFileSync(AGENTS, 'utf8');
+    expect(s).toMatch(/menu=\{<AgentCardMenu area=\{ar\}/);
+    const row = s.slice(s.indexOf('function AgentListRow('), s.indexOf('function WaitingCard('));
+    expect(row).toContain('{menu}');
+  });
+
+  // The menu is absolutely positioned, so the row has to be a positioning parent AND leave a gap,
+  // or it lands on top of the on/off pill.
+  it('leaves room for it instead of covering the on/off pill', () => {
+    const s = fs.readFileSync(AGENTS, 'utf8');
+    const row = s.slice(s.indexOf('function AgentListRow('), s.indexOf('function WaitingCard('));
+    const root = row.slice(row.indexOf('<div className="group'), row.indexOf('>', row.indexOf('<div className="group')));
+    expect(root).toMatch(/\brelative\b/);
+    expect(root).toMatch(/\bpr-9\b/);
+  });
+});
+
 describe('one type scale across the module', () => {
   /**
    * Measured on the live page before this: FOURTEEN distinct size/weight pairs on one screen, and

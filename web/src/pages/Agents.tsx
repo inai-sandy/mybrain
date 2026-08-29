@@ -184,7 +184,7 @@ function LandedRow({ l }: { l: LandedItem }) {
  * The information from the first pass all survives the change: what it does, the last run's status
  * AND time, the real schedule, jobs and tools, on or off.
  */
-function AgentListRow({ ar, onOpen }: { ar: any; onOpen: () => void }) {
+function AgentListRow({ ar, onOpen, menu }: { ar: any; onOpen: () => void; menu?: React.ReactNode }) {
   const r = latestRun(ar);
   const tone = r ? (RUN_TONE[r.status] || RUN_TONE.done) : null;
   const sched = schedOf(ar);
@@ -210,7 +210,14 @@ function AgentListRow({ ar, onOpen }: { ar: any; onOpen: () => void }) {
     ].filter(Boolean).join(' · ');
 
   return (
-    <div className="group flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 transition-all hover:border-emerald-500/40 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    /**
+     * `relative` + right padding so the ⋯ menu has somewhere to live (BEA-1576). Rebuilding the
+     * list as rows dropped it: rename, duplicate, move and delete were only ever drawn on the
+     * CARD, so switching to the list — the view he asked for — quietly took them away, and he
+     * asked "can I rename the agent?". `/documents` puts its actions on the right of every row
+     * for the same reason.
+     */
+    <div className="group relative flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white py-2.5 pl-3 pr-9 transition-all hover:border-emerald-500/40 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="mt-0.5 shrink-0 rounded-lg p-1.5 text-sm leading-none" style={{ backgroundColor: (ar.color || '#818cf8') + '1f' }}>
         <span aria-hidden>{ar.icon || '\u{1F916}'}</span>
       </div>
@@ -230,6 +237,7 @@ function AgentListRow({ ar, onOpen }: { ar: any; onOpen: () => void }) {
       <span className={'mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ' + (on
         ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
         : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>{on ? 'on' : 'off'}</span>
+      {menu}
     </div>
   );
 }
@@ -1598,7 +1606,14 @@ export function Agents() {
                 gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0'}
                 emptyText={`Nothing matches${needle ? ` \u201C${q}\u201D` : ' that filter'}${folderSel ? ' in this folder' : ''}.`}
                 renderCard={view === 'list'
-                  ? ((ar: any) => <AgentListRow key={ar.id} ar={ar} onOpen={() => nav(`/agent/a/${ar.jobCount === 1 && ar.jobs?.[0]?.id ? ar.jobs[0].id : ar.id}`)} />)
+                  ? ((ar: any) => (
+                    <AgentListRow
+                      key={ar.id}
+                      ar={ar}
+                      onOpen={() => nav(`/agent/a/${ar.jobCount === 1 && ar.jobs?.[0]?.id ? ar.jobs[0].id : ar.id}`)}
+                      menu={<AgentCardMenu area={ar} onChanged={() => { loadAreas(); loadHome(); loadFolders(); }} onMoveToFolder={() => setPickerFor({ kind: 'one', id: ar.id, name: ar.name })} />}
+                    />
+                  ))
                   : ((ar: any) => {
                   const color = ar.color || '#818cf8';
                   const runningJob = ar.jobs.find((j: any) => j.lastRun?.status === 'running');
