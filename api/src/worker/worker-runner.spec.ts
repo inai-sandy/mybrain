@@ -280,6 +280,46 @@ describe('the worker runner (BEA-1389)', () => {
     expect(lines[lines.length - 1].line.error).toMatch(/No worker is installed/i);
   });
 
+  /**
+   * RUNNING ONE NAMED VERSION, PROMOTED OR NOT (BEA-1570).
+   *
+   * His new agent was built, passed its own tests 8 of 8, and then died on the pre-flight check with
+   * "No worker is installed for this job yet." — because that check runs BEFORE promotion, and the
+   * runner was resolving the program through the `current` symlink that promotion is what creates.
+   * A first build therefore had nothing to run, and a rebuild quietly ran the PREVIOUS version, so
+   * the check had never once exercised the worker it was judging.
+   */
+  it('runs a version that is not promoted yet — the pre-flight case', async () => {
+    // Exactly the shape of his failed build: v1 on disk, nothing pointing at it.
+    const dir = install(root, 'unpromoted', `
+      process.stdout.write(JSON.stringify({ type: 'result', status: 'done', rows: 7 }) + '\\n');
+    `);
+    fs.unlinkSync(path.join(root, 'unpromoted', 'current'));
+    expect(fs.existsSync(dir)).toBe(true);
+
+    // Without a version it is honestly refused, exactly as before — nothing already working changes.
+    const bare = await ndjson(await run({ jobId: 'unpromoted', runId: 'r1', token: 't' }));
+    expect(bare[bare.length - 1].line.error).toMatch(/No worker is installed/i);
+
+    // Named, it runs.
+    const named = await ndjson(await run({ jobId: 'unpromoted', runId: 'r2', token: 't', version: 1 } as any));
+    expect(named[named.length - 1].line).toMatchObject({ type: 'result', status: 'done', rows: 7 });
+  });
+
+  // The version comes off a request, so it may never reach outside the job's own folder.
+  it('refuses a version that is not a plain number, or does not exist', async () => {
+    install(root, 'guarded', `process.stdout.write(JSON.stringify({ type: 'result', status: 'done', rows: 1 }) + '\\n');`);
+    for (const version of ['../../etc', '1/../../..', 'x', '../v1', '-1']) {
+      const lines = await ndjson(await run({ jobId: 'guarded', runId: 'r', token: 't', version } as any));
+      const last = lines[lines.length - 1].line;
+      expect(last).toMatchObject({ type: 'result', status: 'failed', notStarted: true });
+      expect(last.error).toMatch(/no version/i);
+    }
+    // A well-formed version that simply is not there is refused too, and says so plainly.
+    const missing = await ndjson(await run({ jobId: 'guarded', runId: 'r', token: 't', version: 99 } as any));
+    expect(missing[missing.length - 1].line.error).toMatch(/no version v99/i);
+  });
+
   it('stops relaying a worker that will not stop talking', async () => {
     install(root, 'flood', `
       for (let i = 0; i < 3000; i++) process.stdout.write(JSON.stringify({ type: 'noise', i }) + '\\n');

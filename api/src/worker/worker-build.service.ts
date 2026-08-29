@@ -178,7 +178,7 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
     try {
       const spawn: any = await this.tokens.mint(runId, agentId, { trial: true });
       const out: any = await this.runner
-        .run({ jobId: agentId, runId, token: spawn.token, seed: spawn.seed, timeoutMs: SMOKE_TIMEOUT_MS } as any)
+        .run({ jobId: agentId, runId, token: spawn.token, seed: spawn.seed, timeoutMs: SMOKE_TIMEOUT_MS, version } as any)
         .catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }));
       // EVERYTHING AFTER A HELD WRITE IS FICTION (BEA-1554).
       //
