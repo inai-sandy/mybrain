@@ -6,7 +6,9 @@
     {
       "id": "BEA-1385",
       "title": "uicheck gate: a wrong route silently passes",
-      "status": "pending"
+      "status": "done",
+      "sha": "bcd8ce4",
+      "note": "gate validates routes against the real route table; /agents fails with the near-miss; found BEA-1579 (pre-existing 390 overflow on agent pages)"
     },
     {
       "id": "BEA-1577",

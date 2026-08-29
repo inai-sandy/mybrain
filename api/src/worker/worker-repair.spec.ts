@@ -1,7 +1,7 @@
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { RunJournalService } from './run-journal.service';
 import { WorkerBuildService } from './worker-build.service';
-import { WorkerRepairService } from './worker-repair.service';
+import { COUNTED, WorkerRepairService } from './worker-repair.service';
 import { MAX_ATTEMPTS } from './repair';
 import { SampleFixture, makeWorld, spawnKit } from './worker-harness.testing';
 
@@ -126,8 +126,8 @@ function fakeLocks(busy = false) {
   };
 }
 
-async function setUp(opts: { busy?: boolean } = {}) {
-  const world = await makeWorld({ job: job(), samples: SAMPLES });
+async function setUp(opts: { busy?: boolean; samples?: SampleFixture[] } = {}) {
+  const world = await makeWorld({ job: job(), samples: opts.samples || SAMPLES });
   const prisma = repairPrisma(world.prisma);
   const store = new ToolSampleService(prisma);
   const journal = new RunJournalService(prisma);
@@ -291,6 +291,75 @@ describe('self-heal: the repair turn (BEA-1393)', () => {
   });
 });
 
+/** Poll until a fact becomes true — for the repairs `tick()` starts without awaiting. */
+async function until(cond: () => boolean, ms = 5000) {
+  const t0 = Date.now();
+  while (!cond()) {
+    if (Date.now() - t0 > ms) throw new Error('the condition never came true');
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+describe('self-heal: a refusal before Codex is not an attempt (BEA-1577)', () => {
+  it('the runner answering busy after the app lock was claimed uses NO attempt — the cause stays queued and a later tick repairs it with both tries intact', async () => {
+    // The 2026-08-28 incident: the app-side lock was claimable, the runner\'s own live-map said
+    // "This job is busy here (run)" — twice — and the job was paused after "2 failed repairs" in
+    // which Codex was never asked anything.
+    const w = await setUp();
+    await w.repairs.onRunFailed(await failedRun(w.world), { agentId: 'ag1', error: BROKEN, runKind: 'worker' });
+    const queued = w.prisma.builds.find((b: any) => b.status === 'queued');
+    w.runner.script = [{ ok: false, error: 'This job is busy here (run) — try again when it settles.', notStarted: true }];
+
+    const out = await w.repairs.repair(queued);
+    expect(out.outcome).toBe('busy');
+    expect(w.runner.builds).toHaveLength(1); // it did ask, and was refused at the door
+    expect(queued.status).toBe('queued'); // …and nothing was counted: the row went back to the queue
+    expect(queued.error).toMatch(/no repair attempt was used/);
+    expect(w.prisma.builds.filter((b: any) => b.origin === 'repair' && COUNTED.includes(b.status))).toHaveLength(0);
+    expect(w.prisma.agents).toHaveLength(0); // the job is NOT paused
+    expect(w.locks.state.released).toEqual(['h-ag1']); // the app lock was given back
+
+    // A later tick finds the runner free: the repair runs, and its brief still says attempt 1 of 2 —
+    // the refusal never used one up.
+    w.runner.script = [{ ok: true, version: 2, wrote: true, tests: { passed: 3, failed: 0 } }];
+    w.runner.parityResults = {
+      1: { ok: false, error: 'the field moved' },
+      2: { ok: true, rows: 2, columns: ['id', 'caption', 'link'], rowKeys: ['a', 'b'] },
+    };
+    expect(await w.repairs.tick()).toBe(1);
+    await until(() => w.prisma.builds.some((b: any) => b.origin === 'repair' && b.status === 'promoted'));
+    expect(w.runner.builds).toHaveLength(2);
+    expect(w.runner.builds[1].brief).toMatch(/repair attempt \*\*1 of 2\*\*/);
+    expect(w.prisma.builds.filter((b: any) => b.origin === 'repair' && COUNTED.includes(b.status))).toHaveLength(1);
+  });
+
+  it('failing evidence bigger than the runner\'s declared file cap is trimmed to fit and SENT — never refused (BEA-1577)', async () => {
+    // Thirty real posts make the evidence bigger than this runner\'s (small, declared) cap.
+    const many = Array.from({ length: 30 }, (_, i) => post(`p${i + 1}`));
+    const w = await setUp({ samples: [{ actionId: HASHTAG, args: { hashtag: 'smarthomeindia' }, data: { posts: many } }] });
+    const CAP = 2_500;
+    // The fake runner declares its limits the way the real one does on /status — the app reads
+    // them from the runner and restates nothing.
+    (w.runner as any).limits = async () => ({ fileBytes: CAP, filesBytes: 50_000_000 });
+    await w.repairs.onRunFailed(await failedRun(w.world), { agentId: 'ag1', error: BROKEN, runKind: 'worker' });
+    w.runner.script = [{ ok: true, version: 2, wrote: true, tests: { passed: 1, failed: 0 } }];
+    w.runner.parityResults = {
+      1: { ok: false, error: 'broken' },
+      2: { ok: true, rows: 30, columns: ['id', 'caption', 'link'], rowKeys: many.map((p) => p.id) },
+    };
+
+    const out = await w.repairs.repair(w.prisma.builds.find((b: any) => b.status === 'queued'));
+    expect(out.outcome).toBe('promoted'); // the repair ran — the evidence was trimmed, not refused
+    const sent = w.runner.builds[0].files['samples/failing.json'];
+    expect(Buffer.byteLength(sent, 'utf8')).toBeLessThanOrEqual(CAP);
+    const file = JSON.parse(sent); // valid JSON even after the cut
+    expect(file.trimmed).toBe(true);
+    expect(file.trimNote).toMatch(/cut to fit/);
+    expect(file.failedWith).toBe(BROKEN); // the error and the judgement travel whole
+    expect(file.rule).toBe('unrecognised');
+  });
+});
+
 describe('self-heal: two tries, and then it stops (BEA-1393)', () => {
   it('after two failed repairs the job is genuinely switched off and the owner is told what was tried', async () => {
     const w = await setUp();
@@ -363,6 +432,35 @@ describe('self-heal: two tries, and then it stops (BEA-1393)', () => {
     expect(w.runner.builds[1].brief).toMatch(/40% of the rows are different/);
     expect(w.runner.builds[1].brief).toMatch(/left the worker as it was/);
     expect(w.prisma.agents[0]).toMatchObject({ enabled: false });
+  });
+
+  it('a refusal on the SECOND attempt does not stop the job — the real try stays counted, the other stays owed (BEA-1577)', async () => {
+    const w = await setUp();
+    await w.repairs.onRunFailed(await failedRun(w.world), { agentId: 'ag1', error: BROKEN, runKind: 'worker' });
+    const queued = w.prisma.builds.find((b: any) => b.status === 'queued');
+    w.runner.script = [
+      { ok: false, version: 2, wrote: true, tests: { passed: 0, failed: 1 }, log: 'red' },
+      { ok: false, error: 'This job is busy here (run) — try again when it settles.', notStarted: true },
+    ];
+
+    const out = await w.repairs.repair(queued);
+    expect(out.outcome).toBe('busy');
+    // NOT switched off: only ONE real Codex attempt is on the record, and the owner allowed two.
+    expect(w.prisma.agents).toHaveLength(0);
+    expect(w.prisma.builds.filter((b: any) => b.origin === 'repair' && COUNTED.includes(b.status))).toHaveLength(1);
+    // The refused second attempt went back to the queue, with the evidence still riding on it.
+    const requeued = w.prisma.builds.find((b: any) => b.status === 'queued');
+    expect(requeued).toBeTruthy();
+    expect(requeued.id).not.toBe(queued.id);
+    expect(JSON.parse(requeued.sampleIds)).toHaveLength(1);
+
+    // Later the runner is free and the retry REALLY fails: now it stops, exactly as today.
+    w.runner.script = [{ ok: false, error: 'still red' }];
+    expect((await w.repairs.repair(requeued)).outcome).toBe('stopped');
+    expect(w.prisma.agents).toEqual([{ id: 'ag1', enabled: false, pausedReason: expect.stringMatching(/repairs did not fix it/) }]);
+    // Three /build calls left the app, but only the two REAL attempts count anywhere.
+    expect(w.runner.builds).toHaveLength(3);
+    expect(w.prisma.builds.filter((b: any) => b.origin === 'repair' && COUNTED.includes(b.status))).toHaveLength(2);
   });
 
   it('a queued repair whose cause has already been stopped is closed, not tried again', async () => {

@@ -282,34 +282,87 @@ export type RepairInputs = {
 /** The file the failing answers are written into, beside `samples/`. */
 export const FAILING_FILE = 'samples/failing.json';
 
+/** Below this many characters a cut answer says nothing worth reading — the shrink loop's floor. */
+const TRIM_ANSWER_FLOOR = 2_000;
+
 /**
  * The failing evidence, as a file in the repair's own folder: what each source really answered on
  * the run that broke, and the error and contract that judged it. This is the difference between a
  * repair that reads what happened and a repair that guesses.
+ *
+ * `capBytes` is the runner's OWN per-file limit, read off its `/status` — never a number restated
+ * here (BEA-1577). Evidence bigger than the cap used to be sent whole, refused by the runner, and
+ * the refusal counted as a repair attempt in which Codex was never asked anything. Now it is
+ * trimmed to fit BEFORE sending: the biggest answers are cut to a head, the oldest sources are
+ * dropped when cutting is not enough (the newest are what broke last, so they are kept), and the
+ * file says inside itself exactly what was cut. A repair with trimmed evidence is better than no
+ * repair. No cap (`null`/0 — an older runner, or one that did not answer) means no trimming.
  */
-export function failingFile(inp: RepairInputs): string {
-  return JSON.stringify(
-    {
-      note: 'The run that broke. Each source\'s `answer` is exactly what kit.fetchSource(sourceId) returned on that run — the answer that broke the worker. Use it as a fixture: reproduce the failure first, then fix it.',
-      failedWith: inp.error,
-      rule: inp.cause.rule,
-      ruleInWords: inp.cause.label,
-      contract: inp.contract,
-      sources: inp.fetches.map((f) => ({
-        sourceId: f.sourceId,
-        actionId: f.actionId,
-        label: f.label || null,
-        rows: f.rows ?? 0,
-        columns: f.columns || [],
-        unrecognised: !!f.unrecognised,
-        empty: !!f.empty,
-        why: f.why || null,
-        answer: f.answer ?? null,
-      })),
-    },
-    null,
-    2,
-  );
+export function failingFile(inp: RepairInputs, capBytes?: number | null): string {
+  const sources = inp.fetches.map((f) => ({
+    sourceId: f.sourceId,
+    actionId: f.actionId,
+    label: f.label || null,
+    rows: f.rows ?? 0,
+    columns: f.columns || [],
+    unrecognised: !!f.unrecognised,
+    empty: !!f.empty,
+    why: f.why || null,
+    answer: f.answer ?? null,
+  }));
+  const doc = (extra: Record<string, any>, src: any[]) =>
+    JSON.stringify(
+      {
+        note: 'The run that broke. Each source\'s `answer` is exactly what kit.fetchSource(sourceId) returned on that run — the answer that broke the worker. Use it as a fixture: reproduce the failure first, then fix it.',
+        ...extra,
+        failedWith: inp.error,
+        rule: inp.cause.rule,
+        ruleInWords: inp.cause.label,
+        contract: inp.contract,
+        sources: src,
+      },
+      null,
+      2,
+    );
+
+  let out = doc({}, sources);
+  const cap = Number(capBytes) > 0 ? Math.floor(Number(capBytes)) : 0;
+  if (!cap || Buffer.byteLength(out, 'utf8') <= cap) return out;
+
+  // Over the runner's limit. Cut answers first; drop the OLDEST sources only when that is not
+  // enough (the journal writes them in call order, so the newest sit at the end); shrink further
+  // as the last resort. The loop always terminates: every round makes the file strictly smaller.
+  const originalBytes = Buffer.byteLength(out, 'utf8');
+  let keep = [...sources];
+  let dropped = 0;
+  let allow = Math.max(TRIM_ANSWER_FLOOR, Math.floor(cap / Math.max(1, keep.length)));
+  for (let round = 0; round < 60; round++) {
+    const cut = keep.map((s) => {
+      const json = JSON.stringify(s.answer ?? null);
+      if (json.length <= allow) return s;
+      return { ...s, answer: null, answerTrimmed: { bytes: Buffer.byteLength(json, 'utf8'), head: json.slice(0, allow) } };
+    });
+    out = doc(
+      {
+        trimmed: true,
+        trimNote:
+          `This evidence was ${originalBytes} bytes — more than the ${cap} bytes the runner accepts for one file — so it was cut to fit. ` +
+          `An answer bigger than that budget keeps only the first ${allow} characters of its JSON, as answerTrimmed.head` +
+          (dropped ? `, and the ${dropped} oldest source${dropped === 1 ? '' : 's'} (of ${sources.length}) ${dropped === 1 ? 'was' : 'were'} dropped entirely — the newest are kept` : '') +
+          '. rows/columns/flags are intact. A cut answer cannot be replayed verbatim: treat the head as a shape hint, not a fixture.',
+      },
+      cut,
+    );
+    if (Buffer.byteLength(out, 'utf8') <= cap) return out;
+    if (allow > TRIM_ANSWER_FLOOR) allow = Math.max(TRIM_ANSWER_FLOOR, Math.floor(allow / 2));
+    else if (keep.length > 1) { keep = keep.slice(1); dropped++; }
+    else if (allow > 50) allow = Math.max(50, Math.floor(allow / 2));
+    else break;
+  }
+  // Even one source with a 50-character head does not fit — the rest of the file (error, contract)
+  // is what is over. Send it as it stands: the runner will refuse it as `notStarted`, which does
+  // not count as an attempt, and the cause stays queued rather than burning the owner's two tries.
+  return out;
 }
 
 /** The brief for one repair turn. Pure, so a test reads exactly what Codex will read. */

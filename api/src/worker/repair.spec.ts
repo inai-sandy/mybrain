@@ -180,6 +180,36 @@ describe('what Codex is told, and what the owner is told (BEA-1393)', () => {
     expect(file.sources[0]).toMatchObject({ sourceId: 'src-a', actionId: 'svc:instagram.user_posts', unrecognised: true });
   });
 
+  it('evidence over the runner\'s cap is trimmed to fit — answers cut, the newest sources kept, and the file says so (BEA-1577)', () => {
+    const big = (id: string) => ({ sourceId: id, actionId: `svc:instagram.${id}`, rows: 5, columns: ['id'], answer: 'x'.repeat(10_000) });
+    const inp: any = { ...inputs, fetches: [big('oldest'), big('middle'), big('newest')] };
+
+    // Under the cap (or no cap at all): byte for byte the file it always was — nothing marked, nothing cut.
+    expect(failingFile(inp, 10_000_000)).toBe(failingFile(inp));
+    expect(JSON.parse(failingFile(inp, 10_000_000)).trimmed).toBeUndefined();
+
+    // Over it, with room for every source: each big answer is cut to a head; none is dropped.
+    const roomyRaw = failingFile(inp, 9_000);
+    expect(Buffer.byteLength(roomyRaw, 'utf8')).toBeLessThanOrEqual(9_000);
+    const roomy = JSON.parse(roomyRaw); // still valid JSON — never a file cut mid-character
+    expect(roomy.trimmed).toBe(true);
+    expect(roomy.trimNote).toMatch(/cut to fit/);
+    expect(roomy.sources.map((s: any) => s.sourceId)).toEqual(['oldest', 'middle', 'newest']);
+    for (const s of roomy.sources) {
+      expect(s.answer).toBeNull();
+      expect(s.answerTrimmed.bytes).toBeGreaterThan(9_000);
+      expect(s.answerTrimmed.head.length).toBeGreaterThan(0);
+      expect(s).toMatchObject({ rows: 5, columns: ['id'] }); // the counts and flags survive whole
+    }
+
+    // Tighter still: the OLDEST sources are dropped, the newest is kept — and the file says so.
+    const tightRaw = failingFile(inp, 3_000);
+    expect(Buffer.byteLength(tightRaw, 'utf8')).toBeLessThanOrEqual(3_000);
+    const tight = JSON.parse(tightRaw);
+    expect(tight.sources.map((s: any) => s.sourceId)).toEqual(['newest']);
+    expect(tight.trimNote).toMatch(/2 oldest sources \(of 3\) were dropped/);
+  });
+
   it('the three things the owner can be told all name the job, the break and what happens next', () => {
     const fixed = fixedWords('Smart Home', cause, 4, { within: true, changed: 0, why: 'it gives exactly the same 12 rows as before' });
     expect(fixed.headline).toBe('Smart Home fixed itself');

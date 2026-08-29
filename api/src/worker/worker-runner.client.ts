@@ -25,6 +25,13 @@ export type RunnerBuildResult = {
   timedOut?: boolean;
   log?: string;
   error?: string;
+  /**
+   * The runner refused BEFORE any Codex session existed — busy, an oversized file, a bad request,
+   * a closed door, or a runner that could not be reached at all (BEA-1577). The mirror of `/run`'s
+   * own field (BEA-1394): nothing was tried, so the repair loop must not count it as an attempt.
+   * The runner writes it on every pre-Codex refusal; a build that STARTED and failed never carries it.
+   */
+  notStarted?: boolean;
 };
 
 export type RunnerPromoteResult = { ok: boolean; version?: number; previous?: string | null; error?: string };
@@ -101,12 +108,31 @@ export class WorkerRunnerClient {
         signal: AbortSignal.timeout(input.timeoutMs ? input.timeoutMs + 60_000 : BUILD_TIMEOUT_MS),
       });
       const json: any = await r.json().catch(() => null);
-      if (!r.ok) return { ok: false, error: json?.error || `the worker runner answered ${r.status}`, ...(json || {}) };
+      // A non-200 carries the runner's own `notStarted` when the refusal came before any Codex
+      // session (BEA-1577) — the spread keeps it; nothing here parses error prose.
+      if (!r.ok) return { ...(json || {}), ok: false, error: json?.error || `the worker runner answered ${r.status}` };
       return { ok: !!json?.ok, ...(json || {}) };
     } catch (e: any) {
       this.log.warn(`build for ${input.jobId} could not run: ${e?.message || e}`);
-      return { ok: false, error: `The build could not run — ${reasonOf(e)}.` };
+      // The runner is not installed, is down, or never answered — the same reading `/run` gives
+      // this road (BEA-1394): nothing of ours ran, so no Codex session was started.
+      return { ok: false, error: `The build could not run — ${reasonOf(e)}.`, notStarted: true };
     }
+  }
+
+  /**
+   * The runner's own body limits, read off `/status` (BEA-1577). The numbers live in the runner and
+   * only there — the app trims what it sends to fit them, never restating them in a second place.
+   * `null` means the runner did not say (down, or an older build): send untrimmed and let the
+   * refusal come back `notStarted`, which does not count as an attempt.
+   */
+  async limits(): Promise<{ fileBytes: number | null; filesBytes: number | null }> {
+    const s: any = await this.status();
+    const l = s?.limits || {};
+    return {
+      fileBytes: Number(l.fileBytes) > 0 ? Number(l.fileBytes) : null,
+      filesBytes: Number(l.filesBytes) > 0 ? Number(l.filesBytes) : null,
+    };
   }
 
   /**

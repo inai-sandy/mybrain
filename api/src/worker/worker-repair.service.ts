@@ -44,7 +44,7 @@ export const REPAIR_LOCK_MS = 25 * 60_000;
  * list, read by both the cap and the "what has already been tried" note — two lists is how a cause
  * gets three tries out of a two-try rule.
  */
-const COUNTED = ['failed', 'held', 'promoted'];
+export const COUNTED = ['failed', 'held', 'promoted'];
 
 /**
  * Self-heal (BEA-1393, agent workers 8/10 — `specs/AGENT-WORKERS.md` §G).
@@ -307,6 +307,13 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
         if (attempt > first) row = await this.nextRow(queuedRow, live);
         const done = await this.attempt(row, job, live, cause, attempt, tried);
         if (done.outcome === 'promoted' || done.outcome === 'held') return { outcome: done.outcome, version: done.version, why: done.why };
+        if (done.outcome === 'notStarted') {
+          // The runner refused before Codex existed (BEA-1577). The row is already back to `queued`,
+          // no attempt was used, and the cause is simply tried again on a later tick — the same
+          // reading as an app lock that could not be claimed.
+          this.log.log(`job ${agentId}: the runner refused before Codex started (${done.why}) — the repair stays queued and no attempt was used`);
+          return { outcome: 'busy', why: done.why };
+        }
         tried.push(done.why || 'it did not say why');
         // Two Codex turns can outlast the lock's own 30 minutes; keep it while we are still working.
         if (holder && !(await this.locks?.renew(holder, REPAIR_LOCK_MS).catch(() => false))) {
@@ -335,7 +342,7 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
     cause: FailureCause,
     attempt: number,
     tried: string[],
-  ): Promise<{ outcome: 'promoted' | 'held' | 'failed'; version?: number; why?: string }> {
+  ): Promise<{ outcome: 'promoted' | 'held' | 'failed' | 'notStarted'; version?: number; why?: string }> {
     await this.prisma.workerBuild.update({ where: { id: row.id }, data: { status: 'building', startedAt: new Date() } }).catch(() => undefined);
     const { req, kit, plan } = await this.builds.materials(job, { version: (live.version || 0) + 1, previousVersion: live.version, origin: 'rebuild' });
     const contract = safeContract(job);
@@ -351,12 +358,26 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
       fromVersion: live.version,
       previousTries: tried,
     };
-    const files = { ...req.files, [FAILING_FILE]: failingFile(inputs) };
+    // The evidence is trimmed to the RUNNER's own limits before it travels (BEA-1577) — a 2MB
+    // failing.json used to be refused at the door, and the refusal counted as a repair attempt.
+    const files = { ...req.files, [FAILING_FILE]: failingFile(inputs, await this.evidenceCap(req.files)) };
 
     const built = await this.runner.build({ jobId: job.id, brief: repairBrief(inputs), files, copyFrom: live.version });
     const tests = built.tests || null;
     const version = Number(built.version) || 0;
     const log = String(built.log || '').slice(-8000);
+    if (!built.ok && built.notStarted) {
+      // The runner refused BEFORE any Codex session — busy on the host, an oversized body, a closed
+      // door, or not reachable at all. Nothing was tried, so nothing may be counted (BEA-1577): the
+      // row goes back to `queued` — a status both `attemptsFor` and `triedFor` ignore, so neither
+      // the two-try cap nor the "already tried" note ever sees it — and the next tick tries the
+      // same cause again. The field is the runner's own fact, never read out of error prose.
+      const why = String(built.error || 'the worker runner refused before Codex was started');
+      await this.prisma.workerBuild
+        .update({ where: { id: row.id }, data: { status: 'queued', error: `Waiting for the runner — no repair attempt was used: ${why.slice(0, 300)}` } })
+        .catch(() => undefined);
+      return { outcome: 'notStarted', why };
+    }
     if (!built.ok) {
       const why = built.error
         ? built.error
@@ -524,9 +545,33 @@ export class WorkerRepairService implements OnModuleInit, OnModuleDestroy {
         reason: first.reason,
         planHash: live.planHash || '',
         kit: live.kit || '1',
-        sampleIds: '[]',
+        // The same failing evidence rides into the later attempt's folder — and stays with the row
+        // if a runner refusal sends it back to `queued` for a later tick (BEA-1577).
+        sampleIds: first.sampleIds || '[]',
       },
     });
+  }
+
+  /**
+   * The most `samples/failing.json` may be, read from the RUNNER's own declared limits — the cap
+   * has exactly one home, the runner (BEA-1577). Bounded twice: the per-file limit, and what is
+   * left of the all-files limit after the build's other files. `null` = the runner did not say
+   * (down, or older): no trimming, and an over-cap send comes back `notStarted`, which never
+   * counts as an attempt.
+   */
+  private async evidenceCap(others: Record<string, string>): Promise<number | null> {
+    const limits = await this.runner.limits?.().catch(() => null);
+    const file = Number(limits?.fileBytes) || 0;
+    if (!file) return null;
+    const total = Number(limits?.filesBytes) || 0;
+    if (!total) return file;
+    let used = 0;
+    for (const body of Object.values(others || {})) used += Buffer.byteLength(String(body ?? ''), 'utf8');
+    const room = total - used;
+    // The other files alone already blow the all-files budget: no trim of the evidence can save the
+    // send, so at least keep it consistent at the per-file cap — a 0 here would read as "no cap
+    // known" and skip trimming entirely (review finding, BEA-1577).
+    return room <= 0 ? file : Math.min(file, room);
   }
 
   /** The failing answers this repair was queued with, read back out of the store. */
