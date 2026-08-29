@@ -29,6 +29,8 @@ export type WorkerBuild = {
   reason?: string | null;
   tests?: { passed: number; failed: number } | null;
   error?: string | null;
+  /** The customer-facing failure words (BEA-1580): plumbing → calm shape, else the sentence ending in a move. */
+  errorWords?: string | null;
   stale?: boolean;
   startedAt: string;
   finishedAt?: string | null;
@@ -349,7 +351,7 @@ export function WorkerRow({ agentId, worker: w, contractWords, reload, toast }: 
                   {' · '}{b.status}
                   {b.tests ? ` · ${b.tests.passed} passed${b.tests.failed ? `, ${b.tests.failed} failed` : ''}` : ''}
                   {' · '}{dt(b.finishedAt || b.startedAt)}
-                  {b.error && <span className="block text-xs text-zinc-400">{b.error}</span>}
+                  {b.error && <span className="block text-xs text-zinc-400">{b.errorWords || b.error}</span>}
                   {b.cause && b.origin === 'repair' && <span className="block text-xs text-zinc-400">what broke: {b.cause}</span>}
                   {/* WHEN THE GOAL CHANGED (BEA-1509). Editing a goal rebuilds the program, so the
                       build history is also the goal's history — every build stamps the goal it was

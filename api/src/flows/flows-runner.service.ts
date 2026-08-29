@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, OnModuleIni
 import { PrismaService } from '../prisma/prisma.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { AgentService } from '../agent/agent.service';
+import { customerWords } from '../agent/failure-words';
 import { JobBusyError, RunLockService } from '../agent/run-lock.service';
 import { LlmService } from '../llm/llm.service';
 import { DocumentsService } from '../documents/documents.service';
@@ -289,6 +290,10 @@ export class FlowRunnerService implements OnModuleInit {
     const results = this.parse(r.results);
     return {
       ...r,
+      // What the CUSTOMER reads about a failure (BEA-1580): plumbing-class → the calm shape, else
+      // the honest sentence ending in one of his six moves. Computed at show time; the stored
+      // `error` stays the honest internal sentence.
+      errorWords: r.status === 'failed' && r.error ? customerWords(r.error) : undefined,
       results,
       documents: this.parseArr(r.documentIds),
       waitOptions: this.parseArr(r.waitOptions),
@@ -777,8 +782,11 @@ export class FlowRunnerService implements OnModuleInit {
       // but BEA-800's guarantee is that a failed run never promotes anything to finalOutput at all.
       await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error, ...(finalOutput.trim() ? { finalOutput } : {}), results: JSON.stringify(results), documentIds: JSON.stringify(kept), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...spendJson() } as any });
       this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
-      void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: error.slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
-      void this.alerts?.runFailed(flow?.name || 'Your flow', error.slice(0, 200), `/flows/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
+      // What reaches him follows BEA-1580: plumbing is never his problem, everything else ends in
+      // one of his six moves. The stored `error` above stays the honest internal sentence.
+      const shown = customerWords(error);
+      void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: shown.slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
+      void this.alerts?.runFailed(flow?.name || 'Your flow', shown.slice(0, 200), `/flows/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
       this.dropDriver(runId, gen);
       return;
     }

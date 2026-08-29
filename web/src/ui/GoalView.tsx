@@ -31,7 +31,7 @@ export type Goal = {
   tools: string[];
   approvedAt?: string | null;
   /** What became of it after approval (BEA-1467) — building | done | failed, and why. */
-  run?: { status: string; error?: string | null; resultText?: string | null; agentId?: string | null; runId?: string | null } | null;
+  run?: { status: string; error?: string | null; errorWords?: string | null; resultText?: string | null; agentId?: string | null; runId?: string | null } | null;
 };
 
 export function GoalView({ goal, busy, onApprove, onSendBack, onAnswer }: {
@@ -197,7 +197,7 @@ export function GoalOutcome({ run }: { run?: Goal['run'] }) {
       <div className="rounded-lg border border-red-300 bg-red-50/70 p-2.5 dark:border-red-500/30 dark:bg-red-500/10" data-testid="goal-run-failed">
         <p className="text-xs font-semibold text-red-800 dark:text-red-300">It ran and could not finish</p>
         <p className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-200">
-          {run.error || 'It stopped without saying why.'}
+          {run.errorWords || run.error || 'It stopped without saying why.'}
         </p>
         <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">Nothing was saved or sent. Fix what it asks for and send the conversation again.</p>
       </div>

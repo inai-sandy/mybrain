@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
+import { customerWords } from '../agent/failure-words';
 import { RunLockService, isJobBusy } from '../agent/run-lock.service';
 import { AlertsService } from '../push/alerts.service';
 import { WorkerRunnerClient } from './worker-runner.client';
@@ -191,7 +192,7 @@ export class WorkerSweeperService implements OnModuleInit, OnModuleDestroy {
     for (const wp of due as any[]) {
       if (!(await this.agent.expireAsk(wp.id).catch(() => false))) continue;
       const hours = Math.max(1, Math.round((now.getTime() - new Date(wp.createdAt).getTime()) / 3600_000));
-      const why = `I asked you "${String(wp.question).slice(0, 200)}" and heard nothing for ${hours} hours. The question named no default, so the run stopped rather than guess. Nothing was written.`;
+      const why = `I asked you "${String(wp.question).slice(0, 200)}" and heard nothing for ${hours} hours. The question named no default, so the run stopped rather than guess. Nothing was written. Run it again when you like.`;
       await this.agent.appendStep(wp.runId, { label: `No answer in ${hours} hours — stopped`, status: 'failed', detail: why }).catch(() => undefined);
       await this.agent.finishRun(wp.runId, { status: 'failed', error: why }).catch(() => undefined);
       this.tokens.revokeRun(wp.runId);
@@ -232,7 +233,10 @@ export class WorkerSweeperService implements OnModuleInit, OnModuleDestroy {
   // ---- shared ----------------------------------------------------------------------------------
 
   private async fail(run: { id: string; title?: string | null }, why: string): Promise<void> {
-    await this.agent.appendStep(run.id, { label: why.slice(0, 200), status: 'failed' }).catch(() => undefined);
+    // The step is the customer's (BEA-1580): plumbing-class ("the worker runner could not be
+    // reached") becomes the calm shape, anything actionable ends in its move. `finishRun` keeps
+    // the honest sentence on the run row untouched.
+    await this.agent.appendStep(run.id, { label: customerWords(why).slice(0, 200), status: 'failed' }).catch(() => undefined);
     await this.agent.finishRun(run.id, { status: 'failed', error: why }).catch(() => undefined);
     this.tokens.revokeRun(run.id);
     await this.tell(run.title || 'Your agent', why, run.id);
@@ -240,7 +244,9 @@ export class WorkerSweeperService implements OnModuleInit, OnModuleDestroy {
 
   /** The owner hears about it on the one road every other alert takes. Never throws. */
   private async tell(name: string, why: string, runId: string): Promise<void> {
-    await this.alerts?.runFailed?.(name, why, `/agent/runs/${runId}`).catch(() => undefined);
+    // What lands on his phone follows the same rule as the screen (BEA-1580) — a plumbing failure
+    // is never his problem, and everything else names his next move.
+    await this.alerts?.runFailed?.(name, customerWords(why), `/agent/runs/${runId}`).catch(() => undefined);
   }
 }
 
