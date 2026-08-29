@@ -6,6 +6,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
 import { customerWords } from '../agent/failure-words';
+import { opsAlertIfPlumbing } from '../push/ops-alert';
 import { BriefService } from '../agent/brief.service';
 import { ToolLessonService, shapeInWords } from '../tools/tool-lesson.service';
 import { ToolLookupService } from '../tools/tool-lookup.service';
@@ -571,6 +572,10 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
             ? `The worker's own tests did not pass (${tests.passed} passed, ${tests.failed} failed).`
             : 'The worker wrote no tests, so nothing could be proved about it.';
       const stayed = before.worker ? `v${before.worker.version} is still the live worker.` : 'The job is still running the old way, on the plan runner.';
+      // A build that failed on OUR plumbing (runner unreachable, workers folder unusable, broken
+      // install) phones home (BEA-1581) — the classifier decides; a Codex build that honestly
+      // failed its tests is not plumbing and stays quiet.
+      opsAlertIfPlumbing(why, { agentId });
       await this.finish(row.id, { status: 'failed', version, tests, sessionId: built.sessionId, log, error: `${why} ${stayed}` });
       return { ...(await this.state(agentId)), built: { ok: false, version, tests, error: `${why} ${stayed}` } };
     }

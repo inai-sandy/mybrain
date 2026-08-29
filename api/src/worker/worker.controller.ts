@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Post, Req, UseGuards } from '@ne
 import { Public } from '../auth/public.decorator';
 import { AgentService } from '../agent/agent.service';
 import { customerWords } from '../agent/failure-words';
+import { opsAlertIfPlumbing } from '../push/ops-alert';
 import { LlmService } from '../llm/llm.service';
 import { AlertsService } from '../push/alerts.service';
 import { whatsappStepLabel } from '../contacts/owner-alert';
@@ -830,14 +831,19 @@ export class WorkerController {
    */
   @Post('finish')
   async finish(@Req() req: any, @Body() body: any) {
-    const { runId } = who(req);
+    const { runId, agentId } = who(req);
     this.trialAsks.delete(runId); // the check's repeat-question tally dies with the run (BEA-1571)
     const status = body?.status === 'failed' ? 'failed' : body?.status === 'cancelled' ? 'cancelled' : 'done';
     const error = body?.error ? String(body.error).slice(0, 2000) : undefined;
     // The step is what the customer reads (BEA-1580): a plumbing-class failure becomes the calm
     // shape, a customer-actionable one ends in its move. `finishRun` below still stores the honest
     // internal sentence untouched on the run row — that one is ours (and BEA-1581's).
-    if (status === 'failed' && error) await this.agent.appendStep(runId, { label: customerWords(error), status: 'failed' }).catch(() => undefined);
+    if (status === 'failed' && error) {
+      await this.agent.appendStep(runId, { label: customerWords(error), status: 'failed' }).catch(() => undefined);
+      // A worker failing on OUR plumbing — NOT_REPEATABLE, a crash, the app restarting under it —
+      // phones home (BEA-1581). The classifier decides; his own failures never page us.
+      opsAlertIfPlumbing(error, { agentId, runId });
+    }
     const run = await this.agent.finishRun(runId, {
       status: status as any,
       error,

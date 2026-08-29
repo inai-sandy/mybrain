@@ -74,7 +74,11 @@ export const PLUMBING_CLASSES: PlumbingClass[] = [
   {
     id: 'app-restart',
     means: 'the app was restarted or deployed while the worker was still going',
-    test: /app stopped listening/i,
+    // Two detections of the SAME event (BEA-1581): the runner's "The app stopped listening, so the
+    // worker was stopped" and the boot reconciler's "Interrupted by an engine restart…" /
+    // "…when the engine restarted…" (agent.service.ts reconcileOrphans). One class, so the customer
+    // reads the same calm shape whichever side noticed, and the ops alert fires either way.
+    test: /app stopped listening|engine restart/i,
   },
   {
     id: 'model-blank',

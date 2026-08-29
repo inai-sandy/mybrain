@@ -6,7 +6,9 @@
     {
       "id": "BEA-1580",
       "title": "every failure ends in one of the six moves; plumbing never presented as his problem",
-      "status": "pending"
+      "status": "done",
+      "sha": "f5a235c",
+      "note": "failure-words.ts classifier; six moves on every surfaced failure; 8 plumbing classes exported incl. model-blank; critical+high regex over-matches fixed and re-verified"
     },
     {
       "id": "BEA-1581",

@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
 import { customerWords } from '../agent/failure-words';
+import { opsAlertIfPlumbing } from '../push/ops-alert';
 import { RunLockService, isJobBusy } from '../agent/run-lock.service';
 import { AlertsService } from '../push/alerts.service';
 import { WorkerRunnerClient } from './worker-runner.client';
@@ -232,10 +233,13 @@ export class WorkerSweeperService implements OnModuleInit, OnModuleDestroy {
 
   // ---- shared ----------------------------------------------------------------------------------
 
-  private async fail(run: { id: string; title?: string | null }, why: string): Promise<void> {
+  private async fail(run: { id: string; agentId?: string | null; title?: string | null }, why: string): Promise<void> {
     // The step is the customer's (BEA-1580): plumbing-class ("the worker runner could not be
     // reached") becomes the calm shape, anything actionable ends in its move. `finishRun` keeps
     // the honest sentence on the run row untouched.
+    // A plumbing-class reason also phones home to US (BEA-1581) — the classifier decides, and the
+    // seam's per-(class, agent)-per-day dedupe is what stops a stuck state alerting every tick.
+    opsAlertIfPlumbing(why, { agentId: run.agentId, runId: run.id });
     await this.agent.appendStep(run.id, { label: customerWords(why).slice(0, 200), status: 'failed' }).catch(() => undefined);
     await this.agent.finishRun(run.id, { status: 'failed', error: why }).catch(() => undefined);
     this.tokens.revokeRun(run.id);
