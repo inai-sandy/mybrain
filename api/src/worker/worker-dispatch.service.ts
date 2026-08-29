@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
+import { plumbingClassOf } from '../agent/failure-words';
 import { isJobBusy } from '../agent/run-lock.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
@@ -212,7 +213,11 @@ export class WorkerDispatchService implements OnModuleInit {
       // One sentence, not two glued together: the runner's reason is folded into the owner's line
       // (its own leading capital and full stop would read as a second sentence inside this one).
       const why = String(r.error || 'the worker road was not available').replace(/\.$/, '').replace(/^([A-Z])(?![A-Z])/, (m) => m.toLowerCase());
-      this.log.warn(`run ${runId}: worker road unavailable — ${why}`);
+      // A plumbing-class reason that already falls back stays EXACTLY as it is (BEA-1580) — the run
+      // carried on and nothing was lost, so the honest reason in the step is fine. The classifier
+      // only NAMES the class here, which is the hook BEA-1581's alert reads the log by.
+      const cls = plumbingClassOf(why);
+      this.log.warn(`run ${runId}: worker road unavailable — ${why}${cls ? ` [plumbing:${cls}]` : ''}`);
       return { fallback: `Ran it the old way for this run — ${why}.` };
     }
     await this.agent.finishRun(runId, { status: 'failed', error: r.error || 'The worker stopped without saying why.' }).catch(() => undefined);

@@ -199,7 +199,7 @@ export function FlowRunView() {
         </div>
       )}
       {run.status === 'done' && !run.finalOutput && <div className="rounded-2xl border border-zinc-200 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">The flow finished — connect a branch to the Output node to get a final result.</div>}
-      {run.status === 'failed' && <div className="rounded-2xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10">{run.error || 'The flow failed.'}</div>}
+      {run.status === 'failed' && <div className="rounded-2xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10">{run.errorWords || run.error || 'The flow failed.'}</div>}
     </div>
   );
 }

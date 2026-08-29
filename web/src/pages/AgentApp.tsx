@@ -634,7 +634,7 @@ export function AgentApp() {
                 <div key={r.id} className="group flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
                   <button onClick={() => nav(`/agent/runs/${r.id}`)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
                     <span className="w-[4.6rem] shrink-0 text-xs font-bold uppercase tracking-wide" style={{ color }}>{fmtDay(r.endedAt || r.startedAt)}</span>
-                    <span className="min-w-0 flex-1 truncate">{r.status === 'failed' ? <span className="text-rose-600 dark:text-rose-400">Failed{r.error ? ` — ${String(r.error).slice(0, 50)}` : ''}</span> : (plainPreview(r.resultText, 140) || r.title || a.name)}</span>
+                    <span className="min-w-0 flex-1 truncate">{r.status === 'failed' ? <span className="text-rose-600 dark:text-rose-400">Failed{(r.errorWords || r.error) ? ` — ${String(r.errorWords || r.error).slice(0, 50)}` : ''}</span> : (plainPreview(r.resultText, 140) || r.title || a.name)}</span>
                   </button>
                   {(r.status === 'failed' || r.status === 'done') && (
                     <button onClick={() => fetch(`/api/agent/runs/${r.id}/replay`, { method: 'POST' }).then(() => { toast('success', r.status === 'failed' ? 'Retrying…' : 'Running it again…'); loadRuns(); })} title={r.status === 'failed' ? 'Retry' : 'Run again'} className={'shrink-0 rounded-lg p-1 ' + (r.status === 'failed' ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10' : 'text-zinc-300 hover:text-emerald-600 group-hover:text-zinc-400')}><RotateCcw className="h-3.5 w-3.5" /></button>

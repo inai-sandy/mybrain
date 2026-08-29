@@ -4,6 +4,7 @@ import { LlmService } from '../llm/llm.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
 import { ToolSampleService } from '../tools/tool-sample.service';
 import { BuilderSampleService } from './builder-sample.service';
+import { customerWords } from './failure-words';
 import { cardText } from './thinking-builder';
 import { GoalRequest, Turn, ToolInfo, LiveLook, goalPrompt, isQuestion, nothingCameBack } from './goal';
 
@@ -37,7 +38,7 @@ export type GoalView = {
    * was static and nothing ever told it otherwise. A quiet failure, in the week I spent removing
    * quiet failures.
    */
-  run?: { status: string; error?: string | null; resultText?: string | null; agentId?: string | null; runId?: string | null; at?: string | null } | null;
+  run?: { status: string; error?: string | null; errorWords?: string | null; resultText?: string | null; agentId?: string | null; runId?: string | null; at?: string | null } | null;
 };
 
 /**
@@ -103,6 +104,9 @@ export class GoalService {
     return {
       status: String(run.status || ''),
       error: run.error ? String(run.error) : null,
+      // What the CUSTOMER reads (BEA-1580): plumbing → the calm shape, else the sentence ending in
+      // one of his six moves. `error` above stays the honest internal sentence.
+      errorWords: run.status === 'failed' && run.error ? customerWords(String(run.error)) : null,
       resultText: run.resultText ? String(run.resultText) : null,
       agentId: String(job.id),
       runId: String(run.id),

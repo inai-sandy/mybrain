@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
+import { customerWords } from '../agent/failure-words';
 import { DocumentsService } from '../documents/documents.service';
 import { LlmService } from '../llm/llm.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -146,8 +147,11 @@ export class SocialAgentRunService {
     const fail = async (error: string) => {
       await step({ label: error, status: 'failed' });
       await this.agent.finishRun(runId, { status: 'failed', error }).catch(() => undefined);
-      await this.push?.send?.({ title: `${title} failed`, body: error.slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` } as any)?.catch(() => undefined);
-      await this.alerts?.runFailed?.(title, error, `/agent/runs/${runId}`)?.catch(() => undefined);
+      // What reaches his phone follows BEA-1580: a plumbing-class failure is never his problem,
+      // anything actionable ends in one of his six moves. The run row keeps the honest sentence.
+      const shown = customerWords(error);
+      await this.push?.send?.({ title: `${title} failed`, body: shown.slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` } as any)?.catch(() => undefined);
+      await this.alerts?.runFailed?.(title, shown, `/agent/runs/${runId}`)?.catch(() => undefined);
     };
 
     try {

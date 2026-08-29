@@ -26,6 +26,8 @@ type Run = {
   resultText?: string | null;
   grade?: Grade | null;
   error?: string | null;
+  /** The customer-facing failure words (BEA-1580): plumbing → the calm shape, else the honest sentence ending in one of the six moves. */
+  errorWords?: string | null;
   startedAt: string;
   endedAt?: string | null;
   /** Which road this run took: engine (a Codex turn) | worker | plan (BEA-1387). */
@@ -376,9 +378,9 @@ export function AgentRunView() {
           )}
           {run.status === 'failed' && (
             <div className="rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
-              {run.error || 'The run failed.'}
+              {run.errorWords || run.error || 'The run failed.'}
               {/* "Connect X first — open /tools" gets the door, not just the sentence (BEA-1357). */}
-              {/\/tools\b/.test(run.error || '') && (
+              {/\/tools\b/.test(run.errorWords || run.error || '') && (
                 <button onClick={() => nav('/tools')} className="mt-2 block rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500">Open Tools to connect it</button>
               )}
             </div>

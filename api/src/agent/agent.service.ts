@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { normaliseToolArgs, toolsFor } from '../social/tool-args';
 import { RunLockService } from './run-lock.service';
+import { customerWords } from './failure-words';
 
 /** The shape of a mid-task question the agent can ask. */
 export type WaitKind = 'choice' | 'free_text' | 'approve_edit_reject' | 'form';
@@ -1495,6 +1496,11 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   private shapeRun(run: any) {
     return {
       ...run,
+      // What the CUSTOMER reads about a failure (BEA-1580): plumbing-class → the calm shape,
+      // customer-actionable → the same sentence ending in one of his six moves. Computed at show
+      // time from the stored row, so history is never migrated and `error` stays the honest
+      // internal sentence for us.
+      errorWords: run.status === 'failed' && run.error ? customerWords(run.error) : undefined,
       stepLog: this.parse(run.stepLog, [] as any[]),
       learnings: this.parse(run.learnings, [] as any[]),
       grade: run.grade ? this.parse(run.grade, null) : null,

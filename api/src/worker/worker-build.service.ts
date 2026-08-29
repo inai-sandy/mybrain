@@ -5,6 +5,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from '../agent/agent.service';
+import { customerWords } from '../agent/failure-words';
 import { BriefService } from '../agent/brief.service';
 import { ToolLessonService, shapeInWords } from '../tools/tool-lesson.service';
 import { ToolLookupService } from '../tools/tool-lookup.service';
@@ -870,6 +871,10 @@ export class WorkerBuildService implements OnModuleInit, OnModuleDestroy {
       sampleCount: countOf(b.sampleIds),
       sessionId: b.sessionId || null,
       error: b.error || null,
+      // What the CUSTOMER reads about a failed build (BEA-1580) — the stored `error` above stays
+      // the honest internal sentence; this is the same sentence ending in one of his six moves,
+      // or the calm shape when the failure was our plumbing.
+      errorWords: b.error ? customerWords(b.error) : null,
       log: b.log || null,
       stale: b.status === 'promoted' && !!planHash && b.planHash !== planHash,
       startedAt: b.startedAt,
