@@ -1,48 +1,27 @@
 {
-  "startedAt": "2026-08-22T17:55:00Z",
-  "status": "complete",
-  "note": "Brief First \u2014 BUILT, PROVED ON HIS REAL INBOX, LIVE. Six pieces (BEA-1405 to 1410) plus BEA-1414 filed for a flaky test. The 8-box form is no longer what an agent is made from: a brief in his own words, every line tagged your-words/looked/my-guess, four rules enforced in CODE (look before you plan, write the message down, say what \"it worked\" means, his words must be in it), Codex building from the brief plus the WHOLE conversation with killed ideas marked, and a TRIAL RUN that writes nothing and sends nothing standing between the brief and Create. Plus: the app now learns each tool by trying it (ToolLesson), so the Gmail-style trap is found by the machine instead of by a human after a disaster. PROVED: 15 real emails read (the old agent read 1), a real grouped WhatsApp summary instead of \"finished \u00b7 5 rows\", 0 documents written, 0 messages sent, 0 credits. The gate caught FOUR defects across four runs, two of them bugs in code written the same day. NOT DONE: he has not tapped Create \u2014 canCreate is true and the decision is his; \"send it to my phone\" is not wired; his old agent is untouched and still runs the old way.",
+  "startedAt": "2026-08-29T16:00:00Z",
+  "status": "running",
+  "note": "Agents reliability batch \u2014 from the full failure record (24 failed runs, 14 failed builds, audited 2026-08-29). Goal: a new agent works first time with no Claude Code in the loop. Gate fix first because every later ship leans on it.",
   "issues": [
     {
-      "id": "BEA-1405",
-      "title": "1/6 the brief: model + the interview that writes it",
-      "status": "done",
-      "sha": "cc64810",
-      "note": "evidence is the ToolCall row, not a ToolSample \u2014 Gmail/WhatsApp are never sampled on purpose, so a sample id could never evidence the very agent this exists to fix"
+      "id": "BEA-1385",
+      "title": "uicheck gate: a wrong route silently passes",
+      "status": "pending"
     },
     {
-      "id": "BEA-1406",
-      "title": "2/6 the brief screen: read it, fix it, approve it",
-      "status": "done",
-      "sha": "c4732af",
-      "note": "screenshots caught two phone-layout bugs and one of mine (brief of a deleted agent was created, now 404)"
+      "id": "BEA-1577",
+      "title": "a repair attempt only counts when Codex actually tried",
+      "status": "pending"
     },
     {
-      "id": "BEA-1407",
-      "title": "3/6 Codex builds from the brief and the whole transcript",
-      "status": "done",
-      "sha": "99da369"
+      "id": "BEA-1578",
+      "title": "a worker is told what a check is (trial contract in every brief)",
+      "status": "pending"
     },
     {
-      "id": "BEA-1408",
-      "title": "4/6 the trial run: see the real thing before Create",
-      "status": "done",
-      "sha": "a3f00f2"
-    },
-    {
-      "id": "BEA-1409",
-      "title": "5/6 the app learns each tool by trying it",
-      "status": "done",
-      "sha": "fd1b495",
-      "note": "learned its first real fact live: Instagram paging, from one call, with nobody typing"
-    },
-    {
-      "id": "BEA-1410",
-      "title": "6/6 rebuild the nightly email agent the new way (the proof)",
-      "status": "done",
-      "sha": "0b9a6c3",
-      "note": "4 real Codex builds + 4 real runs on his inbox; caught 4 defects (2 of them mine, in code written today); nothing written, nothing sent, 0 credits; the final Create tap is HIS"
+      "id": "BEA-1403",
+      "title": "plan runner gets the loud is-this-obviously-wrong check (Gmail read ONE email)",
+      "status": "pending"
     }
-  ],
-  "completedAt": "2026-08-22T20:20:00Z"
+  ]
 }

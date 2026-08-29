@@ -36,10 +36,15 @@ WIDTHS="${UI_WIDTHS:-1180 390}"
 SHOTDIR=".claude/checks/ui-shots/${UI_LABEL:-latest}"
 mkdir -p "$SHOTDIR"
 
-# Routes: arguments win, else the configured list, else just the home page.
+# Routes: arguments win, else $UI_ROUTES, else the configured list, else just the home page.
+# ship.sh expands $UI_ROUTES into arguments; honouring the same variable here means a hand
+# run (`UI_ROUTES="/agent" uicheck.sh`) checks exactly what the ship would, not the full list.
 ROUTES=()
 if [ "$#" -gt 0 ]; then
   ROUTES=("$@")
+elif [ -n "${UI_ROUTES:-}" ] && [ "${UI_ROUTES}" != "-" ]; then
+  # shellcheck disable=SC2206  # splitting on spaces is the point — same as ship.sh line 118
+  set -f; ROUTES=(${UI_ROUTES}); set +f   # -f: split, but never glob-expand against the repo
 elif [ -f .claude/checks/ui-routes ]; then
   while IFS= read -r line; do
     line="${line%%#*}"; line="$(printf '%s' "$line" | tr -d '[:space:]')"
@@ -47,6 +52,84 @@ elif [ -f .claude/checks/ui-routes ]; then
   done < .claude/checks/ui-routes
 fi
 [ "${#ROUTES[@]}" -eq 0 ] && ROUTES=("/")
+
+FAILURES=(); WARNINGS=()
+
+# ROUTE TRUTH (BEA-1385) — refuse to bless a screen the app does not have.
+# A ship once ran with UI_ROUTES="/agents"; the real route is /agent. The SPA served its
+# fallback (the nested `path="*"` renders the Dashboard) for the unknown path, the page
+# rendered cleanly, and the gate PASSED — on the wrong screen. Same family as the login-wall
+# check below: the gate must never approve what it did not actually look at.
+# Truth = the `Route path=` entries in web/src/App.tsx at gate time, plus "/" for the
+# <Route index> home page. A ":param" segment matches anything (so /agent/a/<real-id>
+# still passes); wildcard patterns ARE the fallback, so they count for nothing. Query
+# strings are stripped before matching (/news?view=radar is the /news route).
+# Probed defensively, like the login-wall check: if the route table cannot be read, that
+# is a loud warning and the gate carries on as before — it never fails a ship for a
+# problem of its own making.
+route_report="$(python3 - "${ROUTES[@]}" <<'PY' 2>/dev/null
+import sys, re, difflib
+
+reqs = sys.argv[1:]
+try:
+    src = open("web/src/App.tsx", encoding="utf-8").read()
+except Exception as e:
+    print("ERR could not read web/src/App.tsx (%s)" % e)
+    raise SystemExit(0)
+
+# Per line, so an attribute-order swap (<Route element={...} path="x">) still counts:
+# routes here are one per line, and path= must not need to be the first attribute.
+pats = [m for line in src.splitlines() if "<Route" in line
+        for m in re.findall(r'path="([^"]*)"', line)]
+pats = [p for p in pats if "*" not in p]          # wildcards are the fallback itself
+if not pats:
+    print("ERR no Route path= entries found in web/src/App.tsx — has the router moved?")
+    raise SystemExit(0)
+pats = [p if p.startswith("/") else "/" + p for p in pats]  # nested routes hang off "/"
+pats.append("/")                                  # <Route index> — home has no path= attribute
+
+def segs(path):
+    path = path.split("?", 1)[0].split("#", 1)[0]
+    return [s for s in path.split("/") if s]
+
+def matches(req, pat):
+    r, p = segs(req), segs(pat)
+    if len(r) != len(p):
+        return False
+    # react-router matches literals case-insensitively; :params match any one segment
+    return all(b.startswith(":") or a.lower() == b.lower() for a, b in zip(r, p))
+
+for req in reqs:
+    if any(matches(req, p) for p in pats):
+        print("OK " + req)
+    else:
+        clean = req.split("?", 1)[0]
+        near = difflib.get_close_matches(clean, pats, n=1, cutoff=0.5)
+        if near:
+            print("BAD route %s does not exist — did you mean %s?" % (req, near[0]))
+        else:
+            print("BAD route %s does not exist in web/src/App.tsx — the app would silently show its fallback page instead" % req)
+PY
+)" || route_report=""
+if [ -n "$route_report" ]; then
+  while IFS= read -r rline; do
+    case "$rline" in
+      "BAD "*) FAILURES+=("${rline#BAD }") ;;
+      "ERR "*) WARNINGS+=("route check skipped: ${rline#ERR }") ;;
+    esac
+  done <<<"$route_report"
+else
+  WARNINGS+=("route check skipped: the route-table probe crashed or python3 is missing")
+fi
+if [ ${#FAILURES[@]} -gt 0 ]; then
+  # Fail before the browser ever opens: photographing the fallback page for a route that
+  # does not exist proves nothing, and re-minting a login for it wastes a session.
+  printf '\n'
+  echo "BROKEN (this issue is NOT done):"
+  for f in "${FAILURES[@]}"; do echo "  x $f"; done
+  echo "== UI CHECK FAILED =="
+  exit 1
+fi
 
 [ -f .claude/checks/ui-session ] && export AGENT_BROWSER_SESSION_NAME="$(tr -d '[:space:]' < .claude/checks/ui-session)"
 
@@ -72,7 +155,7 @@ STATE=".claude/checks/ui-state.json"
 echo "== UI CHECK: ${BASE} =="
 echo "   ${#ROUTES[@]} route(s) x widths: ${WIDTHS}"
 
-FAILURES=(); WARNINGS=()
+# FAILURES/WARNINGS start above the route-truth check, so its warnings reach the summary.
 
 # The in-page probe. Returns JSON. Kept in one place so both widths run identical logic.
 probe_js() {
