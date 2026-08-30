@@ -69,9 +69,17 @@ describe('EmoController (BEA-862)', () => {
     expect(r).toEqual({ runId: 'run-9', name: 'ESP32 weekly top posts' });
   });
 
-  it('refuses to run a switched-off agent from the device (BEA-1590)', async () => {
+  it('runs a schedule-off agent from the device just like the app does (BEA-1591)', async () => {
     bridge.startRun.mockClear();
-    await expect(ctrl.deviceRunAgent('off')).rejects.toThrow('switched off');
+    const r = await ctrl.deviceRunAgent('off');
+    expect(bridge.startRun).toHaveBeenCalled();
+    expect(r.runId).toBe('run-9');
+  });
+
+  it('still refuses an agent with no task (BEA-1591)', async () => {
+    bridge.startRun.mockClear();
+    agentSvc.getAgent.mockImplementationOnce(async () => ({ id: 'empty', name: 'Draft', enabled: true, prompt: '' }));
+    await expect(ctrl.deviceRunAgent('empty')).rejects.toThrow('no task');
     expect(bridge.startRun).not.toHaveBeenCalled();
   });
 });

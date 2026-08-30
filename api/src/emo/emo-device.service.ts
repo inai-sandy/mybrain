@@ -173,10 +173,12 @@ export class EmoDeviceService {
     private readonly tasks: TasksService,
   ) {}
 
-  /** The owner's enabled agents, three fields only — the device draws one row at a time. (BEA-1590) */
+  /** Every agent with a task, three fields only — the device draws one row at a time. (BEA-1590)
+   *  Not filtered on `enabled`: that flag is the SCHEDULE switch, and hand-run agents live with it
+   *  off. The app's Run button ignores it too. (BEA-1591) */
   async listAgentsForDevice(): Promise<{ id: string; name: string; color: string | null }[]> {
     const rows = await this.prisma.agent.findMany({
-      where: { enabled: true },
+      where: { AND: [{ prompt: { not: null } }, { prompt: { not: '' } }] },   /* has a task; never lists what run would refuse */
       select: { id: true, name: true, color: true },
       orderBy: { name: 'asc' },
     });
