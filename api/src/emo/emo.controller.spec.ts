@@ -21,7 +21,9 @@ describe('EmoController (BEA-862)', () => {
   const settingsSvc: any = { get: jest.fn(async () => ({})), set: jest.fn(async () => ({})) };
   const deviceSvc: any = { turn: jest.fn(async () => ({ ok: true, mode: 'capture', heard: 'x', reply: 'r', say: 's' })), ttsWav16k: jest.fn(async () => Buffer.from('RIFF')), readAudio: jest.fn(() => Buffer.from('RIFFdata')) };
   const notesSvc: any = { create: jest.fn(async () => ({ id: 'n1' })) };
-  const ctrl = new EmoController(svc, router, capture, search, taskLane, reminderLane, storyLane, researchLane, askSvc, talkSvc, settingsSvc, deviceSvc, notesSvc, { handle: async () => undefined } as any, { handle: async () => undefined } as any, { handle: async () => undefined } as any);
+  const agentSvc: any = { getAgent: jest.fn(async (id: string) => id === 'off' ? { id, name: 'Paused', enabled: false, prompt: 'x' } : { id, name: 'ESP32 weekly top posts', enabled: true, prompt: 'fetch the week', collectionId: null, rubric: null, defaultDepth: 'standard' }) };
+  const bridge: any = { applyAgentSkills: jest.fn(async (_a: any, input: any) => input), startRun: jest.fn(async () => ({ id: 'run-9' })) };
+  const ctrl = new EmoController(svc, router, capture, search, taskLane, reminderLane, storyLane, researchLane, askSvc, talkSvc, settingsSvc, deviceSvc, notesSvc, { handle: async () => undefined } as any, { handle: async () => undefined } as any, { handle: async () => undefined } as any, agentSvc, bridge);
 
   it('uploads a recording to the capture pipeline, and rejects an empty upload', async () => {
     await ctrl.upload({ buffer: Buffer.from('audio'), originalname: 'r.webm', mimetype: 'audio/webm' });
@@ -58,5 +60,18 @@ describe('EmoController (BEA-862)', () => {
   it('filters the feed to one person (BEA-1034)', async () => {
     await ctrl.list(undefined, undefined, undefined, 'c1', undefined, undefined);
     expect(svc.list).toHaveBeenCalledWith(expect.objectContaining({ contactId: 'c1' }));
+  });
+
+  it('runs an agent from the device through the app\'s own path, titled for the history (BEA-1590)', async () => {
+    const r = await ctrl.deviceRunAgent('a2');
+    expect(bridge.applyAgentSkills).toHaveBeenCalledWith(expect.objectContaining({ id: 'a2' }), expect.objectContaining({ prompt: 'fetch the week', title: 'ESP32 weekly top posts — from EMO Agent', agentId: 'a2', depth: 'standard' }));
+    expect(bridge.startRun).toHaveBeenCalled();
+    expect(r).toEqual({ runId: 'run-9', name: 'ESP32 weekly top posts' });
+  });
+
+  it('refuses to run a switched-off agent from the device (BEA-1590)', async () => {
+    bridge.startRun.mockClear();
+    await expect(ctrl.deviceRunAgent('off')).rejects.toThrow('switched off');
+    expect(bridge.startRun).not.toHaveBeenCalled();
   });
 });
