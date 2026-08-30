@@ -25,6 +25,10 @@ describe('EmoDeviceService (BEA-926)', () => {
   const prisma: any = {
     // Claims waiting on the owner also ride this feed now (BEA-1035). None in this fixture.
     taskClaim: { findMany: jest.fn(async () => []) },
+    agent: { findMany: jest.fn(async () => [
+      { id: 'a2', name: 'ESP32 weekly top posts', color: '#34d399' },
+      { id: 'a1', name: 'AI News Daily', color: null },
+    ]) },
     emoDeviceReminder: {
       findMany: jest.fn(async () => [{ id: 'dr1', text: 'call the vendor', dueAt: new Date(1760000000000), status: 'active' }]),
       update: jest.fn(async () => ({})),
@@ -292,5 +296,15 @@ describe('EmoDeviceService (BEA-926)', () => {
   it('a plain reminder still acks exactly as before', async () => {
     await svc.ackDeviceReminder('dr1', 'missed');
     expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'missed' } });
+  });
+
+  it('lists enabled agents for the device with three fields only (BEA-1590)', async () => {
+    const rows = await svc.listAgentsForDevice();
+    expect(prisma.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { enabled: true }, select: { id: true, name: true, color: true } }));
+    expect(rows).toEqual([
+      { id: 'a2', name: 'ESP32 weekly top posts', color: '#34d399' },
+      { id: 'a1', name: 'AI News Daily', color: null },
+    ]);
+    for (const r of rows) expect(Object.keys(r).sort()).toEqual(['color', 'id', 'name']);
   });
 });

@@ -16,6 +16,8 @@ import { EmoAskService, AskTurn } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
 import { EmoSettingsService, EmoSettings } from './emo-settings.service';
 import { EmoDeviceService } from './emo-device.service';
+import { AgentService } from '../agent/agent.service';
+import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { NotesService } from '../notes/notes.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
@@ -38,6 +40,8 @@ export class EmoController {
     private readonly closeLane: EmoCloseService, // last on purpose: keeps positional wiring stable
     private readonly briefLane: EmoBriefService,
     private readonly agentLane: EmoAgentLaneService,
+    private readonly agentSvc: AgentService,          // BEA-1590: run-from-device goes through the app's path
+    private readonly bridge: HermesBridgeService,
   ) {}
 
   // Shared EMO settings (BEA-908) — same source of truth for web + app.
@@ -155,6 +159,25 @@ export class EmoController {
   @Post('device/reminders/:id/ack')
   deviceReminderAck(@Param('id') id: string, @Body() body: { status?: string }) {
     return this.deviceSvc.ackDeviceReminder(id, String(body?.status || 'done'));
+  }
+
+  // EMO Agent hardware (BEA-1590): the device lists the owner's agents and starts one.
+  // Deliberately tiny: the device has 512 KB of RAM and holds one row at a time.
+  @Get('device/agents')
+  deviceAgents() {
+    return this.deviceSvc.listAgentsForDevice();
+  }
+
+  /** Starts the agent exactly like the app's Run button; the run is titled so history shows the device. */
+  @Post('device/agents/:id/run')
+  async deviceRunAgent(@Param('id') id: string) {
+    const agent = await this.agentSvc.getAgent(id);
+    if (!agent.enabled) throw new BadRequestException('This agent is switched off');
+    if (!agent.prompt) throw new BadRequestException('This agent has no task set yet');
+    const depth = agent.defaultDepth === 'quick' ? 'quick' : 'standard';
+    const input = await this.bridge.applyAgentSkills(agent, { prompt: agent.prompt, title: `${agent.name} — from EMO Agent`, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth, lockReason: 'a run you started from the device' });
+    const run: any = await this.bridge.startRun(input);
+    return { runId: run?.id ?? run?.runId ?? null, name: agent.name };
   }
 
   // Listen to what the device recorded for a card (BEA-927).

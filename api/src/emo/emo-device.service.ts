@@ -173,6 +173,16 @@ export class EmoDeviceService {
     private readonly tasks: TasksService,
   ) {}
 
+  /** The owner's enabled agents, three fields only — the device draws one row at a time. (BEA-1590) */
+  async listAgentsForDevice(): Promise<{ id: string; name: string; color: string | null }[]> {
+    const rows = await this.prisma.agent.findMany({
+      where: { enabled: true },
+      select: { id: true, name: true, color: true },
+      orderBy: { name: 'asc' },
+    });
+    return rows.map((r) => ({ id: r.id, name: String(r.name || '').slice(0, 40), color: r.color || null }));
+  }
+
   /**
    * What is waiting for the owner on the device. (BEA-1035)
    *
