@@ -298,9 +298,9 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'missed' } });
   });
 
-  it('lists enabled agents for the device with three fields only (BEA-1590)', async () => {
+  it('lists every agent with a task for the device, three fields only, whatever the schedule switch says (BEA-1590, BEA-1591)', async () => {
     const rows = await svc.listAgentsForDevice();
-    expect(prisma.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { enabled: true }, select: { id: true, name: true, color: true } }));
+    expect(prisma.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [{ prompt: { not: null } }, { prompt: { not: '' } }] }, select: { id: true, name: true, color: true } }));
     expect(rows).toEqual([
       { id: 'a2', name: 'ESP32 weekly top posts', color: '#34d399' },
       { id: 'a1', name: 'AI News Daily', color: null },

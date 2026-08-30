@@ -172,8 +172,7 @@ export class EmoController {
   @Post('device/agents/:id/run')
   async deviceRunAgent(@Param('id') id: string) {
     const agent = await this.agentSvc.getAgent(id);
-    if (!agent.enabled) throw new BadRequestException('This agent is switched off');
-    if (!agent.prompt) throw new BadRequestException('This agent has no task set yet');
+    if (!agent.prompt) throw new BadRequestException('This agent has no task set yet');   /* like the app: the schedule switch does not gate a manual run (BEA-1591) */
     const depth = agent.defaultDepth === 'quick' ? 'quick' : 'standard';
     const input = await this.bridge.applyAgentSkills(agent, { prompt: agent.prompt, title: `${agent.name} — from EMO Agent`, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth, lockReason: 'a run you started from the device' });
     const run: any = await this.bridge.startRun(input);
