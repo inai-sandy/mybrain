@@ -26,8 +26,15 @@ describe('EmoDeviceService (BEA-926)', () => {
     // Claims waiting on the owner also ride this feed now (BEA-1035). None in this fixture.
     taskClaim: { findMany: jest.fn(async () => []) },
     agent: { findMany: jest.fn(async () => [
-      { id: 'a2', name: 'ESP32 weekly top posts', color: '#34d399' },
-      { id: 'a1', name: 'AI News Daily', color: null },
+      { id: 'a2', name: 'ESP32 weekly top posts', color: '#34d399', areaId: null },
+      { id: 'a1', name: 'AI News Daily', color: null, areaId: null },
+      { id: 'a3', name: 'Build a manually run agent that, each time you start it, …', color: null, areaId: 'ar-esp' },
+      { id: 'a4', name: 'Meshtastic Practicality Report', color: null, areaId: 'ar-research' },
+      { id: 'a5', name: 'Indian Apartment EV Charging', color: null, areaId: 'ar-research' },
+    ]) },
+    agentArea: { findMany: jest.fn(async () => [
+      { id: 'ar-esp', name: 'top ESP32 posts from last week', color: '#fbbf24' },
+      { id: 'ar-research', name: 'Research Agent', color: '#2563EB' },
     ]) },
     emoDeviceReminder: {
       findMany: jest.fn(async () => [{ id: 'dr1', text: 'call the vendor', dueAt: new Date(1760000000000), status: 'active' }]),
@@ -298,12 +305,15 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'missed' } });
   });
 
-  it('lists every agent with a task for the device, three fields only, whatever the schedule switch says (BEA-1590, BEA-1591)', async () => {
+  it('lists every agent with a task, named like the app: card name, or the job name when the card holds several (BEA-1590/1591/1592)', async () => {
     const rows = await svc.listAgentsForDevice();
-    expect(prisma.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [{ prompt: { not: null } }, { prompt: { not: '' } }] }, select: { id: true, name: true, color: true } }));
+    expect(prisma.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [{ prompt: { not: null } }, { prompt: { not: '' } }] } }));
     expect(rows).toEqual([
-      { id: 'a2', name: 'ESP32 weekly top posts', color: '#34d399' },
       { id: 'a1', name: 'AI News Daily', color: null },
+      { id: 'a2', name: 'ESP32 weekly top posts', color: '#34d399' },
+      { id: 'a5', name: 'Indian Apartment EV Charging', color: '#2563EB' },   // shared card: job name, card colour
+      { id: 'a4', name: 'Meshtastic Practicality Report', color: '#2563EB' },
+      { id: 'a3', name: 'top ESP32 posts from last week', color: '#fbbf24' }, // its own card: the card's name
     ]);
     for (const r of rows) expect(Object.keys(r).sort()).toEqual(['color', 'id', 'name']);
   });

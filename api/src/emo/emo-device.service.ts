@@ -175,14 +175,31 @@ export class EmoDeviceService {
 
   /** Every agent with a task, three fields only — the device draws one row at a time. (BEA-1590)
    *  Not filtered on `enabled`: that flag is the SCHEDULE switch, and hand-run agents live with it
-   *  off. The app's Run button ignores it too. (BEA-1591) */
+   *  off. The app's Run button ignores it too. (BEA-1591)
+   *  Named like the app: the agent's CARD (AgentArea) name, which is what the owner recognises —
+   *  builder-made agents carry their first sentence as `Agent.name`. A card holding several jobs
+   *  ("Research Agent" × 4) shows each job's own name so rows stay distinct. (BEA-1592) */
   async listAgentsForDevice(): Promise<{ id: string; name: string; color: string | null }[]> {
     const rows = await this.prisma.agent.findMany({
       where: { AND: [{ prompt: { not: null } }, { prompt: { not: '' } }] },   /* has a task; never lists what run would refuse */
-      select: { id: true, name: true, color: true },
-      orderBy: { name: 'asc' },
+      select: { id: true, name: true, color: true, areaId: true },
     });
-    return rows.map((r) => ({ id: r.id, name: String(r.name || '').slice(0, 40), color: r.color || null }));
+    const areaIds = Array.from(new Set(rows.map((r: any) => r.areaId).filter(Boolean)));
+    let areas: { id: string; name: string; color: string | null }[] = [];
+    if (areaIds.length) {
+      try { areas = await this.prisma.agentArea.findMany({ where: { id: { in: areaIds } }, select: { id: true, name: true, color: true } }); }
+      catch { areas = []; }                                   /* a lookup failure never breaks the device feed */
+    }
+    const areaById = new Map<string, any>(areas.map((a) => [a.id, a]));
+    const perArea = new Map<string, number>();
+    for (const r of rows as any[]) if (r.areaId) perArea.set(r.areaId, (perArea.get(r.areaId) || 0) + 1);
+    const out = (rows as any[]).map((r) => {
+      const area = r.areaId ? areaById.get(r.areaId) : null;
+      const shared = r.areaId ? (perArea.get(r.areaId) || 0) > 1 : false;
+      const name = area && !shared ? area.name : r.name;
+      return { id: r.id, name: String(name || r.name || '').slice(0, 40), color: r.color || area?.color || null };
+    });
+    return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
