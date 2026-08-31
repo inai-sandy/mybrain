@@ -14,6 +14,45 @@ import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
 
+/** IMA ADPCM (4:1) — the one codec the 512 KB no-PSRAM boards can afford (BEA-1595).
+ *  Wire format: 256-byte blocks = [int16 LE predictor][uint8 step index][reserved] + 252 bytes
+ *  of 4-bit nibbles (low nibble first) -> 505 samples per block, 16 kHz mono. A truncated tail
+ *  block decodes as far as it goes; garbage never throws. */
+const IMA_STEP = [7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552,1707,1878,2066,2272,2499,2749,3024,3327,3660,4026,4428,4871,5358,5894,6484,7132,7845,8630,9493,10442,11487,12635,13899,15289,16818,18500,20350,22385,24623,27086,29794,32767];
+const IMA_INDEX = [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8];
+export const ADPCM_BLOCK = 256;
+export function decodeImaAdpcm(buf: Buffer, blockSize = ADPCM_BLOCK): Buffer {
+  if (!buf?.length || blockSize < 8) return Buffer.alloc(0);
+  const spb = (blockSize - 4) * 2 + 1;
+  const blocks = Math.ceil(buf.length / blockSize);
+  const out = Buffer.alloc(blocks * spb * 2);
+  let o = 0;
+  for (let b = 0; b < blocks; b++) {
+    const base = b * blockSize;
+    if (base + 4 > buf.length) break;
+    let pred = buf.readInt16LE(base);
+    let idx = Math.min(88, Math.max(0, buf[base + 2]));
+    out.writeInt16LE(pred, o); o += 2;
+    const end = Math.min(base + blockSize, buf.length);
+    for (let i = base + 4; i < end; i++) {
+      const byte = buf[i];
+      for (const nib of [byte & 0x0f, byte >> 4]) {
+        const step = IMA_STEP[idx];
+        let diff = step >> 3;
+        if (nib & 1) diff += step >> 2;
+        if (nib & 2) diff += step >> 1;
+        if (nib & 4) diff += step;
+        pred += (nib & 8) ? -diff : diff;
+        if (pred > 32767) pred = 32767; else if (pred < -32768) pred = -32768;
+        idx += IMA_INDEX[nib];
+        if (idx < 0) idx = 0; else if (idx > 88) idx = 88;
+        out.writeInt16LE(pred, o); o += 2;
+      }
+    }
+  }
+  return out.subarray(0, o);
+}
+
 /** Wrap raw 16-bit mono PCM in a minimal WAV container (what the transcriber + device speak). */
 export function wavWrap(pcm: Buffer, sampleRate = 16000, channels = 1): Buffer {
   const byteRate = sampleRate * channels * 2;
@@ -345,7 +384,7 @@ export class EmoDeviceService {
     try {
       if (!body?.length) return null;
       const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
-      let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : body;
+      let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : opts.codec === 'adpcm' ? decodeImaAdpcm(body) : body;
       if (!pcm.length) return null;
       pcm = normalizePcm(pcm);
       const wav = wavWrap(pcm, sr);
@@ -466,7 +505,7 @@ export class EmoDeviceService {
     if (!body?.length) throw new BadRequestException('No audio received');
     const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
-    let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : body;
+    let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : opts.codec === 'adpcm' ? decodeImaAdpcm(body) : body;
     if (!pcm.length) throw new BadRequestException('Could not decode the audio');
     pcm = normalizePcm(pcm);
     const wav = wavWrap(pcm, sr);

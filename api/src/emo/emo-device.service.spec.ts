@@ -1,4 +1,4 @@
-import { EmoDeviceService, wavWrap, resample24to16, decodeOpusStream, normalizePcm, clampForDevice, DEVICE_BODY_BUDGET } from './emo-device.service';
+import { EmoDeviceService, wavWrap, resample24to16, decodeOpusStream, decodeImaAdpcm, ADPCM_BLOCK, normalizePcm, clampForDevice, DEVICE_BODY_BUDGET } from './emo-device.service';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript');
 import * as fs from 'fs';
@@ -454,5 +454,77 @@ describe('INPUT inbox: agent questions + answers (BEA-1594)', () => {
     const r = await svc.turn(pcm, { mode: 'note', answerTo: 'card:feed1234-0000-0000-0000-000000000001' });
     expect(cards.answer).toHaveBeenCalledWith('feed1234-0000-0000-0000-000000000001', 'go with the second vendor');
     expect(r.reply).toBe('Answered.');
+  });
+});
+
+
+describe('IMA ADPCM decode (BEA-1595)', () => {
+  // Reference encoder — the mirror of the firmware's. Same tables as the decoder.
+  const STEP = [7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552,1707,1878,2066,2272,2499,2749,3024,3327,3660,4026,4428,4871,5358,5894,6484,7132,7845,8630,9493,10442,11487,12635,13899,15289,16818,18500,20350,22385,24623,27086,29794,32767];
+  const IDX = [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8];
+  function encode(pcm: Buffer, blockSize = ADPCM_BLOCK): Buffer {
+    const n = pcm.length >> 1;
+    const spb = (blockSize - 4) * 2 + 1;
+    const blocks = Math.ceil(n / spb);
+    const out = Buffer.alloc(blocks * blockSize);
+    let s = 0, pred = 0, idx = 0;
+    for (let b = 0; b < blocks; b++) {
+      const base = b * blockSize;
+      pred = s < n ? pcm.readInt16LE(s * 2) : pred;
+      out.writeInt16LE(pred, base); out[base + 2] = idx; out[base + 3] = 0;
+      s++;                                       // first sample rides the header verbatim
+      for (let i = base + 4; i < base + blockSize; i++) {
+        let byte = 0;
+        for (let half = 0; half < 2; half++) {
+          let nib = 0;
+          if (s < n) {
+            const step = STEP[idx];
+            let diff = pcm.readInt16LE(s * 2) - pred;
+            if (diff < 0) { nib = 8; diff = -diff; }
+            if (diff >= step) { nib |= 4; diff -= step; }
+            if (diff >= step >> 1) { nib |= 2; diff -= step >> 1; }
+            if (diff >= step >> 2) nib |= 1;
+            let d = step >> 3;
+            if (nib & 1) d += step >> 2;
+            if (nib & 2) d += step >> 1;
+            if (nib & 4) d += step;
+            pred += (nib & 8) ? -d : d;
+            if (pred > 32767) pred = 32767; else if (pred < -32768) pred = -32768;
+            idx += IDX[nib & 7];
+            if (idx < 0) idx = 0; else if (idx > 88) idx = 88;
+            s++;
+          }
+          byte |= half ? (nib << 4) : nib;
+        }
+        out[i] = byte;
+      }
+    }
+    return out;
+  }
+
+  it('round-trips a sine wave at 4:1 with decent fidelity', () => {
+    const n = 505 * 3;                                   // exactly 3 blocks
+    const pcm = Buffer.alloc(n * 2);
+    for (let i = 0; i < n; i++) pcm.writeInt16LE(Math.round(12000 * Math.sin((i / 16000) * 2 * Math.PI * 440)), i * 2);
+    const enc = encode(pcm);
+    expect(enc.length).toBe(3 * ADPCM_BLOCK);            // truly ~4:1
+    const dec = decodeImaAdpcm(enc);
+    expect(dec.length).toBe(pcm.length);
+    let sig = 0, err = 0;
+    for (let i = 0; i < n; i++) {
+      const a = pcm.readInt16LE(i * 2), b = dec.readInt16LE(i * 2);
+      sig += a * a; err += (a - b) * (a - b);
+    }
+    const snr = 10 * Math.log10(sig / Math.max(err, 1));
+    expect(snr).toBeGreaterThan(20);                     // speech-quality territory
+  });
+
+  it('a truncated tail block decodes as far as it goes, never throws', () => {
+    const pcm = Buffer.alloc(505 * 2 * 2);
+    const enc = encode(pcm).subarray(0, ADPCM_BLOCK + 40);   // second block cut mid-way
+    const dec = decodeImaAdpcm(enc);
+    expect(dec.length).toBeGreaterThan(505 * 2);
+    expect(() => decodeImaAdpcm(Buffer.from([1, 2, 3]))).not.toThrow();
+    expect(decodeImaAdpcm(Buffer.alloc(0)).length).toBe(0);
   });
 });
