@@ -41,6 +41,7 @@ describe('EmoDeviceService (BEA-926)', () => {
       findMany: jest.fn(async () => [{ id: 'dr1', text: 'call the vendor', dueAt: new Date(1760000000000), status: 'active' }]),
       update: jest.fn(async () => ({})),
     },
+    emoCard: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) },
   };
   const notes: any = { create: jest.fn(async () => ({ id: 'n1' })) };
   const svc = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any, { create: async () => ({}) } as any);
@@ -77,7 +78,7 @@ describe('EmoDeviceService (BEA-926)', () => {
   });
 
   it('note mode also creates a REAL Note (BEA-957)', async () => {
-    prisma.emoCard = { update: jest.fn(async () => ({})) } as any;
+    prisma.emoCard = { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) } as any;
     await svc.turn(pcm, { mode: 'note' });
     expect(notes.create).toHaveBeenCalledWith(expect.objectContaining({ content: expect.any(String) }));
   });
@@ -386,5 +387,72 @@ describe('fast-ack for deferred lanes (BEA-1593)', () => {
     expect(router.route).toHaveBeenCalled();
     expect(pending()).toHaveLength(0);
     expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.part'))).toHaveLength(0);
+  });
+});
+
+
+describe('INPUT inbox: agent questions + answers (BEA-1594)', () => {
+  const voice: any = {
+    transcribeWith: jest.fn(async () => 'go with the second vendor'),
+    transcribeMeeting: jest.fn(async () => ''),
+    ttsPcm: jest.fn(async () => Buffer.alloc(48)),
+  };
+  const router: any = { route: jest.fn(async () => ({ cards: [] })) };
+  const cards: any = { create: jest.fn(async () => ({})), answer: jest.fn(async () => ({ ok: true })) };
+  const prisma: any = {
+    emoDeviceReminder: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) },
+    taskClaim: { findMany: jest.fn(async () => []) },
+    emoCard: { findMany: jest.fn(async () => [
+      { id: 'q1', summary: 'Research Agent', title: null, needsQuestion: 'Which vendor should I compare first?',
+        needsOptions: JSON.stringify(['Vendor A', 'Vendor B']), createdAt: new Date(1760000002000) },
+    ]) },
+  };
+  const svc = new EmoDeviceService(voice, router, {} as any, {} as any, prisma,
+    { create: jest.fn() } as any, { decide: async () => ({ ok: true }) } as any,
+    { setDone: async () => undefined } as any, cards);
+  const pcm = Buffer.alloc(3200);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('needs-you cards join the feed as questions, with options, and count as needsYou', async () => {
+    const r = await svc.listDeviceReminders();
+    const q = r.reminders.find((x: any) => x.kind === 'question')! as any;
+    expect(q.id).toBe('card:q1');
+    expect(q.text).toBe('Which vendor should I compare first?');
+    expect(q.options).toEqual(['Vendor A', 'Vendor B']);
+    expect(r.needsYou).toBe(1);
+  });
+
+  it('acking a card: id records the payload as the answer', async () => {
+    const r = await svc.ackDeviceReminder('card:q1', 'Vendor B');
+    expect(r.ok).toBe(true);
+    expect(cards.answer).toHaveBeenCalledWith('q1', 'Vendor B');
+  });
+
+  it('a timed-out ring never answers a question for the owner', async () => {
+    const r = await svc.ackDeviceReminder('card:q1', 'missed');
+    expect(r.ok).toBe(true);
+    expect(cards.answer).not.toHaveBeenCalled();
+  });
+
+  it('turn?answerTo speaks the answer through the fast-ack pipeline', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-ans-'));
+    process.env.EMO_FASTACK = '1'; process.env.EMO_PENDING_DIR = tmp;
+    try {
+      const r = await svc.turn(pcm, { mode: 'note', answerTo: 'card:1234abcd-0000-0000-0000-00000000beef' });
+      expect(r.ok).toBe(true);
+      expect(fs.readdirSync(tmp).some((f) => f.includes('-ans_1234abcd'))).toBe(true);
+      await new Promise((res) => setTimeout(res, 120));
+      expect(cards.answer).toHaveBeenCalledWith('1234abcd-0000-0000-0000-00000000beef', 'go with the second vendor');
+      expect(router.route).not.toHaveBeenCalled();   // the words went to the card, not the router
+    } finally {
+      process.env.EMO_FASTACK = '0'; delete process.env.EMO_PENDING_DIR;
+    }
+  });
+
+  it('turn?answerTo also works on the synchronous path', async () => {
+    const r = await svc.turn(pcm, { mode: 'note', answerTo: 'card:feed1234-0000-0000-0000-000000000001' });
+    expect(cards.answer).toHaveBeenCalledWith('feed1234-0000-0000-0000-000000000001', 'go with the second vendor');
+    expect(r.reply).toBe('Answered.');
   });
 });
