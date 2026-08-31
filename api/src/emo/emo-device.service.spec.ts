@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 process.env.EMO_DEVICE_AUDIO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-audio-'));
+process.env.EMO_FASTACK = '0'; // these suites exercise the synchronous path; the fast-ack suite flips it on
 
 describe('EmoDeviceService (BEA-926)', () => {
   const voice: any = {
@@ -42,7 +43,7 @@ describe('EmoDeviceService (BEA-926)', () => {
     },
   };
   const notes: any = { create: jest.fn(async () => ({ id: 'n1' })) };
-  const svc = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any);
+  const svc = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any, { create: async () => ({}) } as any);
   const pcm = Buffer.alloc(3200); // 100ms of 16k mono silence
 
   beforeEach(() => jest.clearAllMocks());
@@ -93,7 +94,7 @@ describe('EmoDeviceService (BEA-926)', () => {
     const longTranscript = 'today I walked to the market and thought about the vendor list. '.repeat(120); // ~7.5k chars
     const v: any = { ...voice, transcribeWith: jest.fn(async () => longTranscript) };
     const r: any = { route: jest.fn(async () => ({ cards: [{ id: 'c9', lane: 'story', summary: longTranscript }] })) };
-    const s = new EmoDeviceService(v, r, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any);
+    const s = new EmoDeviceService(v, r, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any, { create: async () => ({}) } as any);
     const out = await s.turn(pcm, { mode: 'story' });
     expect(Buffer.byteLength(JSON.stringify(out))).toBeLessThanOrEqual(DEVICE_BODY_BUDGET);
     // and it must still be a SUCCESS the device can act on, not an empty husk
@@ -143,7 +144,7 @@ describe('EmoDeviceService (BEA-926)', () => {
       setDone: async () => undefined,
       dump: jest.fn(async () => ({ dumpId: 'd1', tasks: [{ title: 'Call the supplier' }, { title: 'Send the BOM' }] })),
     };
-    const s = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, tasks);
+    const s = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, tasks, { create: async () => ({}) } as any);
     const r = await s.turn(pcm, { mode: 'dump' });
     expect(tasks.dump).toHaveBeenCalledWith(expect.any(String), 'emo-device');
     expect(router.route).not.toHaveBeenCalled();
@@ -157,7 +158,7 @@ describe('EmoDeviceService (BEA-926)', () => {
       setDone: async () => undefined,
       dump: jest.fn(async () => ({ dumpId: 'd2', question: 'What is on your mind this morning?', tasks: [] })),
     };
-    const s = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, tasks);
+    const s = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, tasks, { create: async () => ({}) } as any);
     const r = await s.turn(pcm, { mode: 'dump' });
     expect(r.say).toContain('What is on your mind');
   });
@@ -277,7 +278,7 @@ describe('EmoDeviceService (BEA-926)', () => {
   it('a confirmation answered on the device decides the claim', async () => {
     const decide = jest.fn(async () => ({ ok: true, taskId: 't1', confirmed: true }));
     const setDone = jest.fn(async () => undefined);
-    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone } as any);
+    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone } as any, { create: async () => ({}) } as any);
     await s2.ackDeviceReminder('claim:k1', 'done');
     expect(decide).toHaveBeenCalledWith('k1', true);
     expect(setDone).toHaveBeenCalledWith('t1', true);
@@ -286,7 +287,7 @@ describe('EmoDeviceService (BEA-926)', () => {
   it('"reject" from the device sends it back instead of closing it', async () => {
     const decide = jest.fn(async () => ({ ok: true, taskId: 't1', confirmed: false }));
     const setDone = jest.fn(async () => undefined);
-    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone } as any);
+    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone } as any, { create: async () => ({}) } as any);
     await s2.ackDeviceReminder('claim:k1', 'reject');
     expect(decide).toHaveBeenCalledWith('k1', false);
     expect(setDone).toHaveBeenCalledWith('t1', false);
@@ -294,7 +295,7 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('an auto-"missed" from old firmware NEVER decides a claim — it is a timeout, not a human', async () => {
     const decide = jest.fn(async () => ({ ok: true, taskId: 't1', confirmed: false }));
-    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone: jest.fn() } as any);
+    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone: jest.fn() } as any, { create: async () => ({}) } as any);
     const r = await s2.ackDeviceReminder('claim:k1', 'missed');
     expect(r.ok).toBe(true);
     expect(decide).not.toHaveBeenCalled();
@@ -316,5 +317,74 @@ describe('EmoDeviceService (BEA-926)', () => {
       { id: 'a3', name: 'top ESP32 posts from last week', color: '#fbbf24' }, // its own card: the card's name
     ]);
     for (const r of rows) expect(Object.keys(r).sort()).toEqual(['color', 'id', 'name']);
+  });
+});
+
+
+describe('fast-ack for deferred lanes (BEA-1593)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-pending-'));
+  const voice: any = {
+    transcribeWith: jest.fn(async () => 'remember to call the supplier'),
+    transcribeMeeting: jest.fn(async () => 'Speaker 1: hello'),
+    ttsPcm: jest.fn(async () => Buffer.alloc(48)),
+  };
+  const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1', lane: 'note', summary: 'Call the supplier' }] })) };
+  const ask: any = { ask: jest.fn(async () => ({ mode: 'answer', summary: 'The answer.', cardId: 'a1' })) };
+  const talk: any = { talk: jest.fn(async () => ({ conversationId: 't1', reply: 'Hi.' })) };
+  const cards: any = { create: jest.fn(async () => ({ id: 'f1' })) };
+  const mk = (v: any = voice) =>
+    new EmoDeviceService(v, router, ask, talk, {} as any, { create: jest.fn() } as any,
+      { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any, cards);
+  const pcm = Buffer.alloc(3200);
+  const pending = () => fs.readdirSync(tmp).filter((f) => /^pend-.*\.wav$/.test(f));
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+
+  beforeAll(() => { process.env.EMO_FASTACK = '1'; process.env.EMO_PENDING_DIR = tmp; });
+  afterAll(() => { process.env.EMO_FASTACK = '0'; delete process.env.EMO_PENDING_DIR; });
+  beforeEach(() => { jest.clearAllMocks(); for (const f of pending()) fs.unlinkSync(path.join(tmp, f)); });
+
+  it('confirms instantly, holds the audio on disk, then routes in the background', async () => {
+    const s = mk();
+    const r = await s.turn(pcm, { mode: 'capture' });
+    expect(r.ok).toBe(true);
+    expect(r.reply).toMatch(/Saved/);
+    await settle();
+    expect(voice.transcribeWith).toHaveBeenCalled();
+    expect(router.route).toHaveBeenCalledWith('remember to call the supplier', expect.objectContaining({ source: 'emo-device' }));
+    expect(pending()).toHaveLength(0); // processed and cleaned up
+  });
+
+  it('ask stays synchronous — the device needs the answer in the reply', async () => {
+    const s = mk();
+    const r = await s.turn(pcm, { mode: 'ask' });
+    expect(ask.ask).toHaveBeenCalled();
+    expect(r.reply).toBe('The answer.');
+    expect(pending()).toHaveLength(0); // never went through the pending store
+  });
+
+  it('keeps the audio and surfaces a card when transcription fails for good', async () => {
+    const failing: any = { ...voice, transcribeWith: jest.fn(async () => { throw new Error('stt down'); }) };
+    const s = mk(failing);
+    s.retryDelayMs = 1;
+    const r = await s.turn(pcm, { mode: 'note' });
+    expect(r.ok).toBe(true);
+    await settle();
+    expect(failing.transcribeWith).toHaveBeenCalledTimes(3);
+    const failed = fs.readdirSync(path.join(tmp, 'failed'));
+    expect(failed.length).toBeGreaterThan(0);
+    expect(cards.create).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining('Recording kept') }));
+    for (const f of failed) fs.unlinkSync(path.join(tmp, 'failed', f));
+  });
+
+  it('startup sweep recovers recordings a restart stranded', async () => {
+    fs.writeFileSync(path.join(tmp, 'pend-1-abcd1234-capture.wav'), wavWrap(pcm, 16000));
+    fs.writeFileSync(path.join(tmp, 'pend-9-dead-note.wav.part'), Buffer.alloc(8)); // stale half-write: swept away
+    const s = mk();
+    s.onModuleInit();
+    await settle();
+    expect(voice.transcribeWith).toHaveBeenCalled();
+    expect(router.route).toHaveBeenCalled();
+    expect(pending()).toHaveLength(0);
+    expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.part'))).toHaveLength(0);
   });
 });

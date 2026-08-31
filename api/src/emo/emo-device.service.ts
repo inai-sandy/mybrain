@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript');
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { VoiceService } from '../voice/voice.service';
+import { EmoCardsService } from './emo-cards.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -171,6 +173,7 @@ export class EmoDeviceService {
     private readonly notes: NotesService,
     private readonly claims: ClaimsService, // last on purpose: keeps positional wiring stable
     private readonly tasks: TasksService,
+    private readonly cardsSvc: EmoCardsService, // failure cards for the fast-ack pipeline (BEA-1593)
   ) {}
 
   /** Every agent with a task, three fields only — the device draws one row at a time. (BEA-1590)
@@ -276,7 +279,134 @@ export class EmoDeviceService {
    * (emo_turn.h), so everything past that was discarded on arrival anyway.
    */
   async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean } = {}): Promise<DeviceTurn> {
+    // Fast-ack (BEA-1593): every lane except ask/talk is record-first on the devices — they
+    // discard the reply and sync in the background. Take custody (durable file) and confirm
+    // NOW; transcribe + route async. Cuts the device's upload wait roughly in half and keeps
+    // long recordings inside the device's 30 s response timeout.
+    const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
+    // EMO_FASTACK=0 is the ops kill-switch: everything back through the synchronous path.
+    if (mode !== 'ask' && mode !== 'talk' && process.env.EMO_FASTACK !== '0') {
+      const fast = await this.turnDeferred(body, opts, mode);
+      if (fast) return clampForDevice(fast);
+    }
     return clampForDevice(await this.turnInner(body, opts));
+  }
+
+  /** How long to wait between transcription retries (tests shrink this). */
+  retryDelayMs = 30_000;
+
+  private pendingDir(): string {
+    return process.env.EMO_PENDING_DIR || '/app/data/emo/pending';
+  }
+
+  /** Store-then-process: write the WAV durably, answer instantly, work in the background.
+   *  Returns null when custody could not be taken — the caller falls back to the sync path.
+   *  CUSTODY RULE: the device deletes its SD copy on any 2xx, so the file MUST be safely on
+   *  disk (atomic .part + rename) before we confirm. */
+  private async turnDeferred(body: Buffer, opts: { sampleRate?: number; codec?: string; capped?: boolean }, mode: DeviceMode): Promise<DeviceTurn | null> {
+    try {
+      if (!body?.length) return null;
+      const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
+      let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : body;
+      if (!pcm.length) return null;
+      pcm = normalizePcm(pcm);
+      const wav = wavWrap(pcm, sr);
+      const dir = this.pendingDir();
+      fs.mkdirSync(dir, { recursive: true });
+      // the filename IS the job description — a restart re-reads everything it needs from it.
+      // The random part makes it collision-proof: two devices in the same millisecond must
+      // never overwrite each other's already-acked audio (review finding).
+      const name = `pend-${Date.now()}-${randomUUID().slice(0, 8)}-${mode}${opts.capped ? '-capped' : ''}.wav`;
+      const part = path.join(dir, name + '.part');
+      // async writes: a meeting WAV can be tens of MB — never block the event loop for it.
+      // Custody holds: the 2xx only goes out after the awaited rename lands.
+      await fs.promises.writeFile(part, wav);
+      await fs.promises.rename(part, path.join(dir, name));
+      setImmediate(() => { this.processPending(name).catch((e) => console.error('[emo] pending failed', name, e)); });
+      return { ok: true, mode, heard: '', reply: 'Saved. Working on it in the background.', say: '' };
+    } catch (e) {
+      console.error('[emo] fast-ack unavailable, sync fallback', e);
+      return null;
+    }
+  }
+
+  /** Transcribe + route one pending file. Deletes it on success; on permanent failure the
+   *  audio moves to pending/failed/ and a card says so — a recording never silently vanishes. */
+  private async processPending(name: string): Promise<void> {
+    const dir = this.pendingDir();
+    const p = path.join(dir, path.basename(name));
+    const m = /^pend-\d+-[0-9a-f]+-([a-z]+)(-capped)?\.wav$/.exec(path.basename(name));
+    if (!m) return;
+    const mode: DeviceMode = MODES.includes(m[1] as DeviceMode) ? (m[1] as DeviceMode) : 'capture';
+    const capped = !!m[2];
+    let wav: Buffer;
+    try { wav = fs.readFileSync(p); } catch (e: any) {
+      if (e?.code !== 'ENOENT') console.error('[emo] pending read failed', name, e);
+      return;
+    }
+    let audioPath: string | undefined;
+    if (wav.length <= 15 * 1024 * 1024) {
+      try { audioPath = this.saveRecording(wav); } catch { /* keep going without audio */ }
+    }
+    let heard = '';
+    let lastErr: unknown;
+    for (let i = 0; i < 3; i++) {
+      try {
+        heard = mode === 'meeting'
+          ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
+          : (await this.voice.transcribeWith('deepgram', wav, 'device-turn.wav', 'audio/wav')).trim();
+        lastErr = undefined;
+        break;
+      } catch (e) {
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, this.retryDelayMs * (i + 1)));
+      }
+    }
+    if (lastErr) {
+      const failedDir = path.join(dir, 'failed');
+      try {
+        fs.mkdirSync(failedDir, { recursive: true });
+        fs.renameSync(p, path.join(failedDir, path.basename(name)));
+      } catch { /* the pending file stays for the next sweep */ }
+      await this.cardsSvc.create({
+        lane: 'note', status: 'done', source: 'emo-device',
+        title: 'Recording kept — transcription failed',
+        summary: 'A device recording could not be transcribed after 3 tries. The audio is kept on the server.',
+        detail: audioPath ? `Audio: ${audioPath}` : `Kept as: pending/failed/${path.basename(name)}`,
+      } as any).catch((e) => console.error('[emo] failure card', e));
+      return;
+    }
+    if (heard) await this.routeHeard(mode, heard, { capped }, audioPath);
+    else {
+      // silence is still an event the owner should see — the old sync path said
+      // "couldn't hear anything" live; deferred lanes never read the reply (review finding)
+      await this.cardsSvc.create({
+        lane: 'note', status: 'done', source: 'emo-device',
+        title: 'Nothing heard',
+        summary: 'A device recording reached the server but contained no speech.',
+        detail: audioPath ? `Audio: ${audioPath}` : undefined,
+      } as any).catch((e) => console.error('[emo] silence card', e));
+    }
+    try { fs.unlinkSync(p); } catch { /* already gone */ }
+  }
+
+  /** Restart custody: whatever fast-ack accepted but never finished gets processed again. */
+  onModuleInit(): void {
+    setImmediate(async () => {
+      let files: string[] = [];
+      try {
+        const all = fs.readdirSync(this.pendingDir());
+        for (const f of all.filter((x) => x.endsWith('.part'))) {
+          // died mid-write: the device never got a 2xx for this one, so it kept its own copy
+          try { fs.unlinkSync(path.join(this.pendingDir(), f)); } catch { /* next boot */ }
+        }
+        files = all.filter((f) => /^pend-.*\.wav$/.test(f));
+      } catch { return; }
+      for (const f of files) {
+        try { await this.processPending(f); } catch (e) { console.error('[emo] pending sweep', f, e); }
+      }
+      if (files.length) console.log(`[emo] pending sweep: ${files.length} recording(s) recovered`);
+    });
   }
 
   private async turnInner(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean } = {}): Promise<DeviceTurn> {
@@ -300,6 +430,12 @@ export class EmoDeviceService {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
     }
 
+    return this.routeHeard(mode, heard, opts, audioPath);
+  }
+
+  /** Everything after transcription: route one heard utterance per mode. Shared by the live
+   *  (ask/talk) path and the deferred fast-ack pipeline (BEA-1593). */
+  private async routeHeard(mode: DeviceMode, heard: string, opts: { conversationId?: string; capped?: boolean } = {}, audioPath?: string): Promise<DeviceTurn> {
     if (mode === 'ask') {
       // direct: the device never asks counter-questions (938) — best-guess answer immediately
       // ragOnly: device answers come from the local RAG store only, never SuperMemory (BEA-967)
