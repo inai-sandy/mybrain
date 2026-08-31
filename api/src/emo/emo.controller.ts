@@ -110,6 +110,7 @@ export class EmoController {
     @Query('sr') sr?: string,
     @Query('codec') codec?: string,
     @Query('capped') capped?: string,
+    @Query('answerTo') answerTo?: string,
   ) {
     const MAX = 60 * 1024 * 1024; // ~30 min at 16 kHz mono
     const chunks: Buffer[] = [];
@@ -127,7 +128,7 @@ export class EmoController {
       req.on('end', () => resolve());
       req.on('error', (e) => reject(e));
     });
-    return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000, codec, capped: capped === '1' });
+    return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000, codec, capped: capped === '1', answerTo });
   }
 
   // Save any card as a Note in My Brain (BEA-955). Full detail: body + your words.

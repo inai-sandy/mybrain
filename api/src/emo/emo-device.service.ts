@@ -218,13 +218,20 @@ export class EmoDeviceService {
    */
   async listDeviceReminders(): Promise<{ reminders: { id: string; text: string; dueAt: number; kind: string }[]; needsYou: number }> {
     const until = new Date(Date.now() + 48 * 3600 * 1000);
-    const [rems, claims] = await Promise.all([
+    const [rems, claims, cards] = await Promise.all([
       this.prisma.emoDeviceReminder.findMany({ where: { status: 'active', dueAt: { lte: until } }, orderBy: { dueAt: 'asc' }, take: 12 }),
       this.prisma.taskClaim.findMany({
         where: { status: 'pending' },
         orderBy: { createdAt: 'asc' },
         take: 12,
         include: { contact: { select: { name: true } }, task: { select: { title: true } } },
+      }),
+      // agent questions (durable needs-you HITL): the INPUT section's reason to exist (BEA-1594)
+      this.prisma.emoCard.findMany({
+        where: { status: 'needs_you' },
+        orderBy: { createdAt: 'asc' },
+        take: 12,
+        select: { id: true, summary: true, title: true, needsQuestion: true, needsOptions: true, createdAt: true },
       }),
     ]);
 
@@ -239,7 +246,25 @@ export class EmoDeviceService {
         kind: 'confirm',
       }));
 
-    return { reminders: [...reminders, ...confirms].slice(0, 12), needsYou: confirms.length };
+    // Questions carry their options so one keypress can answer (additive fields: old firmware
+    // reads id/text/dueAt/kind and ignores the rest — the BEA-1035 widening rule).
+    const questions = cards.map((c: any) => {
+      let options: string[] = [];
+      try { const v = JSON.parse(c.needsOptions || '[]'); if (Array.isArray(v)) options = v; } catch { /* stays empty */ }
+      return {
+        id: `card:${c.id}`,
+        text: String(c.needsQuestion || c.summary || c.title || 'An agent needs you.').slice(0, 155),
+        dueAt: new Date(c.createdAt).getTime(),
+        kind: 'question',
+        options: options.slice(0, 4).map((o) => String(o).slice(0, 60)),
+        about: String(c.summary || c.title || '').slice(0, 80),
+      };
+    });
+    // Fixed 12 slots, but the needs-you kinds are the feature: cap reminders so confirms and
+    // questions always fit (reminders keep at least 4 slots; needs-you kinds at most 8).
+    const needsItems = [...confirms, ...questions].slice(0, 8);
+    const remCap = 12 - needsItems.length;
+    return { reminders: [...reminders.slice(0, remCap), ...needsItems], needsYou: confirms.length + questions.length };
   }
 
   /**
@@ -249,6 +274,12 @@ export class EmoDeviceService {
    */
   async ackDeviceReminder(id: string, status: string): Promise<{ ok: boolean }> {
     const raw = String(status || '').toLowerCase();
+    if (id.startsWith('card:')) {
+      // the payload IS the owner's answer (an option label, typed text — voice goes via turn?answerTo)
+      if (raw === 'missed') return { ok: true };   /* a timeout is not an answer (BEA-1036 rule) */
+      const r: any = await this.cardsSvc.answer(id.slice('card:'.length), String(status || '')).catch(() => ({ ok: false }));
+      return { ok: !!r?.ok };
+    }
     if (id.startsWith('claim:')) {
       const claimId = id.slice('claim:'.length);
       // "missed" is what OLD firmware auto-sends when a ring goes unanswered — it is a timeout,
@@ -278,7 +309,7 @@ export class EmoDeviceService {
    * Trimming costs nothing: the device only ever keeps heard[160]/reply[512]/say[512]
    * (emo_turn.h), so everything past that was discarded on arrival anyway.
    */
-  async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean } = {}): Promise<DeviceTurn> {
+  async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string } = {}): Promise<DeviceTurn> {
     // Fast-ack (BEA-1593): every lane except ask/talk is record-first on the devices — they
     // discard the reply and sync in the background. Take custody (durable file) and confirm
     // NOW; transcribe + route async. Cuts the device's upload wait roughly in half and keeps
@@ -295,6 +326,13 @@ export class EmoDeviceService {
   /** How long to wait between transcription retries (tests shrink this). */
   retryDelayMs = 30_000;
 
+  /** "card:<uuid>" -> uuid, or null. Only card answers are supported — and only a clean id
+   *  ever reaches a filename. */
+  private answerTarget(answerTo?: string): string | null {
+    const m = /^card:([0-9a-f-]{8,40})$/.exec(String(answerTo || ''));
+    return m ? m[1] : null;
+  }
+
   private pendingDir(): string {
     return process.env.EMO_PENDING_DIR || '/app/data/emo/pending';
   }
@@ -303,7 +341,7 @@ export class EmoDeviceService {
    *  Returns null when custody could not be taken — the caller falls back to the sync path.
    *  CUSTODY RULE: the device deletes its SD copy on any 2xx, so the file MUST be safely on
    *  disk (atomic .part + rename) before we confirm. */
-  private async turnDeferred(body: Buffer, opts: { sampleRate?: number; codec?: string; capped?: boolean }, mode: DeviceMode): Promise<DeviceTurn | null> {
+  private async turnDeferred(body: Buffer, opts: { sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string }, mode: DeviceMode): Promise<DeviceTurn | null> {
     try {
       if (!body?.length) return null;
       const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
@@ -316,7 +354,8 @@ export class EmoDeviceService {
       // the filename IS the job description — a restart re-reads everything it needs from it.
       // The random part makes it collision-proof: two devices in the same millisecond must
       // never overwrite each other's already-acked audio (review finding).
-      const name = `pend-${Date.now()}-${randomUUID().slice(0, 8)}-${mode}${opts.capped ? '-capped' : ''}.wav`;
+      const ans = this.answerTarget(opts.answerTo);
+      const name = `pend-${Date.now()}-${randomUUID().slice(0, 8)}-${mode}${opts.capped ? '-capped' : ''}${ans ? `-ans_${ans}` : ''}.wav`;
       const part = path.join(dir, name + '.part');
       // async writes: a meeting WAV can be tens of MB — never block the event loop for it.
       // Custody holds: the 2xx only goes out after the awaited rename lands.
@@ -335,10 +374,11 @@ export class EmoDeviceService {
   private async processPending(name: string): Promise<void> {
     const dir = this.pendingDir();
     const p = path.join(dir, path.basename(name));
-    const m = /^pend-\d+-[0-9a-f]+-([a-z]+)(-capped)?\.wav$/.exec(path.basename(name));
+    const m = /^pend-\d+-[0-9a-f]+-([a-z]+)(-capped)?(?:-ans_([0-9a-f-]+))?\.wav$/.exec(path.basename(name));
     if (!m) return;
     const mode: DeviceMode = MODES.includes(m[1] as DeviceMode) ? (m[1] as DeviceMode) : 'capture';
     const capped = !!m[2];
+    const ansCard = m[3] || null;
     let wav: Buffer;
     try { wav = fs.readFileSync(p); } catch (e: any) {
       if (e?.code !== 'ENOENT') console.error('[emo] pending read failed', name, e);
@@ -376,7 +416,20 @@ export class EmoDeviceService {
       } as any).catch((e) => console.error('[emo] failure card', e));
       return;
     }
-    if (heard) await this.routeHeard(mode, heard, { capped }, audioPath);
+    if (heard && ansCard) {
+      // a spoken INPUT answer: the words go to the waiting card, not the general router (BEA-1594)
+      let ok = false;
+      try { const r: any = await this.cardsSvc.answer(ansCard, heard); ok = !!r?.ok; } catch { ok = false; }
+      if (!ok) {
+        // the card was answered/closed/deleted meanwhile — the owner's words must not vanish
+        await this.cardsSvc.create({
+          lane: 'note', status: 'done', source: 'emo-device',
+          title: 'Answer could not be delivered',
+          summary: `You said: "${heard.slice(0, 120)}" — but that question was no longer waiting.`,
+          detail: audioPath ? `Audio: ${audioPath}` : undefined,
+        } as any).catch((e) => console.error('[emo] answer-failed card', e));
+      }
+    } else if (heard) await this.routeHeard(mode, heard, { capped }, audioPath);
     else {
       // silence is still an event the owner should see — the old sync path said
       // "couldn't hear anything" live; deferred lanes never read the reply (review finding)
@@ -409,7 +462,7 @@ export class EmoDeviceService {
     });
   }
 
-  private async turnInner(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean } = {}): Promise<DeviceTurn> {
+  private async turnInner(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string } = {}): Promise<DeviceTurn> {
     if (!body?.length) throw new BadRequestException('No audio received');
     const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
@@ -430,6 +483,11 @@ export class EmoDeviceService {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
     }
 
+    const ansCard = this.answerTarget(opts.answerTo);
+    if (ansCard) {
+      const r: any = await this.cardsSvc.answer(ansCard, heard).catch(() => ({ ok: false }));
+      return { ok: !!r?.ok, mode, heard, reply: r?.ok ? 'Answered.' : 'That card is not waiting anymore.', say: '' };
+    }
     return this.routeHeard(mode, heard, opts, audioPath);
   }
 
