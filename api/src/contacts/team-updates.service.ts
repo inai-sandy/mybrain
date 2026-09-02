@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
-import { readUpdate, readLabel, type Read, type ReadResult } from './update-read';
+import { readUpdate, readLabel, isNeedKind, type Read, type ReadResult, type NeedKind } from './update-read';
 import { TASK_OPEN } from '../tasks/task-status';
 import { openNeedsWhere, type OpenNeed } from './needs-you';
 
@@ -54,12 +54,22 @@ export class TeamUpdatesService {
    *   figures, and those keep their deterministic floor — wrong there costs a stopped line.
    * - No model, no answer, bad answer → the deterministic read stands. This must never break intake.
    */
-  private async secondOpinion(text: string, r: ReadResult, isReport: boolean): Promise<{ needsYou: boolean; why: string | null }> {
-    const out = { needsYou: r.needsYou, why: r.why };
+  private async secondOpinion(text: string, r: ReadResult, isReport: boolean): Promise<{ needsYou: boolean; why: string | null; kind?: NeedKind }> {
+    const out: { needsYou: boolean; why: string | null; kind?: NeedKind } = { needsYou: r.needsYou, why: r.why };
     if (!this.llm || !this.prompts) return out;
     if (r.reads.includes('done')) return out; // the floor: a claim always reaches him
     const t = text.trim();
     if (r.reads.length === 1 && r.reads[0] === 'chat' && t.length < 12) return out; // "Kk sir" needs no model
+    // A positive word-rule hit is decided: the model may not raise what is already raised, and it
+    // may only stand down the short, figure-free politeness class below. Asking it about anything
+    // longer would spend a call whose answer is ignored — and the wider rules (BEA-1597) must not
+    // turn into wider spend. (BEA-1597)
+    // The stand-down window exists for ONE trip: a trouble-word inside politeness ("No problem
+    // sir"). A short ASK — "pls confirm the qty", "sir pls send the drawing" — is a decided hit
+    // (BEA-1597) and never goes to the model, or its "needs you" would hang on the model agreeing.
+    const troubleOnly = r.reads.every((x) => !isNeedKind(x) || x === 'blocked');
+    const standDownClass = t.length <= 25 && !/\d/.test(t) && troubleOnly;
+    if (out.needsYou && !standDownClass) return out;
     try {
       const tmpl = await this.prompts.get('people.reviewRead');
       const prompt = tmpl
@@ -70,9 +80,11 @@ export class TeamUpdatesService {
       const parsed = m ? JSON.parse(m[0]) : null;
       if (typeof parsed?.needsYou !== 'boolean') return out;
       if (parsed.needsYou && !out.needsYou) {
-        return { needsYou: true, why: String(parsed.why || 'this needs your eyes').trim().slice(0, 120) || 'this needs your eyes' };
+        // The model may also say WHAT they need him for; an unknown word is simply no kind.
+        const kind = isNeedKind(parsed.kind) ? parsed.kind : undefined;
+        return { needsYou: true, why: String(parsed.why || 'this needs your eyes').trim().slice(0, 120) || 'this needs your eyes', kind };
       }
-      if (!parsed.needsYou && out.needsYou && t.length <= 25 && !/\d/.test(t)) {
+      if (!parsed.needsYou && out.needsYou && standDownClass) {
         this.log.log(`AI stood down "${t.slice(0, 40)}" — politeness, not a problem`);
         return { needsYou: false, why: null };
       }
@@ -119,7 +131,7 @@ export class TeamUpdatesService {
       // and let the caller's judgement WIN: the item the model named beats the generic record's
       // "first item with a task", and its reason beats the word-rules' one. (review finding)
       if (input.forceNeedsYou) {
-        const reads = [...safeReads(String((dupe as any).reads || '[]')).filter((x) => x !== 'chat' && x !== 'needs_you'), 'needs_you'];
+        const reads = withNeed(safeReads(String((dupe as any).reads || '[]')), input.channel === 'system' ? 'no_reply' : 'question');
         const raised = await this.prisma.teamUpdate
           .update({ where: { id: dupe.id }, data: { needsYou: true, why: forcedWhy, reads: JSON.stringify(reads), ...(input.taskId ? { taskId: input.taskId } : {}) } })
           .catch((e) => { this.log.warn(`record (raise): ${e?.message}`); return null; });
@@ -131,14 +143,26 @@ export class TeamUpdatesService {
 
     // A system row is the app's own sentence, not their words — there is nothing to read in it.
     const forced = !!input.forceNeedsYou || input.channel === 'system';
-    const r: ReadResult = input.channel === 'system' ? { reads: ['needs_you'], needsYou: true, why: forcedWhy } : readUpdate(text, { isReport: !!input.isReport });
-    // A forced row reads as "raised a problem" in the inbox, whatever the words alone said.
-    if (forced && !r.reads.includes('needs_you')) r.reads = [...r.reads.filter((x) => x !== 'chat'), 'needs_you'];
+    const r: ReadResult = input.channel === 'system' ? { reads: ['needs_you', 'no_reply'], needsYou: true, why: forcedWhy } : readUpdate(text, { isReport: !!input.isReport });
+    // A forced row carries a kind the inbox can name (BEA-1597): the watchdog's is "no reply";
+    // the chase agent hands over what it could not ANSWER, so its default kind is a question.
+    if (forced && !r.reads.includes('needs_you')) r.reads = withNeed(r.reads, input.channel === 'system' ? 'no_reply' : 'question');
     // The word-rules propose, the AI seconds, and the merge rules in secondOpinion decide. (BEA-1213)
     // Backfill passes skipAi: hundreds of historical messages need no model round-trip each.
-    const read = forced
+    const read: { needsYou: boolean; why: string | null; kind?: NeedKind } = forced
       ? { needsYou: true, why: input.why ? forcedWhy : r.why || forcedWhy }
       : input.skipAi ? { needsYou: r.needsYou, why: r.why } : await this.secondOpinion(text, r, !!input.isReport);
+    // The AI raised it: the row's reads say so too (with the kind it named), so the reason line
+    // reads from the ONE map like every other item, not from a guess at the label. (BEA-1597)
+    // Only a RAISE — a done-claim is `needsYou` by the words alone and must stay a pure claim, or
+    // deciding it would leave the row open as if it had raised a problem.
+    if (!forced && read.needsYou && !r.needsYou) r.reads = withNeed(r.reads, read.kind);
+    // And the other way: a stood-down "No problem sir" must not keep a reason in its reads, or a
+    // person's story would say "stuck / blocked" about a message that never needed him.
+    if (!forced && !read.needsYou && r.needsYou && !r.reads.includes('done')) {
+      const kept = r.reads.filter((x) => x !== 'needs_you' && !isNeedKind(x));
+      r.reads = kept.length ? kept : ['chat'];
+    }
     const row = await this.prisma.teamUpdate
       .create({
         data: {
@@ -584,6 +608,16 @@ function safeIds(raw: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Mark reads as needing him, with a kind when one is known and none is there yet. `chat` goes —
+ * a flagged message is not "just talk" — and `needs_you` is never doubled. (BEA-1597)
+ */
+function withNeed(reads: Read[], kind?: NeedKind): Read[] {
+  const kept = reads.filter((x) => x !== 'chat' && x !== 'needs_you');
+  const hasKind = kept.some((x) => isNeedKind(x));
+  return [...kept, 'needs_you', ...(kind && !hasKind ? [kind] : [])];
 }
 
 function safeReads(raw: string): Read[] {

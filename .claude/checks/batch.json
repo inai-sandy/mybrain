@@ -3,7 +3,17 @@
   "status": "running",
   "note": "Needs You split fix: inbox becomes the one source for Tasks + Dashboard (1596), then reason line / question detection / reply-from-dashboard (1597). Order: 1596 -> 1597.",
   "issues": [
-    { "id": "BEA-1596", "title": "Needs You: one inbox for Tasks + Dashboard; Reminder.needsOwner retired", "status": "pending" },
-    { "id": "BEA-1597", "title": "Needs You extras: reason line, questions without ?, reply from Dashboard", "status": "pending" }
+    {
+      "id": "BEA-1596",
+      "title": "Needs You: one inbox for Tasks + Dashboard; Reminder.needsOwner retired",
+      "status": "done",
+      "sha": "4374b9a",
+      "note": "inbox is the one source; Dashboard reads inbox; needsOwner retired + cleared; watchdog/needsSandeep write inbox rows"
+    },
+    {
+      "id": "BEA-1597",
+      "title": "Needs You extras: reason line, questions without ?, reply from Dashboard",
+      "status": "in_progress"
+    }
   ]
 }

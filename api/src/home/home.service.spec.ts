@@ -1,4 +1,5 @@
 import { HomeService } from './home.service';
+import { readLabel } from '../contacts/update-read';
 
 /** What a paused flow run looks like in the database: a gate, or an ordinary "Ask me". */
 function waitingFlow(kind: 'gate' | 'ask') {
@@ -17,10 +18,11 @@ function waitingFlow(kind: 'gate' | 'ask') {
 }
 
 /** What the review inbox holds — the SAME rows Tasks → Needs you draws. (BEA-1596) */
+// Each row's label is what the real inbox writes: `readLabel(reads)`, the ONE map. (BEA-1597)
 const INBOX_ROWS = [
-  { id: 'u1', channel: 'whatsapp', text: 'Need 298usd for the Elleys PCB advance sir', label: 'raised a problem', contact: { id: 'c1', name: 'Deepthi' }, closedAt: null, at: new Date('2026-08-31') },
-  { id: 'u2', channel: 'system', text: 'No reply for 3 h — "sir the vendor is refusing"', label: 'raised a problem', contact: { id: 'c2', name: 'Rakesh' }, closedAt: null, at: new Date('2026-09-02') },
-  { id: 'u3', channel: 'whatsapp', text: 'closed already', label: 'raised a problem', contact: { id: 'c3', name: 'Jayanth' }, closedAt: new Date('2026-09-01'), at: new Date('2026-08-18') },
+  { id: 'u1', channel: 'whatsapp', text: 'Need 298usd for the Elleys PCB advance sir', reads: ['needs_you', 'money'], label: readLabel(['needs_you', 'money']), contact: { id: 'c1', name: 'Deepthi', whatsappNumber: '919000000000' }, canReply: true, closedAt: null, at: new Date('2026-08-31') },
+  { id: 'u2', channel: 'system', text: 'No reply for 3 h — "sir the vendor is refusing"', reads: ['needs_you', 'no_reply'], label: readLabel(['needs_you', 'no_reply']), contact: { id: 'c2', name: 'Rakesh' }, canReply: false, closedAt: null, at: new Date('2026-09-02') },
+  { id: 'u3', channel: 'whatsapp', text: 'closed already', reads: ['needs_you', 'blocked'], label: readLabel(['needs_you', 'blocked']), contact: { id: 'c3', name: 'Jayanth' }, closedAt: new Date('2026-09-01'), at: new Date('2026-08-18') },
   { id: 'claim:cl1', claimId: 'cl1', channel: 'whatsapp', text: 'sir it is done', label: 'says it is done', contact: { id: 'c4', name: 'Srikar' }, closedAt: null, at: new Date('2026-09-02') },
   // A message the inbox glued a pending claim onto — its id is the update's, but it IS the claim.
   { id: 'u5', claimId: 'cl2', channel: 'whatsapp', text: 'PCBs also sent sir', label: 'says it is done', contact: { id: 'c5', name: 'Radha' }, closedAt: null, at: new Date('2026-09-02') },
@@ -133,8 +135,27 @@ describe('HomeService — Needs you reads the review inbox (BEA-1596)', () => {
     const team = d.needsYou.filter((n) => n.kind === 'team');
     expect(team.map((n) => n.title)).toEqual(['Deepthi: Need 298usd for the Elleys PCB advance sir', 'Rakesh: No reply for 3 h — "sir the vendor is refusing"']);
     expect(team.every((n) => n.href === '/tasks?tab=review' && n.action === 'Reply')).toBe(true);
-    expect(team[0]).toMatchObject({ icon: '💬', sub: 'raised a problem' });
+    expect(team[0]).toMatchObject({ icon: '💬', sub: 'asked for money' });
     expect(team[1].icon).toBe('⏳'); // the watchdog's own row
+  });
+
+  /**
+   * BEA-1597 — the reason line on the Dashboard IS the inbox item's `readLabel()` string. Both
+   * surfaces read the one map; this is the lock that they cannot drift apart.
+   */
+  it('the reason line is the same readLabel() string the inbox item carries', async () => {
+    const d = await makeSvc().summary();
+    const team = d.needsYou.filter((n) => n.kind === 'team');
+    expect(team.map((n) => n.sub)).toEqual([readLabel(['needs_you', 'money']), readLabel(['needs_you', 'no_reply'])]);
+    expect(team.map((n) => n.sub)).toEqual(['asked for money', 'waiting on your reply']);
+  });
+
+  it('a team row carries the inbox item behind it, so the Dashboard can open the same reply sheet', async () => {
+    const d = await makeSvc().summary();
+    const team = d.needsYou.filter((n) => n.kind === 'team');
+    expect(team[0].update).toEqual({ id: 'u1', text: 'Need 298usd for the Elleys PCB advance sir', label: 'asked for money', contact: { id: 'c1', name: 'Deepthi' }, canReply: true });
+    expect(team[1].update).toMatchObject({ id: 'u2', canReply: false });
+    expect(team[0].href).toBe('/tasks?tab=review'); // a plain tap on the text still goes to the tab
   });
 
   it('a closed update is absent, and a pure claim row is not listed twice', async () => {
