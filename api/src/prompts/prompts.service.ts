@@ -614,7 +614,8 @@ Decide: does this reply need Sandeep HIMSELF to look at it?
 - NO when it is a routine status update, a promise to do something later, or plain politeness/acknowledgement ("ok", "no problem sir", "thank you").
 
 Reply with ONLY this JSON, nothing else:
-{"needsYou": true or false, "why": "<seven words max, plain English>"}`,
+{"needsYou": true or false, "why": "<seven words max, plain English>", "kind": "money" | "question" | "decision" | "blocked"}
+kind = what they need him for: "money" (a payment, advance or budget), "question" (they asked him something), "decision" (a yes/no or a pick), "blocked" (stuck, missing, late). Leave kind out when needsYou is false.`,
   },
   {
     key: 'people.profile',

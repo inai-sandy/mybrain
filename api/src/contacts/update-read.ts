@@ -24,7 +24,25 @@ import { promisesLater } from './promise-later';
  */
 
 /** A message can mean several things at once — Radha's is a real report AND two blockers. */
-export type Read = 'done' | 'needs_you' | 'status' | 'promise' | 'chat';
+export type Read = 'done' | 'needs_you' | 'status' | 'promise' | 'chat' | NeedKind;
+
+/**
+ * WHAT they need him for — the finer kinds that sit beside `needs_you` in a row's reads, so the
+ * inbox can say "asked for money" instead of the one-size "raised a problem". (BEA-1597)
+ *
+ *   money     — they asked for a payment, an advance, a budget
+ *   decision  — a yes/no or a pick is waiting on him
+ *   question  — they asked him something, with or without a "?"
+ *   blocked   — stuck, missing, late, waiting on somebody
+ *   no_reply  — the app's own watchdog row: their reply went unanswered (channel `system`)
+ *
+ * `needs_you` stays the umbrella every filter reads; a kind never appears without it.
+ */
+export type NeedKind = 'money' | 'question' | 'decision' | 'blocked' | 'no_reply';
+export const NEED_KINDS: readonly NeedKind[] = ['money', 'decision', 'question', 'blocked', 'no_reply'];
+export function isNeedKind(x: unknown): x is NeedKind {
+  return typeof x === 'string' && (NEED_KINDS as readonly string[]).includes(x);
+}
 
 /**
  * Something is stuck, missing, late, or waiting on somebody. Drawn from how the owner's team
@@ -43,11 +61,67 @@ const TROUBLE = [
   // [A-Z] would match any letter and every "problem" would be excluded.
   /\b(?:[Pp]roblem|[Ii]ssue|[Tt]rouble)s?\b(?!\s+[A-Z])/,
   /\b(?:difficulty|shortage|short\s+of|out\s+of\s+stock|breakdown|damaged|defect|reject(?:ed|ion)?)\b/i,
-  /\bneed\s+(?:your|sandeep|his|approval|permission|budget|payment|help|support|clarity|clarification)\b/i,
+  /\bneed\s+(?:help|support)\b/i,
   /\bcan\s*n[o']?t\b|\bcannot\b|\bunable\b/i,
-  /\bwho\s+(?:will|should)\b|\bshall\s+i\b|\bshould\s+(?:i|we)\b/i,
-  /\?\s*$/, // they asked something
 ];
+
+/**
+ * They want a yes, a no, or a pick from him. (BEA-1597)
+ * "Shall I go ahead", "pls confirm the qty", "which one", "need your approval".
+ */
+const DECISION = [
+  /\bwho\s+(?:will|should)\b|\bshall\s+(?:i|we)\b|\bshould\s+(?:i|we)\b|\bcan\s+we\b/i,
+  /\b(?:pls|plz|please|kindly)\s+confirm\b|\bconfirm\s+(?:pls|plz|please|sir)\b/i,
+  /\bneed\s+(?:your|ur|sandeep'?s?|his)\s+(?:approval|permission|go[- ]ahead|ok|okay|decision|confirmation)\b|\b(?:your|ur)\s+approval\b/i,
+  /\bwhich\s+one\b|\bis\s+it\s+ok(?:ay)?\b/i,
+];
+
+/** Money: a payment, an advance, a budget — asked for, not merely reported. (BEA-1597) */
+const MONEY_WORD = /₹|\$\s*\d|\b(?:rs\.?|inr|usd)\s*\d|\d\s*(?:rs|rupees|usd|dollars|lakhs?)\b|\b(?:payment|money|advance|budget|funds?|cash)\b/i;
+const MONEY_ASK = /\b(?:need|needs|needed|require|required|release|transfer|arrange|approve|approval|pay|pending|due|send|sanction)\b/i;
+
+/**
+ * They asked him something WITHOUT a question mark — how his team actually writes.
+ * "sir what is the budget for the Elleys order", "let me know", "pls check". (BEA-1597)
+ */
+const ASKS = [
+  /\b(?:let\s+me\s+know|can\s+(?:you|u)|could\s+(?:you|u)|kindly\s+advise|please\s+advise|waiting\s+for\s+(?:your|ur)|need\s+(?:your|ur)|what\s+(?:is|are|about|should|to\s+do)|how\s+much|how\s+many|when\s+(?:can|will|should)|where\s+(?:is|are))\b/i,
+  /\b(?:pls|plz|please)\s+(?:check|tell|share|send|reply|update|suggest|advise|clarify|guide|look)\b/i,
+  /\bneed\s+(?:clarity|clarification)\b/i, // was in the old trouble list — kept
+];
+
+/**
+ * A request that names the owner: "Sandeep sir, we need the drawing", "sir pls send it". The name
+ * and the asking word must sit CLOSE — "As discussed with Sandeep, will update tomorrow" names him
+ * and asks nothing, and a routine line must never flip on his name alone. (review finding)
+ */
+const REQUEST = '(?:pls|plz|please|kindly|send|share|give|check|confirm|approve|tell|need|want|call|suggest|advise|help|reply)';
+const OWNER_ASK = new RegExp(`\\bsandeep\\b[^\\n]{0,30}?\\b${REQUEST}\\b|\\b${REQUEST}\\b[^\\n]{0,30}?\\bsandeep\\b`, 'i');
+const SIR_PLEASE = /\bsir\b[^\n]{0,24}?\b(?:pls|plz|please|kindly)\b|\b(?:pls|plz|please|kindly)\b[^\n]{0,24}?\bsir\b/i;
+
+/**
+ * A "?" anywhere, judged per LINE, on a line with at least two real words. (BEA-1597)
+ *
+ * The old rule was `/\?\s*$/` — a "?" at the very end of the whole message — so a question on the
+ * first line of a two-line message never counted. Two words on the line keeps a "?" inside a
+ * product code or a link from reading as a question; the "?" must also end a word, not sit inside
+ * one ("SPD-3?0" is a code).
+ */
+function asksWithMark(text: string): boolean {
+  const lines = text.replace(/https?:\/\/\S+/gi, ' ').split(/\r?\n/);
+  return lines.some((line) => /\?(?!\w)/.test(line) && (line.match(/[A-Za-z]{2,}/g) || []).length >= 2);
+}
+
+/** Every finer kind the words carry — what, exactly, they need him for. Empty = nothing needs him. */
+export function needKindsOf(text: string): NeedKind[] {
+  const t = String(text || '').trim();
+  const kinds: NeedKind[] = [];
+  if (MONEY_WORD.test(t) && MONEY_ASK.test(t)) kinds.push('money');
+  if (DECISION.some((re) => re.test(t))) kinds.push('decision');
+  if (asksWithMark(t) || ASKS.some((re) => re.test(t)) || OWNER_ASK.test(t) || SIR_PLEASE.test(t)) kinds.push('question');
+  if (TROUBLE.some((re) => re.test(t))) kinds.push('blocked');
+  return kinds;
+}
 
 /** They are telling him a thing is finished. */
 const CLAIMS_DONE = /\b(?:done|completed|finished|closed|delivered|dispatched|submitted|uploaded|sent\s+it|handed\s+over)\b/i;
@@ -120,10 +194,11 @@ export function readUpdate(text: string, opts: { isReport?: boolean } = {}): Rea
   const reads = new Set<Read>();
   let why: string | null = null;
 
-  const trouble = TROUBLE.find((re) => re.test(t));
-  if (trouble) {
+  const kinds = needKindsOf(t);
+  if (kinds.length) {
     reads.add('needs_you');
-    why = 'they raised a problem';
+    for (const k of kinds) reads.add(k);
+    why = WHY[kinds[0]];
   }
 
   // Substance means they genuinely reported. This is INDEPENDENT of trouble: Radha's message is a
@@ -162,11 +237,40 @@ function isQuantityNotClaim(text: string, reported: boolean): boolean {
   return reported && text.trim().length > 25;
 }
 
+/** The reason line's first half, per kind — in the order `needKindsOf` lists them, most specific first. */
+const WHY: Record<NeedKind, string> = {
+  money: 'they asked for money',
+  decision: 'they need your decision',
+  question: 'they asked you a question',
+  blocked: 'they raised a problem',
+  no_reply: 'their reply went unanswered',
+};
+
+/**
+ * The ONE kind → wording map (BEA-1597). Every surface that says WHY an item needs him — Tasks →
+ * Needs you, the Dashboard's team rows, a person's story — reads this and nothing else. Short,
+ * plain, and the same string everywhere, so a spec can assert both screens agree.
+ */
+const LABEL: Record<NeedKind, string> = {
+  money: 'asked for money',
+  decision: 'needs your decision',
+  question: 'asked you a question',
+  blocked: 'stuck / blocked',
+  no_reply: 'waiting on your reply',
+};
+const DONE_LABEL = 'claims done — needs your check';
+
 /** Plain English for the review list — why this landed in front of him. */
 export function readLabel(reads: Read[]): string {
-  if (reads.includes('needs_you') && reads.includes('done')) return 'says it is done, and raised something';
-  if (reads.includes('needs_you')) return 'raised a problem';
-  if (reads.includes('done')) return 'says it is done';
+  const done = reads.includes('done');
+  if (reads.includes('needs_you')) {
+    // Most specific first: money beats a question beats "stuck" when one message is all three.
+    const kind = NEED_KINDS.find((k) => reads.includes(k));
+    // A row flagged before the finer kinds existed, or raised by the AI with no kind named.
+    const need = kind ? LABEL[kind] : 'needs your attention';
+    return done ? `${need}, and claims done` : need;
+  }
+  if (done) return DONE_LABEL;
   if (reads.includes('promise')) return 'promised it for later';
   if (reads.includes('status')) return 'sent an update';
   return 'said something';

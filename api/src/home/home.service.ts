@@ -9,7 +9,9 @@ import { MemoryService } from '../memory/memory.service';
 import { TASK_OPEN } from '../tasks/task-status';
 import { TeamUpdatesService } from '../contacts/team-updates.service';
 
-type NeedItem = { kind: string; icon: string; title: string; sub: string; href: string; action: string };
+/** The inbox item behind a team row, so the Dashboard can open the SAME reply sheet Tasks → Needs you uses. (BEA-1597) */
+type NeedUpdate = { id: string; text: string; label: string; contact: { id: string; name: string } | null; canReply: boolean };
+type NeedItem = { kind: string; icon: string; title: string; sub: string; href: string; action: string; update?: NeedUpdate };
 type CookItem = { icon: string; label: string; href: string };
 
 const LANE_ICON: Record<string, string> = { search: '🔎', research: '🧪', reminder: '⏰', task: '✅', note: '📝', meeting: '🎧', story: '🎙' };
@@ -47,9 +49,17 @@ export class HomeService {
           kind: 'team',
           icon: it.channel === 'system' ? '⏳' : '💬',
           title: `${it.contact?.name || 'Someone'}: ${String(it.text || '').replace(/\s+/g, ' ').trim().slice(0, 60)}`,
+          // The reason line — the SAME `readLabel()` string the inbox item carries. (BEA-1597)
           sub: String(it.label || 'needs you').slice(0, 120),
           href: '/tasks?tab=review',
           action: 'Reply',
+          update: {
+            id: String(it.id),
+            text: String(it.text || ''),
+            label: String(it.label || ''),
+            contact: it.contact ? { id: String(it.contact.id), name: String(it.contact.name || '') } : null,
+            canReply: !!it.canReply,
+          },
         }));
     } catch {
       return [];

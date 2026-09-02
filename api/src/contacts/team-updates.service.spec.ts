@@ -1,4 +1,5 @@
 import { TeamUpdatesService } from './team-updates.service';
+import { readLabel } from './update-read';
 
 /**
  * BEA-1159. The loop in the owner's words: "If they need my help, it will land in the review
@@ -50,7 +51,7 @@ describe('the review loop (BEA-1159)', () => {
     await svc.record({ contactId: 'c1', text: RADHA, channel: 'whatsapp', isReport: true });
     const inbox: any = await svc.inbox();
     expect(inbox.count).toBe(1);
-    expect(inbox.items[0].label).toContain('problem');
+    expect(inbox.items[0].label).toBe('stuck / blocked');
     expect(inbox.items[0].text).toContain('sense PCB');
   });
 
@@ -671,7 +672,8 @@ describe('one inbox for every "needs you" (BEA-1596)', () => {
     await svc.record({ contactId: 'c1', text: 'ok sir will check', channel: 'whatsapp', forceNeedsYou: true, skipAi: true, why: 'the assistant could not answer this about the payment' });
     const inbox: any = await svc.inbox();
     expect(inbox.count).toBe(1);
-    expect(inbox.items[0].label).toBe('raised a problem');
+    // The agent hands over what it could not ANSWER — so a forced row reads as a question. (BEA-1597)
+    expect(inbox.items[0].label).toBe('asked you a question');
     expect(inbox.items[0].why).toContain('the payment');
   });
 
@@ -685,7 +687,7 @@ describe('one inbox for every "needs you" (BEA-1596)', () => {
     expect(rows[0]).toMatchObject({ needsYou: true, taskId: 't3' }); // the named item's task is stapled on
     const inbox: any = await svc.inbox();
     expect(inbox.count).toBe(1);
-    expect(inbox.items[0].label).toBe('raised a problem');
+    expect(inbox.items[0].label).toBe('asked you a question');
     expect(inbox.items[0].why).toContain('Elleys');
   });
 
@@ -711,7 +713,7 @@ describe('one inbox for every "needs you" (BEA-1596)', () => {
     expect(rows).toHaveLength(1);
     const inbox: any = await svc.inbox();
     expect(inbox.count).toBe(1);
-    expect(inbox.items[0]).toMatchObject({ channel: 'system', label: 'raised a problem' });
+    expect(inbox.items[0]).toMatchObject({ channel: 'system', label: 'waiting on your reply' });
     expect(inbox.items[0].text).toMatch(/^No reply for 3 h — /);
   });
 
@@ -728,5 +730,125 @@ describe('one inbox for every "needs you" (BEA-1596)', () => {
     const { svc } = make();
     await svc.record({ contactId: 'c1', text: 'Today work SPD-300 qty 400', channel: 'whatsapp', isReport: true, skipAi: true });
     expect((await svc.inbox()).count).toBe(0);
+  });
+});
+
+/**
+ * BEA-1597 — every inbox item says WHY it needs him, and the wording comes from the ONE map
+ * (`readLabel()`), never a second table. Per kind, including the app's own system row.
+ */
+describe('the reason line on every item (BEA-1597)', () => {
+  const cases: [string, string, string][] = [
+    ['Need 298usd for the Elleys PCB advance sir', 'money', 'asked for money'],
+    ['sir what is the budget for the Elleys order', 'question', 'asked you a question'],
+    ['pls confirm the qty', 'decision', 'needs your decision'],
+    ['We have not received the material yet', 'blocked', 'stuck / blocked'],
+  ];
+  it.each(cases)('"%s" → %s → "%s"', async (text, kind, label) => {
+    const { svc, rows } = make();
+    await svc.record({ contactId: 'c1', text, channel: 'whatsapp', skipAi: true });
+    const reads = JSON.parse(rows[0].reads);
+    expect(reads).toEqual(expect.arrayContaining(['needs_you', kind]));
+    const it0 = (await svc.inbox()).items[0];
+    expect(it0.label).toBe(label);
+    expect(it0.label).toBe(readLabel(reads)); // the map, not a second table
+  });
+
+  it('the system row (the watchdog) says it is waiting on his reply', async () => {
+    const { svc, rows } = make();
+    await svc.record({ contactId: 'c1', text: 'No reply for 3 h — "sir the vendor is refusing"', channel: 'system', forceNeedsYou: true, skipAi: true });
+    expect(JSON.parse(rows[0].reads)).toEqual(['needs_you', 'no_reply']);
+    expect((await svc.inbox()).items[0].label).toBe('waiting on your reply');
+  });
+
+  it('a done-claim that also raised something says both', async () => {
+    const { svc } = make();
+    await svc.record({ contactId: 'c1', text: 'Installation done. Wifi curtain motor issue is still there', channel: 'whatsapp', skipAi: true });
+    expect((await svc.inbox()).items[0].label).toBe('stuck / blocked, and claims done');
+  });
+
+  it('the forced flag on a plain message names a kind, and never doubles needs_you', async () => {
+    const { svc, rows } = make();
+    await svc.record({ contactId: 'c1', text: 'ok sir will check', channel: 'whatsapp', skipAi: true });
+    await svc.record({ contactId: 'c1', text: 'ok sir will check', channel: 'whatsapp', forceNeedsYou: true, skipAi: true, why: 'the assistant could not answer this' });
+    const reads = JSON.parse(rows[0].reads);
+    expect(reads.filter((r: string) => r === 'needs_you')).toHaveLength(1);
+    expect(reads).toContain('question');
+    expect(reads).not.toContain('chat');
+  });
+
+  it("a person's story carries the same line", async () => {
+    const { svc } = make();
+    await svc.record({ contactId: 'c1', text: 'pls confirm the qty', channel: 'whatsapp', skipAi: true });
+    expect((await svc.forContact('c1'))[0].label).toBe('needs your decision');
+  });
+});
+
+/**
+ * BEA-1597 — wider word-rules must not mean wider spend. A positive hit is decided; the model is
+ * only asked where it can still change the answer (raise a miss, or stand down short politeness).
+ */
+describe('the AI second opinion after the wider rules (BEA-1597)', () => {
+  function svcWithAi(answer: string) {
+    const { svc, rows } = make();
+    const asked: string[] = [];
+    (svc as any).llm = { completeHelper: async (_k: string, p: string) => { asked.push(p); return answer; } };
+    (svc as any).prompts = { get: async () => '{{report}}{{message}}' };
+    return { svc, rows, asked };
+  }
+
+  it('a positive word-rule hit never asks the model — no extra call for a question caught by words', async () => {
+    const { svc, rows, asked } = svcWithAi('{"needsYou": false, "why": "routine"}');
+    await svc.record({ contactId: 'c1', text: 'sir what is the budget for the Elleys order', channel: 'whatsapp' });
+    expect(asked).toHaveLength(0);
+    expect(rows[0].needsYou).toBe(true);
+  });
+
+  it('a SHORT ask is a decided hit too — the model is never given a chance to stand it down', async () => {
+    // "pls confirm the qty" is 20 chars and digit-free — inside the old politeness window. The
+    // brief's MUST cannot depend on the model agreeing. (review finding)
+    for (const text of ['pls confirm the qty', 'sir pls send the drawing']) {
+      const { svc, rows, asked } = svcWithAi('{"needsYou": false, "why": "routine"}');
+      await svc.record({ contactId: 'c1', text, channel: 'whatsapp' });
+      expect(asked).toHaveLength(0);
+      expect(rows[0].needsYou).toBe(true);
+    }
+  });
+
+  it('a stood-down row keeps no reason in its reads — the story never says "stuck / blocked" about politeness', async () => {
+    const { svc, rows } = svcWithAi('{"needsYou": false, "why": "politeness"}');
+    await svc.record({ contactId: 'c1', text: 'No problem sir', channel: 'whatsapp' });
+    expect(rows[0].needsYou).toBe(false);
+    expect(JSON.parse(rows[0].reads)).not.toContain('needs_you');
+    expect((await svc.forContact('c1'))[0].label).toBe('said something');
+  });
+
+  it('but the short politeness class still gets its stand-down look', async () => {
+    const { svc, rows, asked } = svcWithAi('{"needsYou": false, "why": "politeness"}');
+    await svc.record({ contactId: 'c1', text: 'No problem sir', channel: 'whatsapp' });
+    expect(asked).toHaveLength(1);
+    expect(rows[0].needsYou).toBe(false);
+  });
+
+  it('an AI raise lands in the reads with the kind it named, so the label reads from the map', async () => {
+    const { svc, rows } = svcWithAi('{"needsYou": true, "why": "asks about the new die", "kind": "question"}');
+    await svc.record({ contactId: 'c1', text: 'Boss wanted to know about the new die before we cut', channel: 'whatsapp' });
+    expect(JSON.parse(rows[0].reads)).toEqual(expect.arrayContaining(['needs_you', 'question']));
+    expect((await svc.inbox()).items[0].label).toBe('asked you a question');
+  });
+
+  it('an AI raise with no kind (an older prompt override) is still flagged, with an honest line', async () => {
+    const { svc, rows } = svcWithAi('{"needsYou": true, "why": "asks about the new die"}');
+    await svc.record({ contactId: 'c1', text: 'Boss wanted to know about the new die before we cut', channel: 'whatsapp' });
+    const reads = JSON.parse(rows[0].reads);
+    expect(reads).toContain('needs_you');
+    expect(reads).not.toContain('chat');
+    expect((await svc.inbox()).items[0].label).toBe('needs your attention');
+  });
+
+  it('a made-up kind from the model is ignored, never stored', async () => {
+    const { svc, rows } = svcWithAi('{"needsYou": true, "why": "x", "kind": "urgent"}');
+    await svc.record({ contactId: 'c1', text: 'Boss wanted to know about the new die before we cut', channel: 'whatsapp' });
+    expect(JSON.parse(rows[0].reads)).not.toContain('urgent');
   });
 });

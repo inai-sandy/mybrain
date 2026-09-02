@@ -5,8 +5,10 @@ import { openSearch } from '../ui/SearchOverlay';
 import { Skeleton } from '../ui/Skeleton';
 import { TodayCard } from '../ui/TodayCard';
 import { Markdown } from '../ui/markdown';
+import { ReplySheet, type ReplyTarget } from '../ui/ReplySheet';
 
-type Need = { kind: string; icon: string; title: string; sub: string; href: string; action: string };
+/** `update` rides on a `team` row: the inbox item behind it, so Reply opens the SAME sheet Tasks → Needs you uses. (BEA-1597) */
+type Need = { kind: string; icon: string; title: string; sub: string; href: string; action: string; update?: ReplyTarget };
 type Cook = { icon: string; label: string; href: string };
 type Home = {
   today: { dumped: boolean; storyDone: boolean; counts: { total: number; done: number; open: number }; mustDos: { id: string; title: string; pinned: boolean; priority: string }[] };
@@ -57,6 +59,8 @@ export function Dashboard() {
   const [d, setD] = useState<Home | null>(null);
   const [aiWeek, setAiWeek] = useState<number | null>(null);
   const [read, setRead] = useState<'guidance' | 'summary' | 'portrait'>('guidance');
+  // A team row's Reply opens the shared reply sheet right here — no hop to Tasks. (BEA-1597)
+  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
 
   async function load() {
     const h = await fetch('/api/home').then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -141,19 +145,29 @@ export function Dashboard() {
       {!!needs.length && (
         <section className="rounded-xl border border-rose-300/40 bg-rose-500/[0.04] p-2 dark:border-rose-500/30">
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {needs.map((n, i) => (
-              <button key={i} onClick={() => navigate(n.href)} className="flex w-full min-w-0 items-center gap-3 py-2.5 text-left hover:opacity-90">
-                <span className="w-6 shrink-0 text-center text-lg">{n.icon}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">{n.title}</span>
-                  <span className="block truncate text-xs text-zinc-500">{n.sub}</span>
-                </span>
-                <span className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">{n.action}</span>
-              </button>
-            ))}
+            {needs.map((n, i) => {
+              // A team row's Reply opens the sheet in place; the text is still a plain tap to the tab. (BEA-1597)
+              const inPlace = n.kind === 'team' && n.update ? n.update : null;
+              return (
+              <div key={i} className="flex w-full min-w-0 items-center gap-3 py-2.5" data-testid={`need-${n.kind}`}>
+                <button onClick={() => navigate(n.href)} className="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-90">
+                  <span className="w-6 shrink-0 text-center text-lg">{n.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">{n.title}</span>
+                    {/* The reason line — the server's one `readLabel()` string, the same one Tasks → Needs you shows. */}
+                    <span className={'block truncate text-xs ' + (n.kind === 'team' ? 'font-medium text-amber-600 dark:text-amber-500' : 'text-zinc-500')}>{n.sub}</span>
+                  </span>
+                </button>
+                <button onClick={() => (inPlace ? setReplyTo(inPlace) : navigate(n.href))} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500">{n.action}</button>
+              </div>
+              );
+            })}
           </div>
         </section>
       )}
+
+      {/* The same sheet Tasks → Needs you opens; whatever it did, the strip re-reads /api/home. (BEA-1597) */}
+      {replyTo && <ReplySheet item={replyTo} onClose={() => setReplyTo(null)} onDone={() => load()} />}
 
       <TodayCard />
 

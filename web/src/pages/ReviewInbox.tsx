@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check, X, Send, Loader2, MessageSquare, Link2, Radio, Search, ChevronDown, Hand, TriangleAlert } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { ReplySheet, reviewApi, type ReplyOutcome } from '../ui/ReplySheet';
 
 type Item = {
   id: string;
@@ -9,6 +10,7 @@ type Item = {
   channel: 'whatsapp' | 'link' | 'system';
   at: string;
   openDays: number;
+  /** The reason line — `readLabel()` on the server; the Dashboard shows the very same string. (BEA-1597) */
   label: string;
   why: string | null;
   contact: { id: string; name: string; whatsappNumber: string | null } | null;
@@ -37,15 +39,13 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
   const toast = useToast();
   const [items, setItems] = useState<Item[] | null>(null);
   const [q, setQ] = useState('');
-  const [replyTo, setReplyTo] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
+  // The reply sheet is the shared one the Dashboard also opens (BEA-1597); it holds its own draft.
+  const [replyTo, setReplyTo] = useState<Item | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // Accordion state (BEA-1214): collapsed by default — a 1–2 line glance per item, detail on tap.
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
     setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-    // Collapsing while composing acts like Cancel — re-opening must not resurrect a half-typed draft.
-    if (replyTo === id && open.has(id)) { setReplyTo(null); setDraft(''); }
   };
 
   const load = useCallback(() => {
@@ -57,25 +57,14 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  async function send(it: Item) {
-    const text = draft.trim();
-    if (!text) return;
-    setBusy(it.id);
-    try {
-      const r = await fetch(`/api/reminders/review/${it.id}/reply`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
-      });
-      const d = await r.json().catch(() => ({ ok: false }));
-      if (!d.ok) { toast('error', d.message || 'Could not send that'); return; }
-      // Deliberately stays open: answering is not solving. He closes it when the problem is gone.
-      toast('success', `Sent to ${it.contact?.name || 'them'} — still open until you close it`);
-      setDraft('');
-      setReplyTo(null);
-    } catch {
-      toast('error', 'Could not reach the server');
-    } finally {
-      setBusy(null);
-    }
+  const drop = (id: string) => setItems((xs) => { const next = (xs || []).filter((x) => x.id !== id); onCountChange?.(next.length); return next; });
+
+  /** What the sheet did — the list follows the same rules the card's own buttons use. */
+  function sheetDone(it: Item, o: ReplyOutcome) {
+    if (o.kind === 'replied') return; // answering is not solving — it stays until he closes it
+    if (o.kind === 'decided' && o.stillOpen) { load(); return; }
+    if (o.kind === 'closed' && o.pendingClaim) { load(); return; } // the claim may resurface as the one remaining item
+    drop(it.id);
   }
 
   /**
@@ -87,17 +76,14 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
   async function decide(it: Item, confirm: boolean) {
     setBusy(it.id);
     try {
-      const r = await fetch(`/api/reminders/review/${it.id}/decide`, {
-        // The exact claim this card showed — never let the server re-guess it. (BEA-1221)
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm, claimId: it.claimId || undefined }),
-      });
-      const d = await r.json().catch(() => ({ ok: false }));
+      // The exact claim this card showed — never let the server re-guess it. (BEA-1221)
+      const d = await reviewApi.decide(it.id, confirm, it.claimId);
       if (!d.ok) { toast('error', d.message || 'Could not save that'); return; }
       // A message that also raised a problem stays until HE closes it — say so. (BEA-1221)
       toast('success', (confirm ? 'Marked done — no more chasing for it' : `Sent back — ${it.contact?.name || 'they'} will be chased again`)
         + (d.stillOpen ? '. Their message stays until you close it.' : ''));
       if (d.stillOpen) { load(); return; }
-      setItems((xs) => { const next = (xs || []).filter((x) => x.id !== it.id); onCountChange?.(next.length); return next; });
+      drop(it.id);
     } catch {
       toast('error', 'Could not reach the server');
     } finally {
@@ -108,8 +94,7 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
   async function close(it: Item) {
     setBusy(it.id);
     try {
-      const r = await fetch(`/api/reminders/review/${it.id}/close`, { method: 'POST' });
-      const d = await r.json().catch(() => ({ ok: r.ok }));
+      const d = await reviewApi.close(it.id);
       if (!d.ok) { toast('error', 'Could not close that'); load(); return; }
       // If a "says it's done" is still waiting, SAY so — a count that stays up with no
       // explanation is how Ashish's 1 looked broken. (BEA-1221)
@@ -117,7 +102,7 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
         ? `Closed — ${it.contact?.name || 'they'} still has a "says it's done" waiting for your Yes/No`
         : 'Closed');
       if (d.pendingClaim) { load(); return; } // the claim may resurface as the one remaining item
-      setItems((xs) => { const next = (xs || []).filter((x) => x.id !== it.id); onCountChange?.(next.length); return next; });
+      drop(it.id);
     } catch {
       toast('error', 'Could not close that');
     } finally {
@@ -192,8 +177,6 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
                       {it.channel === 'link' ? <><Link2 size={11} /> on their link</> : it.channel === 'system' ? <><Radio size={11} /> the app noticed</> : <><MessageSquare size={11} /> on WhatsApp</>}
                     </span>
                     <span className="tabular-nums">{it.openDays === 0 ? 'today' : `${it.openDays}d ago`}</span>
-                    {/* Colour follows the ACTION on the card: violet = a Yes/No decision, amber = a problem to read. (BEA-1221) */}
-                    <span className={claim ? 'text-violet-600 dark:text-violet-400' : it.label.includes('problem') ? 'text-amber-600 dark:text-amber-500' : 'text-violet-600 dark:text-violet-400'}>{it.label}</span>
                     {/* He replies and then nothing follows up — worth knowing before he answers. (BEA-1160) */}
                     {it.chasePaused && <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><Radio size={11} /> their chase is off</span>}
                   </div>
@@ -207,6 +190,9 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
 
                   {/* Collapsed: the first 1–2 lines of their words, enough to know what it is. */}
                   {!isOpen && <p className="mt-1 line-clamp-2 border-l-2 border-zinc-200 pl-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{it.text}</p>}
+                  {/* WHY it needs him — one line, from the server's one map; the Dashboard shows the same string. (BEA-1597)
+                      Colour follows the ACTION on the card: violet = a Yes/No decision, amber = something to read. (BEA-1221) */}
+                  {!isOpen && <p className={'mt-1 text-[11px] font-medium ' + (claim ? 'text-violet-600 dark:text-violet-400' : 'text-amber-600 dark:text-amber-500')} data-testid="needs-you-reason">{it.label}</p>}
                 </div>
                 <ChevronDown size={16} className={'mt-0.5 shrink-0 text-zinc-400 transition-transform ' + (isOpen ? 'rotate-180' : '')} />
               </div>
@@ -216,26 +202,9 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
             <div className="px-3.5 pb-3.5">
             {/* Their exact words. Never rewritten, never summarised. */}
             <p className="whitespace-pre-wrap border-l-2 border-zinc-200 pl-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{it.text}</p>
+            <p className={'mt-1 text-[11px] font-medium ' + (claim ? 'text-violet-600 dark:text-violet-400' : 'text-amber-600 dark:text-amber-500')} data-testid="needs-you-reason">{it.label}</p>
 
-            {replyTo === it.id ? (
-              <div className="mt-2.5 space-y-2">
-                <textarea
-                  autoFocus
-                  rows={3}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder={`Reply to ${it.contact?.name || 'them'} — this goes to their WhatsApp`}
-                  className="w-full rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => send(it)} disabled={busy === it.id || !draft.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
-                    {busy === it.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send on WhatsApp
-                  </button>
-                  <button onClick={() => { setReplyTo(null); setDraft(''); }} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-500 dark:border-zinc-700">Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 {/* They claimed a task finished — this is a decision, and "No" restarts the chase. */}
                 {it.claimId ? (
                   <>
@@ -252,21 +221,22 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
                   </button>
                 )}
                 <button
-                  onClick={() => { setReplyTo(it.id); setDraft(''); }}
+                  onClick={() => setReplyTo(it)}
                   disabled={!it.canReply}
                   title={it.canReply ? undefined : 'No WhatsApp number for them'}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
                 >
                   <Send size={14} /> Message them
                 </button>
-              </div>
-            )}
+            </div>
             </div>
             )}
           </li>
           );
         })}
       </ul>
+
+      {replyTo && <ReplySheet item={replyTo} onClose={() => setReplyTo(null)} onDone={(o) => sheetDone(replyTo, o)} />}
     </div>
   );
 }
