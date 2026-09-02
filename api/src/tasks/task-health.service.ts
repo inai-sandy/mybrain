@@ -268,19 +268,20 @@ export class TaskHealthService {
       where: 'Tasks → Delegated',
     });
 
-    // A badge asking for the owner's attention on work that is over. This is the one that fired on
-    // live data: a merged duplicate row kept its flag after the chase was stopped. (BEA-1297)
-    const staleNeedsYou = await this.q(() => this.prisma.reminder.findMany({
-      where: { needsOwner: true, OR: [{ status: { in: ['done', 'stopped'] } }, { task: { status: 'done' } }] },
-      select: { subject: true, contact: { select: { name: true } }, task: { select: { title: true } } },
+    // A review item still asking for the owner's attention on work that is over. Finishing a task
+    // closes its open updates (`settleDelegation`), so an open one on a done task means the two
+    // halves came apart. The inbox is the one "needs you" source since BEA-1596. (BEA-1297)
+    const staleNeedsYou = await this.q(() => this.prisma.teamUpdate.findMany({
+      where: { needsYou: true, closedAt: null, task: { status: 'done' } },
+      select: { text: true, contact: { select: { name: true } }, task: { select: { title: true } } },
       take: 50,
     }));
     push({
       key: 'needs-you-on-finished-work',
-      what: '"needs you" flags sitting on work that is already over',
+      what: '"needs you" items sitting on work that is already over',
       count: staleNeedsYou.length,
       examples: titles(staleNeedsYou, who),
-      where: 'Contacts',
+      where: 'Tasks → Needs you',
     });
 
     // A standing report can never be finished — closing one kills its chase for good and tomorrow's

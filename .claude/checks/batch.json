@@ -1,28 +1,9 @@
 {
-  "startedAt": "2026-08-29T17:45:00Z",
-  "status": "complete",
-  "note": "Customer-recovery batch: six-moves messages, plumbing phone-home, and (added mid-batch with approval after the 17:36 Daily Email failure) model-hiccup retries. Order: 1580 -> 1581 -> 1582.",
+  "startedAt": "2026-09-02T02:50:00Z",
+  "status": "running",
+  "note": "Needs You split fix: inbox becomes the one source for Tasks + Dashboard (1596), then reason line / question detection / reply-from-dashboard (1597). Order: 1596 -> 1597.",
   "issues": [
-    {
-      "id": "BEA-1580",
-      "title": "every failure ends in one of the six moves; plumbing never presented as his problem",
-      "status": "done",
-      "sha": "f5a235c",
-      "note": "failure-words.ts classifier; six moves on every surfaced failure; 8 plumbing classes exported incl. model-blank; critical+high regex over-matches fixed and re-verified"
-    },
-    {
-      "id": "BEA-1581",
-      "title": "plumbing failures phone home (opsAlert seam, Telegram today)",
-      "status": "done",
-      "sha": "ebeb4ec",
-      "note": "ops-alert seam, 9 detection points, dedupe per class+agent+day, Telegram transport swappable at boot"
-    },
-    {
-      "id": "BEA-1582",
-      "title": "a model hiccup is retried like a vendor hiccup; a model outage never queues a repair",
-      "status": "done",
-      "sha": "5ffc14f",
-      "note": "helper retry at one door, same model; model-blank never queues a repair; interactive helpers fail fast"
-    }
+    { "id": "BEA-1596", "title": "Needs You: one inbox for Tasks + Dashboard; Reminder.needsOwner retired", "status": "pending" },
+    { "id": "BEA-1597", "title": "Needs You extras: reason line, questions without ?, reply from Dashboard", "status": "pending" }
   ]
 }

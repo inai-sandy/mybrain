@@ -13,10 +13,10 @@ type Contact = { id: string; name: string; whatsappNumber: string | null; notes:
 /** The work signals behind one card on the team board. (BEA-1219) */
 type Board = { open: number; needsYou: number; chasing: number; lastHeardAt: string | null; report: 'in' | 'waiting' | 'missed' | null };
 type BoardContact = Contact & { board?: Board };
-type Reminder = { id: string; contactId: string; taskId: string | null; repeat?: string; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; createdAt?: string; contact?: Contact; task?: { id: string; title: string } | null };
+type Reminder = { id: string; contactId: string; taskId: string | null; repeat?: string; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsYou?: boolean; armedDay?: string | null; createdAt?: string; contact?: Contact; task?: { id: string; title: string } | null };
 
 /** One row in the WhatsApp-style conversation inbox (BEA-921). */
-type Conversation = { contactId: string; name: string; whatsappNumber: string | null; lastMessage: { body: string; direction: string; at: string } | null; lastAt: string | null; reminderId: string; times: string[]; activeReminderCount: number; needsOwner: boolean; unread: number };
+type Conversation = { contactId: string; name: string; whatsappNumber: string | null; lastMessage: { body: string; direction: string; at: string } | null; lastAt: string | null; reminderId: string; times: string[]; activeReminderCount: number; needsYou: boolean; unread: number };
 
 /** Short "when" for a conversation row: time today, weekday this week, else date. */
 function fmtRel(s?: string | null): string {
@@ -190,7 +190,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
                         <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
                           <div className="flex items-center gap-2">
                             <span className="truncate font-medium">{rm.subject?.trim() || rm.task?.title || 'Reminder'}</span>
-                            {rm.repeat === 'daily' && <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" title="Repeats every day until the task is confirmed done">↻ chases daily</span>}<span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+                            {rm.repeat === 'daily' && <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" title="Repeats every day until the task is confirmed done">↻ chases daily</span>}<span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsYou && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
                           </div>
                           <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
                           <div className="mt-1.5 flex flex-wrap gap-1">
@@ -585,7 +585,7 @@ type PersonRow = {
   activeN: number;
   pausedN: number;
   doneN: number;
-  needsOwner: boolean;
+  needsYou: boolean;
   message: string;
   taskTitle: string;
   newestMs: number;
@@ -628,7 +628,7 @@ function ReminderLine({ rm, onEdit, onAct }: { rm: Reminder; onEdit: () => void;
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className={'shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>
           {rm.repeat === 'daily' && <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" title="Repeats every day until the task is confirmed done">↻ chases daily</span>}
-          {rm.needsOwner && <span className="shrink-0 whitespace-nowrap rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+          {rm.needsYou && <span className="shrink-0 whitespace-nowrap rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
           {isFutureReminder(rm) && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">📅 {fmtDayKey(rm.armedDay)}</span>}
           {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
         </div>
@@ -666,7 +666,7 @@ function PersonCard({ g, onChat, onEdit, onAct }: { g: PersonRow; onChat: () => 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="truncate font-medium">{g.person}</span>
-            {g.needsOwner && <span className="shrink-0 whitespace-nowrap rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+            {g.needsYou && <span className="shrink-0 whitespace-nowrap rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
           </div>
           <div className="text-xs text-zinc-500">{counts}</div>
         </div>
@@ -779,7 +779,7 @@ export function RemindersTab() {
   }
 
   const totalUnread = (convos || []).reduce((n, c) => n + (c.unread || 0), 0);
-  const needsCount = (convos || []).filter((c) => c.needsOwner).length;
+  const needsCount = (convos || []).filter((c) => c.needsYou).length;
   const unreadCount = (convos || []).filter((c) => c.unread > 0).length;
 
   // The inbox after search + chip. The 20s refresh replaces `convos` underneath; these are pure
@@ -787,7 +787,7 @@ export function RemindersTab() {
   const chatRows = useMemo(() => {
     let r = convos || [];
     if (chatChip === 'unread') r = r.filter((c) => c.unread > 0);
-    if (chatChip === 'needs') r = r.filter((c) => c.needsOwner);
+    if (chatChip === 'needs') r = r.filter((c) => c.needsYou);
     const s = chatQ.trim().toLowerCase();
     if (s) r = r.filter((c) => (c.name || '').toLowerCase().includes(s) || (c.lastMessage?.body || '').toLowerCase().includes(s));
     return r;
@@ -808,7 +808,7 @@ export function RemindersTab() {
       const cid = rm.contactId || rm.contact?.id || `solo-${rm.id}`;
       let g = map.get(cid);
       if (!g) {
-        g = { contactId: cid, person: rm.contact?.name || 'Contact', reminders: [], activeN: 0, pausedN: 0, doneN: 0, needsOwner: false, message: '', taskTitle: '', newestMs: 0, activeFirst: 0 };
+        g = { contactId: cid, person: rm.contact?.name || 'Contact', reminders: [], activeN: 0, pausedN: 0, doneN: 0, needsYou: false, message: '', taskTitle: '', newestMs: 0, activeFirst: 0 };
         map.set(cid, g);
       }
       g.reminders.push(rm);
@@ -819,7 +819,7 @@ export function RemindersTab() {
         if (rm.status === 'active') g.activeN++;
         else if (rm.status === 'paused') g.pausedN++;
         else g.doneN++;
-        if (rm.needsOwner) g.needsOwner = true;
+        if (rm.needsYou) g.needsYou = true;
       }
       g.message = g.reminders.map((r) => r.message || '').join(' ');
       g.taskTitle = g.reminders.map((r) => r.task?.title || '').join(' ');
@@ -841,7 +841,7 @@ export function RemindersTab() {
         label: 'Person',
         options: [...personRows].sort((a, b) => a.person.localeCompare(b.person)).map((g) => ({ value: g.contactId, label: `${g.person} · ${g.reminders.length}` })),
       },
-      { key: 'needsOwner', label: 'Needs you', options: [{ value: 'yes', label: 'Needs you' }], match: (g: PersonRow, v: string) => (v === 'yes' ? g.needsOwner : true) },
+      { key: 'needsYou', label: 'Needs you', options: [{ value: 'yes', label: 'Needs you' }], match: (g: PersonRow, v: string) => (v === 'yes' ? g.needsYou : true) },
     ],
     [personRows],
   );
@@ -898,7 +898,7 @@ export function RemindersTab() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className={'truncate ' + (c.unread > 0 ? 'font-semibold text-zinc-900 dark:text-white' : 'font-medium')}>{c.name}</span>
-                      {c.needsOwner && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+                      {c.needsYou && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
                       <span className={'ml-auto shrink-0 text-[11px] ' + (c.unread > 0 ? 'font-semibold text-emerald-600 dark:text-emerald-400' : 'text-zinc-400')}>{fmtRel(c.lastAt)}</span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-2">

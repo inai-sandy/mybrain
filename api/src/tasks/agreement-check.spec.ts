@@ -23,7 +23,6 @@ function build(rows: Record<string, any[]> = {}) {
   const prisma: any = {
     reminder: {
       findMany: async ({ where }: any) => {
-        if (where?.needsOwner === true) return r('staleNeedsYou');
         if (where?.status === 'active' && where?.task?.claims) return r('chasingClaimed');
         if (where?.status === 'done' && where?.task) return r('silentlyOff');
         if (where?.status?.in && where?.taskId?.in) return r('liveSiblings'); // the "is it covered?" pass
@@ -54,6 +53,8 @@ function build(rows: Record<string, any[]> = {}) {
     taskClaim: {
       findMany: async ({ where }: any) => (where?.task?.kind === 'recurring' ? r('recurringInReview') : r('oldClaims')),
     },
+    // "Needs you" lives in the review inbox since BEA-1596.
+    teamUpdate: { findMany: async ({ where }: any) => (where?.needsYou === true && where?.task?.status === 'done' ? r('staleNeedsYou') : []) },
   };
   return new TaskHealthService(prisma);
 }
@@ -100,8 +101,8 @@ describe('each contradiction is caught, and named (BEA-1298)', () => {
     expect(f?.examples[0]).toContain('Deepthi');
   });
 
-  it('a "needs you" flag left on work that is over — the one that fired on live data', async () => {
-    const svc = build({ staleNeedsYou: [{ subject: 'Haasya recruitment', contact: { name: 'Swathi' }, task: { title: 'Get 10 people hired' } }] });
+  it('a "needs you" item left open on work that is over — the one that fired on live data', async () => {
+    const svc = build({ staleNeedsYou: [{ text: 'sir the Haasya recruitment is stuck', contact: { name: 'Swathi' }, task: { title: 'Get 10 people hired' } }] });
     expect(await keys(svc)).toContain('needs-you-on-finished-work');
   });
 

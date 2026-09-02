@@ -47,8 +47,8 @@ const REMINDERS = [
 ];
 
 const CONVOS = [
-  { contactId: 'c1', name: 'Ravi', whatsappNumber: '+91', lastMessage: { body: 'the units are packed', direction: 'in', at: '2026-08-05T10:00:00Z' }, lastAt: '2026-08-05T10:00:00Z', reminderId: 'r1', times: [], activeReminderCount: 1, needsOwner: false, unread: 2 },
-  { contactId: 'c2', name: 'Meena', whatsappNumber: '+91', lastMessage: { body: 'will confirm tomorrow', direction: 'in', at: '2026-08-04T10:00:00Z' }, lastAt: '2026-08-04T10:00:00Z', reminderId: 'r2', times: [], activeReminderCount: 1, needsOwner: true, unread: 0 },
+  { contactId: 'c1', name: 'Ravi', whatsappNumber: '+91', lastMessage: { body: 'the units are packed', direction: 'in', at: '2026-08-05T10:00:00Z' }, lastAt: '2026-08-05T10:00:00Z', reminderId: 'r1', times: [], activeReminderCount: 1, needsYou: false, unread: 2 },
+  { contactId: 'c2', name: 'Meena', whatsappNumber: '+91', lastMessage: { body: 'will confirm tomorrow', direction: 'in', at: '2026-08-04T10:00:00Z' }, lastAt: '2026-08-04T10:00:00Z', reminderId: 'r2', times: [], activeReminderCount: 1, needsYou: true, unread: 0 },
 ];
 
 const SUGGESTIONS = Array.from({ length: 7 }, (_, i) => ({

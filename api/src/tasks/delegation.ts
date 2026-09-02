@@ -106,11 +106,6 @@ export async function settleDelegation(
     say(`review settle for ${taskId}: ${e?.message ?? e}`);
   }
 
-  // 3. The "needs you" badge. Nothing cleared this when the work itself was finished, so a flag
-  //    raised because the agent got stuck on a task outlived the task by weeks. (BEA-1296)
-  try {
-    await p.reminder?.updateMany?.({ where: { taskId, needsOwner: true }, data: { needsOwner: false } });
-  } catch (e: any) {
-    say(`needs-you clear for ${taskId}: ${e?.message ?? e}`);
-  }
+  // 3. The "needs you" badge is the review list itself (BEA-1596): closing the task's open updates
+  //    above IS the clear. `Reminder.needsOwner` is retired and nothing writes it any more.
 }

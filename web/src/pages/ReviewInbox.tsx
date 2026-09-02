@@ -6,7 +6,7 @@ import { useToast } from '../ui/Toast';
 type Item = {
   id: string;
   text: string;
-  channel: 'whatsapp' | 'link';
+  channel: 'whatsapp' | 'link' | 'system';
   at: string;
   openDays: number;
   label: string;
@@ -189,7 +189,7 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
                       <Link to={`/contacts?contact=${it.contact.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-emerald-600 hover:underline dark:text-emerald-400">{it.contact.name}</Link>
                     )}
                     <span className="inline-flex items-center gap-1">
-                      {it.channel === 'link' ? <><Link2 size={11} /> on their link</> : <><MessageSquare size={11} /> on WhatsApp</>}
+                      {it.channel === 'link' ? <><Link2 size={11} /> on their link</> : it.channel === 'system' ? <><Radio size={11} /> the app noticed</> : <><MessageSquare size={11} /> on WhatsApp</>}
                     </span>
                     <span className="tabular-nums">{it.openDays === 0 ? 'today' : `${it.openDays}d ago`}</span>
                     {/* Colour follows the ACTION on the card: violet = a Yes/No decision, amber = a problem to read. (BEA-1221) */}

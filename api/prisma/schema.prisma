@@ -1119,7 +1119,7 @@ model TeamUpdate {
   contact    Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
   taskId     String?
   task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  /// whatsapp | link — how it reached him
+  /// whatsapp | link | system — how it reached him (system = the app itself raised it, BEA-1596)
   channel    String
   /// Their words, exactly. Never rewritten.
   text       String

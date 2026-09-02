@@ -8,7 +8,9 @@ import { TasksService } from './tasks.service';
 function build(task: any) {
   const reminderUpdates: any[] = [];
   const sendDeletes: any[] = [];
+  const updateCloses: any[] = [];
   const prisma: any = {
+    teamUpdate: { updateMany: async (args: any) => { updateCloses.push(args); return { count: 1 }; } },
     task: {
       findUnique: async () => task,
       update: async ({ data }: any) => ({ ...task, ...data }),
@@ -25,7 +27,7 @@ function build(task: any) {
   svc.allContacts = async () => [];
   svc.syncPeople = async () => undefined;
   svc.shape = (x: any) => x;
-  return { svc, reminderUpdates, sendDeletes };
+  return { svc, reminderUpdates, sendDeletes, updateCloses };
 }
 
 const delegated = { id: 't1', title: 'Send the report', status: 'open', progress: 50, ownerContactId: 'c1', party: 'Madhuri', priority: 'medium', reminderCount: 0, reminders: null, kind: 'assignment' };
@@ -51,14 +53,15 @@ describe('closing a task stops its chase (BEA-1187)', () => {
     expect(sendDeletes.length).toBe(1); // queued sends cleared too
   });
 
-  it('clears the "needs you" badge on the same task (BEA-1296)', async () => {
-    // A flag raised because the agent got stuck on this task outlived the task itself — nothing
-    // ever cleared it when the work finished.
-    const { svc, reminderUpdates } = build(delegated);
+  it('clears the "needs you" on the same task by closing its review items (BEA-1296, BEA-1596)', async () => {
+    // A "needs you" raised because the agent got stuck on this task outlived the task itself. It is
+    // an inbox row now, and finishing the work closes it — no reminder flag is written any more.
+    const { svc, reminderUpdates, updateCloses } = build(delegated);
     await svc.update('t1', { progress: 100 });
-    const cleared = didUpdate(reminderUpdates, { needsOwner: false });
-    expect(cleared).toHaveLength(1);
-    expect(cleared[0].where).toMatchObject({ taskId: 't1', needsOwner: true });
+    expect(updateCloses).toHaveLength(1);
+    expect(updateCloses[0].where).toMatchObject({ taskId: 't1', closedAt: null });
+    expect(updateCloses[0].data.closedAt).toBeInstanceOf(Date);
+    expect(reminderUpdates.filter((c) => 'needsOwner' in (c.data || {}))).toEqual([]);
   });
 
   it('resumes a repeating chase when the task is re-opened', async () => {

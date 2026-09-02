@@ -33,9 +33,9 @@ function db() {
   const store: any = {
     task: [{ id: 't1', title: 'Add all videos to the Beacon Hub', status: 'open', progress: 50, kind: 'assignment', ownerContactId: 'c1', party: 'Dharmendra', priority: 'medium', reminderCount: 0, reminders: null }],
     reminder: [
-      { id: 'r1', taskId: 't1', status: 'active', repeat: 'daily', needsOwner: true, pausedAuto: false },
-      { id: 'r2', taskId: 't1', status: 'paused', repeat: 'none', needsOwner: true, pausedAuto: true },
-      { id: 'other', taskId: 't2', status: 'active', repeat: 'daily', needsOwner: true, pausedAuto: false },
+      { id: 'r1', taskId: 't1', status: 'active', repeat: 'daily', pausedAuto: false },
+      { id: 'r2', taskId: 't1', status: 'paused', repeat: 'none', pausedAuto: true },
+      { id: 'other', taskId: 't2', status: 'active', repeat: 'daily', pausedAuto: false },
     ],
     reminderSend: [{ id: 's1', reminderId: 'r1', status: 'queued' }],
     taskClaim: [{ id: 'cl1', taskId: 't1', status: 'pending', quote: 'sir it is done', contactId: 'c1' }],
@@ -92,13 +92,13 @@ function finishedState(row: (n: string, id: string) => any) {
     task: row('task', 't1').status,
     chase: row('reminder', 'r1').status,
     pausedChase: row('reminder', 'r2').status,
-    needsYou: row('reminder', 'r1').needsOwner,
     claim: row('taskClaim', 'cl1').status,
+    // "Needs you" IS the team update since BEA-1596 — closing it is the clear.
     teamUpdateClosed: row('teamUpdate', 'u1').closedAt !== null,
   };
 }
 
-const FINISHED = { task: 'done', chase: 'done', pausedChase: 'done', needsYou: false, claim: 'confirmed', teamUpdateClosed: true };
+const FINISHED = { task: 'done', chase: 'done', pausedChase: 'done', claim: 'confirmed', teamUpdateClosed: true };
 
 describe('finishing delegated work lands in the same place from every screen (BEA-1296)', () => {
   it('from Tasks — the tick', async () => {
@@ -163,7 +163,7 @@ describe('finishing delegated work lands in the same place from every screen (BE
   it('another person\'s chase is untouched — the switch is per task, not global', async () => {
     const { tasks, row } = db();
     await tasks.setDone('t1', true);
-    expect(row('reminder', 'other')).toMatchObject({ status: 'active', needsOwner: true });
+    expect(row('reminder', 'other')).toMatchObject({ status: 'active' });
   });
 });
 
@@ -178,10 +178,9 @@ describe('closing it as NOT done stops the chase just as hard (BEA-1306/1315)', 
       task: row('task', 't1').status,
       chase: row('reminder', 'r1').status,
       pausedChase: row('reminder', 'r2').status,
-      needsYou: row('reminder', 'r1').needsOwner,
       claim: row('taskClaim', 'cl1').status,
       teamUpdateClosed: row('teamUpdate', 'u1').closedAt !== null,
-    }).toEqual({ task: 'dropped', chase: 'done', pausedChase: 'done', needsYou: false, claim: 'moot', teamUpdateClosed: true });
+    }).toEqual({ task: 'dropped', chase: 'done', pausedChase: 'done', claim: 'moot', teamUpdateClosed: true });
   });
 
   it('and it is never recorded as an achievement', async () => {
