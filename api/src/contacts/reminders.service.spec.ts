@@ -454,16 +454,19 @@ describe('conversations (BEA-921)', () => {
       },
       reminder: {
         findMany: async () => [
-          { id: 'r1', contactId: 'k1', status: 'active', times: '["09:00"]', needsOwner: false },
-          { id: 'r2', contactId: 'k2', status: 'active', times: '["10:00"]', needsOwner: true },
+          { id: 'r1', contactId: 'k1', status: 'active', times: '["09:00"]' },
+          { id: 'r2', contactId: 'k2', status: 'active', times: '["10:00"]' },
         ],
       },
+      // "Needs you" is derived from the review inbox, never a reminder flag (BEA-1596).
+      teamUpdate: { findMany: async () => [{ contactId: 'k2', taskId: null }] },
       contact: { findMany: async () => [{ id: 'k1', name: 'Alpha', whatsappNumber: '91' }, { id: 'k2', name: 'Beta', whatsappNumber: '92' }] },
     };
     const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
     const { conversations } = await svc.conversations();
     expect(conversations.map((c: any) => c.name)).toEqual(['Beta', 'Alpha']); // newest message on top
-    expect(conversations[0]).toMatchObject({ contactId: 'k2', reminderId: 'r2', needsOwner: true, activeReminderCount: 1 });
+    expect(conversations[0]).toMatchObject({ contactId: 'k2', reminderId: 'r2', needsYou: true, activeReminderCount: 1 });
+    expect(conversations[1].needsYou).toBe(false);
     expect(conversations[0].lastMessage).toMatchObject({ body: 'latest from k2', direction: 'in' });
     expect(conversations[1].times).toEqual(['09:00']); // parsed from JSON
   });
@@ -479,7 +482,7 @@ describe('conversations unread + markRead (BEA-922)', () => {
           { contactId: 'k1', body: 'old', direction: 'in', createdAt: new Date(t0 - 200000) }, // before read
         ],
       },
-      reminder: { findMany: async () => [{ id: 'r1', contactId: 'k1', status: 'active', times: '[]', needsOwner: false }] },
+      reminder: { findMany: async () => [{ id: 'r1', contactId: 'k1', status: 'active', times: '[]' }] },
       contact: { findMany: async () => [{ id: 'k1', name: 'Alpha', whatsappNumber: '91', lastReadAt: new Date(t0 - 100000) }] },
     };
     const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
@@ -490,7 +493,7 @@ describe('conversations unread + markRead (BEA-922)', () => {
   it('unread counts all inbound when never read', async () => {
     const prisma: any = {
       reminderMessage: { findMany: async () => [{ contactId: 'k1', body: 'hi', direction: 'in', createdAt: new Date() }] },
-      reminder: { findMany: async () => [{ id: 'r1', contactId: 'k1', status: 'active', times: '[]', needsOwner: false }] },
+      reminder: { findMany: async () => [{ id: 'r1', contactId: 'k1', status: 'active', times: '[]' }] },
       contact: { findMany: async () => [{ id: 'k1', name: 'A', whatsappNumber: '9', lastReadAt: null }] },
     };
     const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);

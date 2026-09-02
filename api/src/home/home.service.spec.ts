@@ -16,7 +16,17 @@ function waitingFlow(kind: 'gate' | 'ask') {
   };
 }
 
-function makeSvc(over: { flowWaiting?: any[] } = {}) {
+/** What the review inbox holds — the SAME rows Tasks → Needs you draws. (BEA-1596) */
+const INBOX_ROWS = [
+  { id: 'u1', channel: 'whatsapp', text: 'Need 298usd for the Elleys PCB advance sir', label: 'raised a problem', contact: { id: 'c1', name: 'Deepthi' }, closedAt: null, at: new Date('2026-08-31') },
+  { id: 'u2', channel: 'system', text: 'No reply for 3 h — "sir the vendor is refusing"', label: 'raised a problem', contact: { id: 'c2', name: 'Rakesh' }, closedAt: null, at: new Date('2026-09-02') },
+  { id: 'u3', channel: 'whatsapp', text: 'closed already', label: 'raised a problem', contact: { id: 'c3', name: 'Jayanth' }, closedAt: new Date('2026-09-01'), at: new Date('2026-08-18') },
+  { id: 'claim:cl1', claimId: 'cl1', channel: 'whatsapp', text: 'sir it is done', label: 'says it is done', contact: { id: 'c4', name: 'Srikar' }, closedAt: null, at: new Date('2026-09-02') },
+  // A message the inbox glued a pending claim onto — its id is the update's, but it IS the claim.
+  { id: 'u5', claimId: 'cl2', channel: 'whatsapp', text: 'PCBs also sent sir', label: 'says it is done', contact: { id: 'c5', name: 'Radha' }, closedAt: null, at: new Date('2026-09-02') },
+];
+
+function makeSvc(over: { flowWaiting?: any[]; inbox?: any[] } = {}) {
   const delta = (w: any) => !!w?.createdAt; // a "today-new" count query
   const prisma: any = {
     item: { count: async ({ where }: any) => (delta(where) ? 2 : where?.source === 'raindrop' ? 93 : 35), findMany: async () => [{ id: 'i1', title: 'Recent doc', source: 'app', createdAt: new Date() }] },
@@ -34,7 +44,6 @@ function makeSvc(over: { flowWaiting?: any[] } = {}) {
       findMany: async ({ where }: any) => (where?.status === 'awaiting_input' ? [{ id: 'a1', title: 'Research agent' }] : []),
     },
     flowRun: { count: async () => 0, findMany: async () => over.flowWaiting || [] },
-    reminder: { findMany: async () => [{ contact: { name: 'Srikar' }, subject: 'the BOM' }] },
     reminderSend: { count: async () => 2 },
     task: { findMany: async () => [] },
     mentorDay: { findFirst: async () => ({ day: '2026-07-06', guidance: 'Do more Saturdays like this one.' }) },
@@ -49,24 +58,27 @@ function makeSvc(over: { flowWaiting?: any[] } = {}) {
     activity: async () => ({ day: '2026-07-06', summary: { text: 'A good day.' }, stats: { minutesSpent: 192 } }),
     getPersonality: async () => ({ unlocked: true, summary: 'You focus well alone.', daysCovered: 10, minDays: 7 }),
   };
+  // The inbox stub applies the one rule that matters here: a closed row is not in the inbox.
+  const updates: any = { inbox: async () => { const items = (over.inbox ?? INBOX_ROWS).filter((r) => !r.closedAt); return { items, count: items.length }; } };
   return new HomeService(
     prisma,
     tasks,
     daily,
     { restDays: async () => ['Sun'] } as any,
     { brainCounts: async () => ({ total: 0, types: [] }) } as any,
+    updates,
   );
 }
 
 describe('HomeService — command center (BEA-897)', () => {
-  it('aggregates NeedsYou across Emo, agents and reminders', async () => {
+  it('aggregates NeedsYou across Emo, agents and the team inbox', async () => {
     const d = await makeSvc().summary();
     const kinds = d.needsYou.map((n) => n.kind);
-    expect(kinds).toEqual(expect.arrayContaining(['emo', 'agent', 'reminder']));
+    expect(kinds).toEqual(expect.arrayContaining(['emo', 'agent', 'team']));
     const emo = d.needsYou.find((n) => n.kind === 'emo')!;
     expect(emo.action).toBe('Answer');
     expect(emo.sub).toContain('Which region');
-    expect(d.needsYou.find((n) => n.kind === 'reminder')!.title).toContain('Srikar');
+    expect(d.needsYou.find((n) => n.kind === 'team')!.title).toContain('Deepthi');
   });
 
   it('lists only non-zero cooking items, pluralised', async () => {
@@ -108,5 +120,51 @@ describe('HomeService — a flow waiting on you (BEA-1348)', () => {
     const flow = d.needsYou.find((n) => n.kind === 'flow')!;
     expect(flow.title).toBe('A flow needs your input');
     expect(flow.action).toBe('Reply');
+  });
+});
+
+/**
+ * BEA-1596 — the Dashboard's team rows ARE the review inbox. It used to read `Reminder.needsOwner`,
+ * a flag nothing reliably cleared, so it showed four people while Tasks → Needs you showed none.
+ */
+describe('HomeService — Needs you reads the review inbox (BEA-1596)', () => {
+  it('draws one team row per open inbox item, with the same text, pointing at the Needs you tab', async () => {
+    const d = await makeSvc().summary();
+    const team = d.needsYou.filter((n) => n.kind === 'team');
+    expect(team.map((n) => n.title)).toEqual(['Deepthi: Need 298usd for the Elleys PCB advance sir', 'Rakesh: No reply for 3 h — "sir the vendor is refusing"']);
+    expect(team.every((n) => n.href === '/tasks?tab=review' && n.action === 'Reply')).toBe(true);
+    expect(team[0]).toMatchObject({ icon: '💬', sub: 'raised a problem' });
+    expect(team[1].icon).toBe('⏳'); // the watchdog's own row
+  });
+
+  it('a closed update is absent, and a pure claim row is not listed twice', async () => {
+    const d = await makeSvc().summary();
+    expect(d.needsYou.some((n) => n.title.includes('Jayanth'))).toBe(false); // closed 1 Sept
+    expect(d.needsYou.filter((n) => n.kind === 'team').some((n) => n.title.includes('Srikar'))).toBe(false); // already a `claim` row
+    expect(d.needsYou.filter((n) => n.kind === 'team').some((n) => n.title.includes('Radha'))).toBe(false); // a message WITH a claim on it — same
+  });
+
+  it('the old reminder kind is gone — nothing reads Reminder.needsOwner', async () => {
+    const d = await makeSvc().summary();
+    expect(d.needsYou.some((n) => n.kind === 'reminder')).toBe(false);
+    expect(d.needsYou.some((n) => n.title.includes('needs a reply'))).toBe(false);
+  });
+
+  it('ranks team rows right after claims, ahead of overdue tasks', async () => {
+    const d = await makeSvc().summary();
+    const order = d.needsYou.map((n) => n.kind);
+    expect(order.indexOf('team')).toBeLessThan(order.indexOf('agent'));
+  });
+
+  it('an empty inbox draws nothing, and a missing inbox service cannot take Home down', async () => {
+    expect((await makeSvc({ inbox: [] }).summary()).needsYou.some((n) => n.kind === 'team')).toBe(false);
+    const bare = new HomeService(
+      { item: { count: async () => 0, findMany: async () => [] }, idea: { count: async () => 0 }, skill: { count: async () => 0 }, note: { count: async () => 0 }, contact: { count: async () => 0 }, meeting: { count: async () => 0 }, emoCard: { count: async () => 0, findMany: async () => [] }, agentRun: { count: async () => 0, findMany: async () => [] }, flowRun: { count: async () => 0, findMany: async () => [] }, reminderSend: { count: async () => 0 }, task: { findMany: async () => [] }, mentorDay: { findFirst: async () => null }, taskClaim: { findMany: async () => [] }, daySummary: { findUnique: async () => null } } as any,
+      { today: async () => ({ tasks: [], dumped: false, counts: {} }) } as any,
+      { today: async () => ({}), dashboard: async () => ({ totals: {} }), activity: async () => ({}), getPersonality: async () => ({}) } as any,
+      { restDays: async () => ['Sun'] } as any,
+      { brainCounts: async () => ({ total: 0, types: [] }) } as any,
+    );
+    expect((await bare.summary()).needsYou).toEqual([]);
   });
 });

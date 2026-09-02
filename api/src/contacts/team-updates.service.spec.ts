@@ -659,3 +659,74 @@ describe('plurals are the same word', () => {
     expect(ids).toEqual(['geyser', 'pcb']);
   });
 });
+
+/**
+ * BEA-1596 — ONE inbox for every "needs you". The chase agent and the watchdog used to set a flag
+ * on the reminder that only the Dashboard read; now every road records an inbox row through
+ * `record()`, and the inbox is what both Tasks → Needs you and the Dashboard show.
+ */
+describe('one inbox for every "needs you" (BEA-1596)', () => {
+  it('a forced record lands in the inbox even when the words alone read as chat', async () => {
+    const { svc } = make();
+    await svc.record({ contactId: 'c1', text: 'ok sir will check', channel: 'whatsapp', forceNeedsYou: true, skipAi: true, why: 'the assistant could not answer this about the payment' });
+    const inbox: any = await svc.inbox();
+    expect(inbox.count).toBe(1);
+    expect(inbox.items[0].label).toBe('raised a problem');
+    expect(inbox.items[0].why).toContain('the payment');
+  });
+
+  it('forcing an already-recorded message RAISES that row — never a second copy', async () => {
+    // The agent records the message before it judges it, so the forced flag meets the dedupe.
+    const { svc, rows } = make();
+    await svc.record({ contactId: 'c1', text: 'Kk sir', channel: 'whatsapp', skipAi: true });
+    expect((await svc.inbox()).count).toBe(0); // "Kk sir" is chat by the word-rules
+    await svc.record({ contactId: 'c1', text: 'Kk sir', channel: 'whatsapp', taskId: 't3', forceNeedsYou: true, skipAi: true, why: 'the assistant could not answer this about the Elleys PCBs' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ needsYou: true, taskId: 't3' }); // the named item's task is stapled on
+    const inbox: any = await svc.inbox();
+    expect(inbox.count).toBe(1);
+    expect(inbox.items[0].label).toBe('raised a problem');
+    expect(inbox.items[0].why).toContain('Elleys');
+  });
+
+  it('the named item WINS over the generic record, even when the words already read as a problem', async () => {
+    // The generic record staples the FIRST item with a task; a question already trips the rules,
+    // so the row starts flagged on the wrong task. The forced record must still move it to the
+    // task the model named and carry its reason — or the badge sits on the wrong work. (review finding)
+    const { svc, rows } = make();
+    await svc.record({ contactId: 'c1', text: 'sir what is the budget for the Elleys order?', channel: 'whatsapp', taskId: 't1', skipAi: true });
+    expect(rows[0]).toMatchObject({ needsYou: true, taskId: 't1' });
+    await svc.record({ contactId: 'c1', text: 'sir what is the budget for the Elleys order?', channel: 'whatsapp', taskId: 't3', forceNeedsYou: true, skipAi: true, why: 'the assistant could not answer this about the Elleys PCBs' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ needsYou: true, taskId: 't3' });
+    expect(rows[0].why).toContain('Elleys PCBs');
+    expect(JSON.parse(rows[0].reads).filter((r: string) => r === 'needs_you')).toHaveLength(1);
+  });
+
+  it('the watchdog writes ONE system row, and a repeat inside the dedupe window is dropped', async () => {
+    const { svc, rows } = make();
+    const text = 'No reply for 3 h — "sir the vendor is refusing to release the PCBs"';
+    await svc.record({ contactId: 'c1', text, channel: 'system', forceNeedsYou: true, skipAi: true });
+    await svc.record({ contactId: 'c1', text, channel: 'system', forceNeedsYou: true, skipAi: true }); // the next tick
+    expect(rows).toHaveLength(1);
+    const inbox: any = await svc.inbox();
+    expect(inbox.count).toBe(1);
+    expect(inbox.items[0]).toMatchObject({ channel: 'system', label: 'raised a problem' });
+    expect(inbox.items[0].text).toMatch(/^No reply for 3 h — /);
+  });
+
+  it('closing is the only clear — the row leaves the inbox for good', async () => {
+    const { svc } = make();
+    await svc.record({ contactId: 'c1', text: 'No reply for 3 h — "hello?"', channel: 'system', forceNeedsYou: true, skipAi: true });
+    const id = (await svc.inbox()).items[0].id;
+    await svc.close(id);
+    expect((await svc.inbox()).count).toBe(0);
+    expect(await svc.openNeeds(['c1'])).toEqual([]);
+  });
+
+  it('a routine report still does not open an item', async () => {
+    const { svc } = make();
+    await svc.record({ contactId: 'c1', text: 'Today work SPD-300 qty 400', channel: 'whatsapp', isReport: true, skipAi: true });
+    expect((await svc.inbox()).count).toBe(0);
+  });
+});

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { isOwedOn } from '../tasks/schedule';
 import { weekdayOf } from '../common/localday';
@@ -7,6 +7,7 @@ import { DailyService } from '../daily/daily.service';
 import { RecurringService } from '../tasks/recurring.service';
 import { MemoryService } from '../memory/memory.service';
 import { TASK_OPEN } from '../tasks/task-status';
+import { TeamUpdatesService } from '../contacts/team-updates.service';
 
 type NeedItem = { kind: string; icon: string; title: string; sub: string; href: string; action: string };
 type CookItem = { icon: string; label: string; href: string };
@@ -21,7 +22,39 @@ export class HomeService {
     private readonly daily: DailyService,
     private readonly recurring: RecurringService,
     private readonly memory: MemoryService,
+    // Last, and @Optional(): the spec harness builds this service positionally. (BEA-1596)
+    @Optional() private readonly updates?: TeamUpdatesService,
   ) {}
+
+  /**
+   * What the team is waiting on him for — the SAME rows Tasks → Needs you shows (BEA-1596).
+   *
+   * Home used to read `Reminder.needsOwner`, a flag the chase agent set and nothing reliably
+   * cleared, while the Needs you tab read the review inbox. The two disagreed on the owner's live
+   * data (four ghosts on the Dashboard, none in the inbox). One source now: the inbox. An item that
+   * IS a pending claim — a bare `claim:<id>` row, or a message the inbox glued a claim onto
+   * (`claimId`) — is left out here only because the Dashboard already lists every pending claim as
+   * "X says it's done"; listing it twice would be the same bug in the other direction.
+   */
+  private async teamNeeds(): Promise<NeedItem[]> {
+    if (!this.updates?.inbox) return [];
+    try {
+      const { items } = await this.updates.inbox();
+      return (items as any[])
+        .filter((it) => !it.claimId && !String(it.id || '').startsWith('claim:'))
+        .slice(0, 5)
+        .map((it) => ({
+          kind: 'team',
+          icon: it.channel === 'system' ? '⏳' : '💬',
+          title: `${it.contact?.name || 'Someone'}: ${String(it.text || '').replace(/\s+/g, ' ').trim().slice(0, 60)}`,
+          sub: String(it.label || 'needs you').slice(0, 120),
+          href: '/tasks?tab=review',
+          action: 'Reply',
+        }));
+    } catch {
+      return [];
+    }
+  }
 
   /**
    * A count that can never take the landing page down. Home is the first screen of the app; one
@@ -108,13 +141,14 @@ export class HomeService {
     const mustDos = (today.tasks || []).filter((t: any) => t.status === 'open').slice(0, 3);
 
     // ---- NEEDS YOU — everything waiting on the user, across the app ----
-    const [emoNeeds, agentWaiting, flowWaiting, remindersNeed, overdue, guidanceRow, claimsWaiting] = await Promise.all([
+    const [emoNeeds, agentWaiting, flowWaiting, teamNeeds, overdue, guidanceRow, claimsWaiting] = await Promise.all([
       this.prisma.emoCard.findMany({ where: { status: 'needs_you' }, orderBy: { createdAt: 'desc' }, take: 6 }),
       this.prisma.agentRun.findMany({ where: { status: 'awaiting_input' }, orderBy: { startedAt: 'desc' }, take: 4 }),
       // 'waiting' — the status a paused flow really has. Asking for 'running' with a question could
       // never match, so a flow's question (and now a gate, BEA-1348) never reached this card.
       this.prisma.flowRun.findMany({ where: { status: 'waiting', waitQuestion: { not: null } }, orderBy: { startedAt: 'desc' }, take: 4 }),
-      this.prisma.reminder.findMany({ where: { needsOwner: true, status: 'active' }, include: { contact: true }, take: 5 }),
+      // The review inbox — one source with Tasks → Needs you. (BEA-1596)
+      this.teamNeeds(),
       this.prisma.task.findMany({ where: { status: 'open', dueDate: { lt: todayStart } }, orderBy: { dueDate: 'asc' }, take: 3 }),
       this.prisma.mentorDay.findFirst({ orderBy: { day: 'desc' } }),
       // Work someone says they've finished, waiting on your yes or no. (BEA-1025)
@@ -149,12 +183,12 @@ export class HomeService {
       const isGate = isGateWait(f);
       needsYou.push({ kind: 'flow', icon: isGate ? '⚠️' : '🌊', title: isGate ? 'A flow needs your OK' : 'A flow needs your input', sub: (f.waitQuestion || '').split('\n')[0].slice(0, 120), href: `/flows/runs/${f.id}`, action: isGate ? 'Answer' : 'Reply' });
     }
-    for (const r of remindersNeed as any[]) needsYou.push({ kind: 'reminder', icon: '⏰', title: `${r.contact?.name || 'A contact'} needs a reply`, sub: (r.subject ? `about ${r.subject}` : 'Their WhatsApp reply is waiting'), href: '/contacts', action: 'Read' });
+    needsYou.push(...teamNeeds);
     for (const t of overdue as any[]) needsYou.push({ kind: 'task', icon: '⚠️', title: (t.title || 'Task').slice(0, 90), sub: 'Overdue', href: '/tasks', action: 'Do' });
     for (const c of claimsWaiting as any[]) needsYou.push({ kind: 'claim', icon: '✋', title: `${c.contact?.name || 'Someone'} says it's done`, sub: (c.task?.title || '').slice(0, 120), href: '/tasks?tab=review', action: 'Review' });
 
     // Rank by urgency (most time-sensitive first) and drop duplicates. (BEA-939)
-    const NEED_RANK: Record<string, number> = { claim: 0, reminder: 1, task: 2, agent: 3, flow: 4, meeting: 5, emo: 6 };
+    const NEED_RANK: Record<string, number> = { claim: 0, team: 1, task: 2, agent: 3, flow: 4, meeting: 5, emo: 6 };
     const seenNeed = new Set<string>();
     const rankedNeedsYou = needsYou
       .filter((x) => { const k = `${x.kind}|${x.href}|${x.title}`; if (seenNeed.has(k)) return false; seenNeed.add(k); return true; })

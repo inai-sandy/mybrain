@@ -5,6 +5,7 @@ import { isOwedOn, parseSchedule, scheduleLabel } from '../tasks/schedule';
 import { localDayKey, weekdayOf } from '../common/localday';
 import { matchContact, matchContactsAll, contactSpellings, similarity, norm } from './person-identity';
 import { TASK_OPEN, OPEN_WORK, isOpen, isDone } from '../tasks/task-status';
+import { openNeedsWhere } from './needs-you';
 
 const todayKey = () => localDayKey(new Date());
 
@@ -69,8 +70,8 @@ export class ContactsService {
     if (!ids.length) return base;
     const [openTasks, needs, claims, chasing, lastIns, reports, restDays] = await Promise.all([
       this.prisma.task.groupBy({ by: ['ownerContactId'], where: { ownerContactId: { in: ids }, status: TASK_OPEN }, _count: { _all: true } }).catch(() => [] as any[]),
-      // The same reading the review inbox uses: needs him, not closed, work not already done. (BEA-1211)
-      this.prisma.teamUpdate.findMany({ where: { contactId: { in: ids }, needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: TASK_OPEN } }] }, select: { contactId: true } }).catch(() => [] as any[]),
+      // The same reading the review inbox uses: needs him, not closed, work not already done. (BEA-1211, BEA-1596)
+      this.prisma.teamUpdate.findMany({ where: openNeedsWhere(ids), select: { contactId: true } }).catch(() => [] as any[]),
       this.prisma.taskClaim.findMany({ where: { contactId: { in: ids }, status: 'pending', task: { status: TASK_OPEN } }, select: { contactId: true } }).catch(() => [] as any[]),
       this.prisma.reminder.groupBy({ by: ['contactId'], where: { contactId: { in: ids }, status: 'active' }, _count: { _all: true } }).catch(() => [] as any[]),
       // Exact per-contact latest — a flat row cap could let one chatty contact push a quiet one's

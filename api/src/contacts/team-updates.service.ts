@@ -5,6 +5,9 @@ import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { readUpdate, readLabel, type Read, type ReadResult } from './update-read';
 import { TASK_OPEN } from '../tasks/task-status';
+import { openNeedsWhere, type OpenNeed } from './needs-you';
+
+export { openNeedsWhere, needsYouFor, type OpenNeed } from './needs-you';
 
 
 /**
@@ -19,7 +22,14 @@ import { TASK_OPEN } from '../tasks/task-status';
  * goes out on WhatsApp, and it closes ONLY when he closes it. The old `needsOwner` flag was cleared
  * by the next reply the agent could handle — a "Kk sir" erased the record that someone asked for
  * help. Nothing here is ever cleared by a later message.
+ *
+ * Since BEA-1596 this inbox is the ONE source of "needs you" — the Dashboard, Contacts and the
+ * chase agent all read and write it. `Reminder.needsOwner` is retired (column kept, never read).
  */
+
+/** How an update reached him. `system` = the app itself raised it (the unanswered-reply watchdog). */
+export type UpdateChannel = 'whatsapp' | 'link' | 'system';
+
 @Injectable()
 export class TeamUpdatesService {
   private readonly log = new Logger('TeamUpdates');
@@ -76,21 +86,59 @@ export class TeamUpdatesService {
    * Record what someone said, whatever channel it came through. Returns the row, or null when
    * there is nothing worth keeping.
    */
-  async record(input: { contactId: string; text: string; channel: 'whatsapp' | 'link'; taskId?: string | null; at?: Date; isReport?: boolean; skipAi?: boolean }) {
+  async record(input: {
+    contactId: string;
+    text: string;
+    channel: UpdateChannel;
+    taskId?: string | null;
+    at?: Date;
+    isReport?: boolean;
+    skipAi?: boolean;
+    /**
+     * The caller has ALREADY judged that this needs him — the chase agent said "needs Sandeep", or
+     * the watchdog gave up. The word-rules and the AI second opinion are not asked again; the row
+     * is flagged whatever they would have said. Decided here, in one place, never by the caller
+     * writing a flag of its own. (BEA-1596)
+     */
+    forceNeedsYou?: boolean;
+    /** Plain English for why it reached him, when forcing. */
+    why?: string;
+  }) {
     const text = String(input.text || '').trim();
     if (!text || !input.contactId) return null;
     const at = input.at ?? new Date();
+    const forcedWhy = (input.why || 'the assistant could not answer this').trim().slice(0, 120);
 
     // Never record the same message twice — the agent and the webhook can both see one reply.
     const dupe = await this.prisma.teamUpdate
-      .findFirst({ where: { contactId: input.contactId, text, at: { gte: new Date(at.getTime() - 60_000), lte: new Date(at.getTime() + 60_000) } }, select: { id: true } })
+      .findFirst({ where: { contactId: input.contactId, text, at: { gte: new Date(at.getTime() - 60_000), lte: new Date(at.getTime() + 60_000) } }, select: { id: true, needsYou: true, taskId: true, reads: true } })
       .catch(() => null);
-    if (dupe) return null;
+    if (dupe) {
+      // The agent records the message first and judges it afterwards, so the forced flag usually
+      // lands on a row that already exists. Raise THAT row — never a second copy of the message —
+      // and let the caller's judgement WIN: the item the model named beats the generic record's
+      // "first item with a task", and its reason beats the word-rules' one. (review finding)
+      if (input.forceNeedsYou) {
+        const reads = [...safeReads(String((dupe as any).reads || '[]')).filter((x) => x !== 'chat' && x !== 'needs_you'), 'needs_you'];
+        const raised = await this.prisma.teamUpdate
+          .update({ where: { id: dupe.id }, data: { needsYou: true, why: forcedWhy, reads: JSON.stringify(reads), ...(input.taskId ? { taskId: input.taskId } : {}) } })
+          .catch((e) => { this.log.warn(`record (raise): ${e?.message}`); return null; });
+        if (raised) this.log.log(`needs you (raised) — ${forcedWhy}: "${text.replace(/\s+/g, ' ').slice(0, 70)}"`);
+        return raised;
+      }
+      return null;
+    }
 
-    const r = readUpdate(text, { isReport: !!input.isReport });
+    // A system row is the app's own sentence, not their words — there is nothing to read in it.
+    const forced = !!input.forceNeedsYou || input.channel === 'system';
+    const r: ReadResult = input.channel === 'system' ? { reads: ['needs_you'], needsYou: true, why: forcedWhy } : readUpdate(text, { isReport: !!input.isReport });
+    // A forced row reads as "raised a problem" in the inbox, whatever the words alone said.
+    if (forced && !r.reads.includes('needs_you')) r.reads = [...r.reads.filter((x) => x !== 'chat'), 'needs_you'];
     // The word-rules propose, the AI seconds, and the merge rules in secondOpinion decide. (BEA-1213)
     // Backfill passes skipAi: hundreds of historical messages need no model round-trip each.
-    const read = input.skipAi ? { needsYou: r.needsYou, why: r.why } : await this.secondOpinion(text, r, !!input.isReport);
+    const read = forced
+      ? { needsYou: true, why: input.why ? forcedWhy : r.why || forcedWhy }
+      : input.skipAi ? { needsYou: r.needsYou, why: r.why } : await this.secondOpinion(text, r, !!input.isReport);
     const row = await this.prisma.teamUpdate
       .create({
         data: {
@@ -109,12 +157,22 @@ export class TeamUpdatesService {
     return row;
   }
 
+  /**
+   * Which people / which tasks carry an open "needs you" right now — the small rows the badges
+   * are derived from (`needsYouFor`). One query for a whole page of contacts. (BEA-1596)
+   */
+  async openNeeds(contactIds?: string[]): Promise<OpenNeed[]> {
+    return (await this.prisma.teamUpdate
+      .findMany({ where: openNeedsWhere(contactIds), select: { contactId: true, taskId: true } })
+      .catch(() => [] as OpenNeed[])) as OpenNeed[];
+  }
+
   /** Everything waiting on him, oldest first — the ones that have been ignored longest matter most. */
   async inbox() {
     const rows = await this.prisma.teamUpdate.findMany({
       // A message about a task that is already DONE has nothing left to review — the base filter
       // never looked at the task at all, so completed work sat in the inbox forever. (BEA-1211)
-      where: { needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: TASK_OPEN } }] },
+      where: openNeedsWhere(),
       orderBy: { at: 'asc' },
       take: 100,
       include: {

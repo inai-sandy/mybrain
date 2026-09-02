@@ -6,6 +6,7 @@ import { PostboxService } from './postbox.service';
 import { TZ_OFFSET_MIN } from '../common/localday';
 import { TasksService } from '../tasks/tasks.service';
 import { TASK_OPEN } from '../tasks/task-status';
+import { needsYouFor, openNeedsWhere, type OpenNeed } from './needs-you';
 
 /** Default engine for the reminder "Clean up" / draft — a dependable API model (changeable in Settings). */
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -291,7 +292,6 @@ export class RemindersService {
       const sent = await this.prisma.reminderMessage.create({
         data: { contactId: contact.id, reminderId: reminder?.id || null, direction: 'out', body: rendered, wamid: t.wamid || null, status: 'sent' },
       });
-      await this.prisma.reminder.updateMany({ where: { contactId: contact.id, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
       return {
         id: sent.id,
         direction: 'out',
@@ -315,8 +315,7 @@ export class RemindersService {
     const msg = await this.prisma.reminderMessage.create({
       data: { contactId: contact.id, reminderId: reminder?.id || null, direction: 'out', body: text, wamid: res.wamid || null, status: 'sent' },
     });
-    // Sandeep just replied → clear the "needs you" flag for this contact. (BEA-766)
-    await this.prisma.reminder.updateMany({ where: { contactId: contact.id, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
+    // Replying does NOT clear "needs you" (BEA-1596): the review item stays until he closes it.
     return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt, status: 'sent', viaTemplate: false, note: null as string | null };
   }
 
@@ -595,7 +594,16 @@ export class RemindersService {
     }
   }
   private shape(r: any) {
-    return { ...r, times: this.parse(r.times) };
+    // `needsOwner` is retired (BEA-1596) — it never leaves the server. `needsYou` is derived.
+    const { needsOwner: _retired, ...rest } = r;
+    return { ...rest, times: this.parse(r.times) };
+  }
+
+  /** The open "needs you" rows the badges are derived from — one query, never a stored flag. */
+  private async openNeeds(contactIds?: string[]): Promise<OpenNeed[]> {
+    return (await this.prisma.teamUpdate
+      ?.findMany?.({ where: openNeedsWhere(contactIds), select: { contactId: true, taskId: true } })
+      .catch(() => [] as OpenNeed[])) ?? [];
   }
 
   async list(status?: string) {
@@ -609,7 +617,8 @@ export class RemindersService {
     const taskIds = rows.map((r) => r.taskId).filter(Boolean) as string[];
     const tasks = taskIds.length ? await this.prisma.task.findMany({ where: { id: { in: taskIds } }, select: { id: true, title: true, status: true } }) : [];
     const taskMap = new Map(tasks.map((t) => [t.id, t]));
-    return { reminders: rows.map((r) => ({ ...this.shape(r), task: r.taskId ? taskMap.get(r.taskId) || null : null })) };
+    const open = await this.openNeeds();
+    return { reminders: rows.map((r) => ({ ...this.shape(r), needsYou: needsYouFor(open, r.contactId, r.taskId), task: r.taskId ? taskMap.get(r.taskId) || null : null })) };
   }
 
   /**
@@ -617,7 +626,7 @@ export class RemindersService {
    * newest message on top, with the last message preview + a representative reminder to open the chat.
    */
   async conversations() {
-    const [messages, reminders] = await Promise.all([
+    const [messages, reminders, open] = await Promise.all([
       this.prisma.reminderMessage.findMany({
         where: { contactId: { not: null } },
         orderBy: { createdAt: 'desc' },
@@ -625,8 +634,10 @@ export class RemindersService {
       }),
       this.prisma.reminder.findMany({
         orderBy: { createdAt: 'desc' },
-        select: { id: true, contactId: true, status: true, times: true, needsOwner: true },
+        select: { id: true, contactId: true, status: true, times: true },
       }),
+      // "Needs you" comes from the review inbox, the one source (BEA-1596).
+      this.openNeeds(),
     ]);
 
     // Latest message per contact (messages are newest-first, so the first hit wins) + inbound
@@ -643,18 +654,17 @@ export class RemindersService {
       }
     }
 
-    // Per contact: a representative reminder (prefer an active one), active count, times, needs-you.
-    const remByContact = new Map<string, { reminderId: string; times: string; activeCount: number; needsOwner: boolean }>();
+    // Per contact: a representative reminder (prefer an active one), active count, times.
+    const remByContact = new Map<string, { reminderId: string; times: string; activeCount: number }>();
     for (const r of reminders) {
       if (!r.contactId) continue;
       const cur = remByContact.get(r.contactId);
       const active = r.status === 'active';
       if (!cur) {
-        remByContact.set(r.contactId, { reminderId: r.id, times: r.times, activeCount: active ? 1 : 0, needsOwner: active && !!r.needsOwner });
+        remByContact.set(r.contactId, { reminderId: r.id, times: r.times, activeCount: active ? 1 : 0 });
       } else {
         if (active) {
           cur.activeCount += 1;
-          if (r.needsOwner) cur.needsOwner = true;
           // Prefer an active reminder as the one the chat opens against (for manual sends).
           if (!cur.reminderId) cur.reminderId = r.id;
         }
@@ -683,7 +693,7 @@ export class RemindersService {
           reminderId: rem?.reminderId || null,
           times: rem ? this.parse(rem.times) : [],
           activeReminderCount: rem?.activeCount || 0,
-          needsOwner: rem?.needsOwner || false,
+          needsYou: needsYouFor(open, id),
           unread,
         };
       })
@@ -994,7 +1004,8 @@ export class RemindersService {
     const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true, sends: { orderBy: { at: 'asc' } } } });
     if (!r) throw new NotFoundException('Reminder not found');
     const task = r.taskId ? await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { id: true, title: true, status: true } }).catch(() => null) : null;
-    return { ...this.shape(r), task };
+    const open = await this.openNeeds(r.contactId ? [r.contactId] : []);
+    return { ...this.shape(r), needsYou: needsYouFor(open, r.contactId, r.taskId), task };
   }
 
   async update(id: string, patch: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[]; startDay?: string; repeat?: string }) {
@@ -1063,8 +1074,9 @@ export class RemindersService {
     const rows = await this.prisma.reminder.findMany({
       where: { status: 'paused', pausedAuto: true },
       orderBy: { updatedAt: 'desc' },
-      select: { id: true, subject: true, times: true, updatedAt: true, needsOwner: true, taskId: true, contact: { select: { id: true, name: true } } },
+      select: { id: true, subject: true, times: true, updatedAt: true, taskId: true, contactId: true, contact: { select: { id: true, name: true } } },
     });
+    const open = await this.openNeeds();
     const items = [] as any[];
     for (const r of rows) {
       const task = r.taskId ? await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true, status: true } }).catch(() => null) : null;
@@ -1074,7 +1086,7 @@ export class RemindersService {
         contact: r.contact,
         offSince: r.updatedAt,
         offDays: Math.max(0, Math.floor((Date.now() - new Date(r.updatedAt).getTime()) / 86400000)),
-        needsYou: !!r.needsOwner,
+        needsYou: needsYouFor(open, r.contactId, r.taskId),
         // A chase whose task is already done needs no resuming — say so rather than offering it.
         taskDone: task?.status === 'done',
         taskTitle: task?.title || null,

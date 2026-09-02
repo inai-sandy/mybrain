@@ -25,6 +25,14 @@ export function watchdogAction(ageMs: number, graceMs = 8 * 60_000, escalateMs =
   return 'escalate'; // still stuck after retries → tell the owner
 }
 
+/** The inbox line the watchdog writes when a reply has gone unanswered for good. (BEA-1596) */
+export function watchdogLine(lastInbound: string, ageMs: number): string {
+  const mins = Math.max(1, Math.round(ageMs / 60_000));
+  const dur = mins < 60 ? `${mins} min` : `${Math.round(mins / 60)} h`;
+  const quote = String(lastInbound || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return `No reply for ${dur} — "${quote}"`;
+}
+
 /**
  * Safety net (BEA-899): the reply is SENT TO the contact, so it must never address them by the
  * OWNER's name. Rewrites owner-name greetings/sign-offs ("Hi Sandeep", "thanks … Sandeep!") to the
@@ -185,12 +193,13 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
       const inbound = await this.prisma.reminderMessage.findMany({
         where: { direction: 'in', createdAt: { gte: since }, contactId: { not: null } },
         orderBy: { createdAt: 'desc' },
-        select: { contactId: true, createdAt: true },
+        select: { contactId: true, createdAt: true, body: true },
       });
-      const latestInByContact = new Map<string, Date>();
-      for (const m of inbound) if (m.contactId && !latestInByContact.has(m.contactId)) latestInByContact.set(m.contactId, m.createdAt);
+      const latestInByContact = new Map<string, { at: Date; body: string }>();
+      for (const m of inbound) if (m.contactId && !latestInByContact.has(m.contactId)) latestInByContact.set(m.contactId, { at: m.createdAt, body: String((m as any).body || '') });
 
-      for (const [contactId, inAt] of latestInByContact) {
+      for (const [contactId, last] of latestInByContact) {
+        const inAt = last.at;
         const answered = await this.prisma.reminderMessage.count({ where: { contactId, direction: 'out', createdAt: { gt: inAt } } });
         if (answered > 0) { this.escalated.delete(contactId); continue; } // we replied → clear any escalation state
         const action = watchdogAction(now - new Date(inAt).getTime());
@@ -199,7 +208,12 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         await this.onContactReply(contactId).catch(() => undefined); // retry either way
         if (action === 'escalate' && !this.escalated.has(contactId)) {
           this.escalated.add(contactId);
-          await this.prisma.reminder.updateMany({ where: { contactId, status: { in: ['active', 'paused'] }, needsOwner: false }, data: { needsOwner: true } }).catch(() => undefined);
+          // ONE inbox item per escalation, inside the guard, so later ticks never add another.
+          // It goes through the same door every "needs you" goes through (BEA-1596); `record()`'s
+          // 60 s dedupe also covers a restart that forgets `escalated` within a minute.
+          await this.updates
+            .record({ contactId, channel: 'system', text: watchdogLine(last.body, now - new Date(inAt).getTime()), forceNeedsYou: true, skipAi: true, why: 'their reply went unanswered and the assistant could not answer it', at: new Date() })
+            .catch(() => undefined);
           const contact = await this.prisma.contact.findUnique({ where: { id: contactId } }).catch(() => null);
           await this.notifyOwner(contact?.name || 'A contact', 'their reply is waiting and I have not been able to answer').catch(() => undefined);
         }
@@ -548,10 +562,18 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
       // "Needs you" used to be set on every active chase for the contact, so it said a PERSON needs
       // you and never what about — and each row in Contacts carries its own task line, so the badge
       // appeared against work that was perfectly fine. When the model cannot tell which item it is,
-      // the flag stays contact-wide, which is honest rather than a guess.
-      const stuckOn = items.find((it) => it.n === Number(parsed.needsItem))?.reminderId;
-      const flagWhere: any = stuckOn ? { id: stuckOn } : { contactId, status: 'active' };
-      await this.prisma.reminder.updateMany({ where: flagWhere, data: { needsOwner: true } }).catch(() => undefined);
+      // the item stays contact-wide (no task), which is honest rather than a guess.
+      //
+      // The flag IS an inbox row (BEA-1596): their last message, forced to "needs you" because the
+      // agent already judged it, on the task of the item it named. The Dashboard and Tasks → Needs
+      // you both read that row, and only the owner closing it clears it.
+      const stuckItem = items.find((it) => it.n === Number(parsed.needsItem));
+      const stuckOn = stuckItem?.reminderId;
+      if (lastInBody) {
+        await this.updates
+          .record({ contactId, text: lastInBody, channel: 'whatsapp', taskId: stuckItem?.taskId || null, forceNeedsYou: true, skipAi: true, why: stuckItem ? `the assistant could not answer this about ${stuckItem.subject}` : 'the assistant could not answer this' })
+          .catch(() => undefined);
+      }
       reachedOwner = await this.notifyOwner(name, lastInBody, stuckOn ? items.find((it) => it.reminderId === stuckOn)?.subject : null).catch(() => false);
       this.log.log(`agent: needs Sandeep — ${stuckOn ? `about "${items.find((it) => it.reminderId === stuckOn)?.subject}"` : `contact ${contactId} (could not tell which item)`}${reachedOwner ? '' : ' (could NOT reach him)'}`);
       if (!reachedOwner) {
@@ -721,37 +743,9 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         .catch(() => undefined);
     }
 
-    // The agent couldn't answer → flag the contact's reminders ("needs you") AND WhatsApp Sandeep. (BEA-766/767)
-    // The agent handled this exchange without getting stuck — clear any prior "needs you" flag so
-    // the badge doesn't stay stuck until the owner happens to type a manual message. (BEA-786)
-    //
-    // But NOT while they are still raising something. A person can write again about the same
-    // problem in words the agent happens to be able to answer politely, and clearing the flag there
-    // drops a real question on the floor: the owner never sees it, and they are left waiting on an
-    // answer nobody knows they are owed. (BEA-1297)
-    if (!parsed.needsSandeep && !(lastInBody && readUpdate(lastInBody).reads.includes('needs_you'))) {
-      // …and only for the item this exchange was actually about. Clearing every flag for the person
-      // is the same bug on the other side: a flag raised on Monday about the payment would be wiped
-      // by a cheerful Wednesday message about the videos, and the owner would never learn he still
-      // owed an answer. (review finding)
-      //
-      // Which flags were item-specific is read from the data rather than stored: the fallback flags
-      // EVERY active chase at once, so several flagged rows means it was a contact-wide flag and
-      // clearing them together is right. A single flagged row was aimed at that item, so it waits
-      // for something that actually settles it — this exchange touching it, the owner replying
-      // (`sendManual`), or the work being finished (`settleDelegation`).
-      const touched = new Set<string>();
-      for (const raw of [...(Array.isArray(parsed.done) ? parsed.done : []), ...(Array.isArray(parsed.statusToday) ? parsed.statusToday : []), parsed.promise?.item]) {
-        if (raw === undefined || raw === null) continue;
-        const hit = items.find((it) => it.n === Number(raw));
-        if (hit) touched.add(hit.reminderId);
-      }
-      const flagged: any[] = ((await Promise.resolve(this.prisma.reminder?.findMany?.({ where: { contactId, needsOwner: true }, select: { id: true } })).catch(() => [])) ?? []) as any[];
-      const clearIds = flagged.length > 1 ? flagged.map((f) => f.id) : flagged.filter((f) => touched.has(f.id)).map((f) => f.id);
-      if (clearIds.length) {
-        await this.prisma.reminder.updateMany({ where: { id: { in: clearIds } }, data: { needsOwner: false } }).catch(() => undefined);
-      }
-    }
+    // Nothing here clears a "needs you" any more (BEA-1596). It is an inbox row now, and the
+    // owner's loop is "it closes ONLY when he closes it" (BEA-1159) — a later cheerful message must
+    // never take a real question off his list. Finishing the work closes it (`settleDelegation`).
 
     // NOTE: the agent no longer auto-closes reminders from a chat (BEA-948). These are often ongoing
     // reporting relationships (e.g. daily production updates) that are never really "done" — closing

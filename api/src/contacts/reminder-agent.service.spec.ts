@@ -4,7 +4,7 @@ function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages
   const contact = opts.contact ?? { id: 'c1', name: 'Srikar Rao', whatsappNumber: '919812345678' };
   const reminders = opts.reminders ?? [{ id: 'r1', status: 'active', subject: 'the Zigbee testing', taskId: null }];
   const messages = opts.messages ?? [{ direction: 'in', body: 'update' }];
-  const state: any = { out: [] as any[], updated: {} as Record<string, any>, sent: 0, texts: [] as any[], flagged: null };
+  const state: any = { out: [] as any[], updated: {} as Record<string, any>, sent: 0, texts: [] as any[], flagged: null, records: [] as any[] };
   const prisma: any = {
     contact: { findUnique: async () => contact },
     reminder: {
@@ -26,7 +26,7 @@ function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages
     sendTemplate: async (to: string, _name: string, vars: string[]) => { state.texts.push({ to, body: vars.join(' · '), template: true }); state.sent++; return { wamid: 't1', status: 'sent' }; },
   };
   const remindersSvc: any = { voiceComplete: async () => voice };
-  return { svc: new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any, { record: async () => null } as any), state };
+  return { svc: new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any, { record: async (input: any) => { state.records.push(input); return { id: 'u1' }; } } as any), state };
 }
 
 describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
@@ -53,23 +53,14 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     expect(state.out[0]).toMatchObject({ contactId: 'c1', direction: 'out' });
   });
 
-  it('clears a stuck "needs you" flag once the agent handles the conversation (BEA-786, narrowed by BEA-1297)', async () => {
-    // BEA-786 cleared the flag on ANY handled exchange, to stop a badge lingering. BEA-1297 showed
-    // the cost of that: a flag raised because the agent could not answer a question about item 1 was
-    // wiped by a later cheerful message about item 3, and the owner never learned he still owed an
-    // answer. The badge was not stale — it was right, and clearing it lost a real question.
-    //
-    // So it now clears when the exchange actually SETTLED the flagged item, and still clears the
-    // whole set when the flag was contact-wide (the fallback flags every active chase at once).
-    // A flag that neither applies to is left for the owner's own reply or for the work finishing —
-    // both of which still clear it (`sendManual`, `settleDelegation`).
+  it('an ordinary exchange never touches "needs you" — the inbox row is only the owner\'s to close (BEA-1159/1596)', async () => {
+    // BEA-786 cleared the old flag on ANY handled exchange; BEA-1297 narrowed it; BEA-1596 retired
+    // the flag altogether. A "needs you" is a review inbox row now, and nothing the agent hears
+    // later may take it off the owner's list — that is how a real question got dropped.
     const settled = setup('{"send":true,"reply":"Thanks, noted!","needsSandeep":false,"done":[1]}');
     await settled.svc.onContactReply('c1');
-    expect(settled.state.flagged).toMatchObject({ needsOwner: false });
-
-    const unrelated = setup('{"send":true,"reply":"Thanks, noted!","needsSandeep":false,"items":[]}');
-    await unrelated.svc.onContactReply('c1');
-    expect(unrelated.state.flagged).toBeNull(); // nothing in this chat touched the flagged item
+    expect(settled.state.flagged).toBeNull(); // no reminder flag written, set or cleared
+    expect(settled.state.records.every((r: any) => !r.forceNeedsYou)).toBe(true);
   });
 
   it('acknowledges even when the model returns send:false — never leaves them on read (BEA-923)', async () => {
@@ -93,12 +84,14 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     expect(state.sent).toBe(0);
   });
 
-  it('escalates: flags needs-you AND WhatsApps the owner when it cannot answer (BEA-766/767)', async () => {
+  it('escalates: opens a review inbox item AND WhatsApps the owner when it cannot answer (BEA-766/767, BEA-1596)', async () => {
     const messages = [{ direction: 'in', body: 'what is the final price?' }];
     const voice = '{"send":true,"reply":"Let me check with Sandeep and he\'ll get back to you.","needsSandeep":true,"items":[{"n":1,"resolved":false}]}';
     const { svc, state } = setup(voice, { messages });
     await svc.onContactReply('c1');
-    expect(state.flagged).toMatchObject({ needsOwner: true }); // in-app flag set
+    // The in-app "needs you" IS the inbox row — forced, because the agent already judged it.
+    expect(state.records.find((r: any) => r.forceNeedsYou)).toMatchObject({ contactId: 'c1', channel: 'whatsapp', text: 'what is the final price?' });
+    expect(state.flagged).toBeNull(); // the retired Reminder.needsOwner flag is never written
     const ownerPing = state.texts.find((t: any) => t.to === '919885698665');
     expect(ownerPing).toBeTruthy(); // owner got a WhatsApp
     expect(ownerPing.body).toContain('needs you');
