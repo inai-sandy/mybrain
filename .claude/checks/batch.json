@@ -20,12 +20,14 @@
     {
       "id": "BEA-1605",
       "title": "Protect the clock: log swallowed tick errors, bad tz falls back to Asia/Kolkata",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "75ac859",
+      "note": "one schedule-clock helper for both schedulers: bad tz falls back to IST out loud, thrown tick logged, next tick runs"
     },
     {
       "id": "BEA-1606",
       "title": "Settings sheet: instant-save must not wipe an unsaved source edit",
-      "status": "pending"
+      "status": "in_progress"
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { AgentApp, advancedSummary, contractSummary, goalOf, resultSummary, scheduleSummary, sourcesSummary, toolsSummary, watchSummary, whatSummary } from './AgentApp';
+import { AgentApp, advancedSummary, contractSummary, goalOf, keepSourcesDraft, resultSummary, scheduleSummary, sourcesSummary, toolsSummary, unsavedLine, watchSummary, whatSummary } from './AgentApp';
 
 /**
  * BEA-1381 — the Settings sheet is an accordion of summary rows (approved mockup at
@@ -228,5 +228,97 @@ describe('the accordion (BEA-1381)', () => {
     const patchCall = fetchMock.mock.calls.find((c: any[]) => c[0] === '/api/agent/agents/ag1' && c[1]?.method === 'PATCH');
     expect(JSON.parse(patchCall![1].body)).toEqual({ notifyWhatsApp: false });
     expect(screen.queryByTestId('settings-save-bar')).toBeNull();
+  });
+});
+
+/**
+ * BEA-1606 — an instant-save control must not wipe an unsaved source edit.
+ *
+ * Editing a source's arguments only drafts them locally until "Save changes". Every instant-save
+ * control (WhatsApp, destination, schedule, tools…) PATCHes at once and used to replace the local
+ * agent with the server's copy — the draft vanished, the bar stayed, and Save then PATCHed the
+ * server's own `toolArgs` back. Now `patch()` keeps the local `toolArgs`/`tools` while the sources
+ * are dirty, and the bar says what is unsaved.
+ */
+describe('an instant-save control keeps an unsaved source edit (BEA-1606)', () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => cleanup());
+
+  /** A server that REMEMBERS its PATCHes, on top of the shared mock — so a reload reads what was saved. */
+  function statefulServer(agent: any) {
+    const state = { ...agent };
+    const extra = (url: string, init?: any) => {
+      if (url !== `/api/agent/agents/${agent.id}`) return null;
+      if (init?.method === 'PATCH') { Object.assign(state, JSON.parse(init.body)); return { ok: true, json: async () => ({ ...state }) }; }
+      return { ok: true, json: async () => ({ ...state }) };
+    };
+    return { state, extra };
+  }
+  const patchBodies = (fetchMock: any) => fetchMock.mock.calls.filter((c: any[]) => c[0] === '/api/agent/agents/ag1' && c[1]?.method === 'PATCH').map((c: any[]) => JSON.parse(c[1].body));
+  const queryInput = () => screen.getAllByLabelText('query')[0] as HTMLInputElement;
+
+  it('edit a source argument → flip WhatsApp → Save changes: the final PATCH carries the edited toolArgs, and a reload shows it', async () => {
+    const server = statefulServer(SOCIAL_AGENT);
+    const fetchMock = mount(SOCIAL_AGENT, server.extra);
+    await waitFor(() => expect(screen.getAllByTestId('tool-args').length).toBe(2));
+    fireEvent.change(queryInput(), { target: { value: 'smartlighting' } });
+    expect(screen.getByTestId('settings-save-bar')).toBeTruthy();
+    expect(screen.getByTestId('settings-unsaved-line')).toHaveTextContent('Sources not saved yet');
+
+    // The instant-save control: its own PATCH, at once, with only its key.
+    fireEvent.click(screen.getByRole('checkbox', { name: /Send to WhatsApp/i, hidden: true }));
+    await waitFor(() => expect(patchBodies(fetchMock)).toEqual([{ notifyWhatsApp: false }]));
+    // The server's answer landed (WhatsApp is now off) — and the edit is still here, still unsaved.
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: /Send to WhatsApp/i, hidden: true }) as HTMLInputElement).checked).toBe(false));
+    expect(queryInput().value).toBe('smartlighting');
+    expect(screen.getByTestId('settings-save-bar')).toBeTruthy();
+    expect(screen.getByTestId('settings-unsaved-line')).toHaveTextContent('Sources not saved yet');
+
+    fireEvent.click(screen.getByText('Save changes'));
+    await waitFor(() => expect(screen.queryByTestId('settings-save-bar')).toBeNull());
+    const bodies = patchBodies(fetchMock);
+    expect(bodies).toHaveLength(2);
+    expect(Object.keys(bodies[1])).toEqual(['toolArgs']);
+    expect(bodies[1].toolArgs['svc:instagram.search_popular']).toEqual({ actionId: 'svc:instagram.search_popular', args: { query: 'smartlighting' }, _pages: 2 });
+    expect(bodies[1].toolArgs['svc:instagram.search_popular#2']).toEqual({ actionId: 'svc:instagram.search_popular', args: { query: 'homeautomation' } });
+    expect(queryInput().value).toBe('smartlighting');
+
+    // Reload the sheet from the same server: the edited value is what it shows.
+    cleanup();
+    mount(SOCIAL_AGENT, server.extra);
+    await waitFor(() => expect(screen.getAllByTestId('tool-args').length).toBe(2));
+    expect(queryInput().value).toBe('smartlighting');
+    expect(screen.queryByTestId('settings-save-bar')).toBeNull();
+  });
+
+  it('the bar names every unsaved section — task + sources together', async () => {
+    mount(SOCIAL_AGENT);
+    await waitFor(() => expect(screen.getAllByTestId('tool-args').length).toBe(2));
+    fireEvent.change(document.querySelector('textarea')! as HTMLTextAreaElement, { target: { value: 'Keep India only.' } });
+    expect(screen.getByTestId('settings-unsaved-line')).toHaveTextContent('Task not saved yet');
+    fireEvent.change(queryInput(), { target: { value: 'smartlighting' } });
+    expect(screen.getByTestId('settings-unsaved-line')).toHaveTextContent('Task and Sources not saved yet');
+  });
+
+  it('unsavedLine: plain words for one, two or three sections; empty when clean', () => {
+    expect(unsavedLine({})).toBe('');
+    expect(unsavedLine({ sources: true })).toBe('Sources not saved yet');
+    expect(unsavedLine({ task: true, watch: true })).toBe('Task and Watch not saved yet');
+    expect(unsavedLine({ task: true, sources: true, watch: true })).toBe('Task, Sources and Watch not saved yet');
+  });
+
+  it('keepSourcesDraft: the one merge rule behind every instant save', () => {
+    const local = { id: 'ag1', notifyWhatsApp: true, toolArgs: { s: { actionId: 's', args: { q: 'edited' } } }, tools: ['s'] };
+    const server = { id: 'ag1', notifyWhatsApp: false, toolArgs: { s: { actionId: 's', args: { q: 'saved' } } }, tools: ['s'] };
+    // clean → the server's copy, untouched
+    expect(keepSourcesDraft(local, server, false, { notifyWhatsApp: false })).toBe(server);
+    // dirty + a body without toolArgs → the server's other keys, the local draft kept
+    expect(keepSourcesDraft(local, server, true, { notifyWhatsApp: false })).toEqual({ ...server, toolArgs: local.toolArgs, tools: local.tools });
+    // dirty + the body carried toolArgs (Save changes / add / remove) → the server's answer is the truth
+    expect(keepSourcesDraft(local, server, true, { toolArgs: local.toolArgs })).toEqual({ ...server, tools: local.tools });
+    expect(keepSourcesDraft(local, server, true, { tools: [], toolArgs: {} })).toEqual(server);
+    // a reload (no body) while dirty keeps the draft; nothing local yet → the server's copy
+    expect(keepSourcesDraft(local, server, true)).toEqual({ ...server, toolArgs: local.toolArgs, tools: local.tools });
+    expect(keepSourcesDraft(null, server, true)).toBe(server);
   });
 });
