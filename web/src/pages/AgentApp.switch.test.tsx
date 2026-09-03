@@ -28,7 +28,7 @@ const OFF_AGENT = {
 };
 const ON_AGENT = { ...OFF_AGENT, id: 'on1', enabled: true };
 
-function mockApi(agent: any) {
+function mockApi(agent: any, runs: any[] = []) {
   const state = { ...agent };
   const fetchMock = vi.fn(async (url: string, init?: any) => {
     if (url === `/api/agent/agents/${agent.id}` && init?.method === 'PATCH') {
@@ -40,7 +40,7 @@ function mockApi(agent: any) {
     }
     if (url === `/api/agent/agents/${agent.id}`) return { ok: true, json: async () => ({ ...state }) };
     if (url === '/api/agent/settings') return { ok: true, json: async () => ({ timezone: 'Asia/Kolkata' }) };
-    if (url.startsWith('/api/agent/runs')) return { ok: true, json: async () => [] };
+    if (url.startsWith('/api/agent/runs')) return { ok: true, json: async () => runs };
     if (url.startsWith('/api/flows')) return { ok: true, json: async () => ({ flows: [] }) };
     if (url === '/api/skills') return { ok: true, json: async () => ({ skills: [] }) };
     return { ok: false, json: async () => ({}) };
@@ -49,8 +49,8 @@ function mockApi(agent: any) {
   return fetchMock;
 }
 
-function mount(agent: any, search = '') {
-  const fetchMock = mockApi(agent);
+function mount(agent: any, search = '', runs: any[] = []) {
+  const fetchMock = mockApi(agent, runs);
   render(<MemoryRouter initialEntries={[`/agent/a/${agent.id}${search}`]}><Routes><Route path="/agent/a/:id" element={<AgentApp />} /></Routes></MemoryRouter>);
   return fetchMock;
 }
@@ -123,6 +123,30 @@ describe('the switch in the header (BEA-1603)', () => {
     await waitFor(() => expect(screen.getByTestId('paused-banner')).toBeTruthy());
     expect(screen.getByText('Switch back on')).toBeTruthy();
     expect(screen.getByTestId('off-line')).toBeTruthy();
+  });
+});
+
+describe('the phone fits (BEA-1603 — the UI gate at 390px)', () => {
+  it('a failed history row clips its own words — the red text is the truncating block, not an inline child that runs off screen', async () => {
+    const long = 'The AI could not be reached just now — nothing was written and nothing was sent, try again in a moment.';
+    mount(ON_AGENT, '', [
+      { id: 'r1', agentId: 'on1', status: 'failed', error: long, startedAt: '2026-08-29T17:30:00Z', endedAt: '2026-08-29T17:31:00Z' },
+      { id: 'r2', agentId: 'on1', status: 'done', resultText: 'Created the daily email report.', startedAt: '2026-08-28T17:30:00Z', endedAt: '2026-08-28T17:31:00Z' },
+    ]);
+    const el = await screen.findByTestId('run-failed-words');
+    expect(el.className).toContain('block');
+    expect(el.className).toContain('truncate');
+    expect(el.textContent).toMatch(/^Failed — The AI could not be reached/);
+  });
+
+  it('the name wraps on the phone and stays one line on the laptop, so the switch beside it never leaves "Daily E…"', async () => {
+    mount(OFF_AGENT);
+    await waitFor(() => expect(screen.getByTestId('agent-switch')).toBeTruthy());
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1.textContent).toBe('Daily Email Agent');
+    expect(h1.className).toContain('whitespace-normal');
+    expect(h1.className).toContain('sm:whitespace-nowrap');
+    expect(h1.className).toContain('truncate');
   });
 });
 
