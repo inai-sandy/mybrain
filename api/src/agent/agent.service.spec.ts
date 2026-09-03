@@ -714,3 +714,88 @@ describe('deleteAgent cascades flows (BEA-1113)', () => {
     expect(gone).toEqual(['agentRuns', 'flowRuns:f1', 'flowRuns:f2', 'flows', 'job']);
   });
 });
+
+/**
+ * A GOAL-BUILT AGENT CAN NEVER BE LEFT STUCK OFF (BEA-1603).
+ *
+ * His Daily Email Agent was set to "every day at 23:00" and never ran: born off, its first run failed,
+ * nobody asked "keep it?", and the schedule he saved sat on a switch that was off. Two rules close
+ * that: saving a schedule means ON (unless the SYSTEM paused it), and a run that finishes cleanly is
+ * reported through a hook so the trial can still ask.
+ */
+describe('AgentService — schedule means on, and a clean finish is reported (BEA-1603)', () => {
+  let prisma: ReturnType<typeof fakePrisma>;
+  let svc: AgentService;
+
+  beforeEach(() => {
+    prisma = fakePrisma();
+    svc = new AgentService(prisma as any);
+  });
+
+  it('saving a schedule on an OFF agent with no pausedReason switches it on', async () => {
+    const a = await svc.createAgent({ name: 'Daily Email Agent', prompt: 'x', enabled: false });
+    expect(a.enabled).toBe(false);
+    const up = await svc.updateAgent(a.id, { schedule: { every: 'day', at: '23:00' }, scheduleText: 'Every day at 23:00' });
+    expect(up.enabled).toBe(true); // the PATCH answer carries it — the page reads it for the toast
+    expect((await svc.getAgent(a.id)).enabled).toBe(true);
+  });
+
+  it('saving a schedule on a SYSTEM-paused agent leaves it paused, reason kept', async () => {
+    const a = await svc.createAgent({ name: 'Broken', prompt: 'x' });
+    await prisma.agent.update({ where: { id: a.id }, data: { enabled: false, pausedReason: 'Its worker keeps failing' } });
+    const up = await svc.updateAgent(a.id, { schedule: { every: 'day', at: '23:00' }, scheduleText: 'Every day at 23:00' });
+    expect(up.enabled).toBe(false);
+    expect(up.pausedReason).toBe('Its worker keeps failing');
+  });
+
+  it('clearing the schedule (null) does not switch an off agent on; an explicit enabled:false with a schedule is respected', async () => {
+    const a = await svc.createAgent({ name: 'Manual', prompt: 'x', enabled: false });
+    expect((await svc.updateAgent(a.id, { schedule: null })).enabled).toBe(false);
+    expect((await svc.updateAgent(a.id, { schedule: { every: 'day', at: '09:00' }, enabled: false })).enabled).toBe(false);
+  });
+
+  it('a save with no schedule in it (a rename) never touches the switch', async () => {
+    const a = await svc.createAgent({ name: 'Off', prompt: 'x', enabled: false, schedule: { every: 'day', at: '09:00' } });
+    expect((await svc.updateAgent(a.id, { name: 'Still off' })).enabled).toBe(false);
+  });
+
+  it('finishRun done → the done hook hears the run, its job and what it said', async () => {
+    const heard: any[] = [];
+    svc.setRunDoneHook((runId, ctx) => { heard.push({ runId, ...ctx }); });
+    const a = await svc.createAgent({ name: 'Job', prompt: 'x', enabled: false });
+    const run = await svc.createRun({ agentId: a.id, input: 'go' });
+    await svc.finishRun(run.id, { status: 'done', resultText: 'Read 14 emails.' });
+    expect(heard).toEqual([{ runId: run.id, agentId: a.id, runKind: '', resultText: 'Read 14 emails.' }]);
+  });
+
+  it('a failed or cancelled run is NOT reported as done; a run with no job is not reported either', async () => {
+    const heard: any[] = [];
+    svc.setRunDoneHook((runId) => { heard.push(runId); });
+    const a = await svc.createAgent({ name: 'Job', prompt: 'x' });
+    const failed = await svc.createRun({ agentId: a.id, input: 'go' });
+    await svc.finishRun(failed.id, { status: 'failed', error: 'Notion said no' });
+    const cancelled = await svc.createRun({ agentId: a.id, input: 'go' });
+    await svc.cancelRun(cancelled.id);
+    const orphan = await svc.createRun({ input: 'go' });
+    await svc.finishRun(orphan.id, { status: 'done' });
+    expect(heard).toEqual([]);
+  });
+
+  it('a hook that throws never fails the finish — the run is still done', async () => {
+    svc.setRunDoneHook(async () => { throw new Error('phone off'); });
+    const a = await svc.createAgent({ name: 'Job', prompt: 'x' });
+    const run = await svc.createRun({ agentId: a.id, input: 'go' });
+    const done: any = await svc.finishRun(run.id, { status: 'done' });
+    expect(done.status).toBe('done');
+  });
+
+  it('the hook fires AFTER a self-pause is cleared, so it reads the job as it now is', async () => {
+    const seen: boolean[] = [];
+    svc.setRunDoneHook(async (_r, ctx) => { seen.push((await prisma.agent.findUnique({ where: { id: ctx.agentId! } }))!.enabled); });
+    const a = await svc.createAgent({ name: 'Job', prompt: 'x' });
+    await prisma.agent.update({ where: { id: a.id }, data: { enabled: false, pausedReason: 'credit ceiling' } });
+    const run = await svc.createRun({ agentId: a.id, input: 'go' });
+    await svc.finishRun(run.id, { status: 'done' });
+    expect(seen).toEqual([true]);
+  });
+});

@@ -287,7 +287,7 @@ export function AgentAreaPage() {
                   )}
                   {j.scheduleText && <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" />{j.scheduleText}</span>}
                   {(j.mode === 'watch' || j.mode === 'alert') && <span className="rounded-full bg-pink-50 px-1.5 text-pink-700 dark:bg-pink-500/10 dark:text-pink-300">{j.mode === 'watch' ? 'watch' : 'alert'}</span>}
-                  {!j.enabled && <span className={'rounded-full px-1.5 ' + (j.pausedReason ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300' : 'bg-zinc-100 dark:bg-zinc-800')} title={j.pausedReason || undefined}>{j.pausedReason ? 'paused itself' : 'paused'}</span>}
+                  {!j.enabled && <span className={'rounded-full px-1.5 ' + (j.pausedReason ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300' : 'bg-zinc-100 dark:bg-zinc-800')} title={j.pausedReason || undefined}>{j.pausedReason ? 'paused itself' : 'off'}</span>}
                 </span>
               </span>
               <ChevronRight className="h-4 w-4 shrink-0 text-zinc-300 dark:text-zinc-600" />

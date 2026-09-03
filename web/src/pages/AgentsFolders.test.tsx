@@ -143,6 +143,23 @@ describe('moving agents into folders (BEA-1380)', () => {
     });
   });
 
+  it('the bulk bar says "Switch off" / "Switch on" — honest words for the switch, not Pause/Resume (BEA-1603)', async () => {
+    render(<MemoryRouter initialEntries={['/agent']}><Agents /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('Radar')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Select Radar'));
+    const bar = within(screen.getByTestId('bulk-bar'));
+    expect(bar.getByTestId('bulk-pause').textContent).toBe('Switch off');
+    expect(bar.getByTestId('bulk-resume').textContent).toBe('Switch on');
+    expect(bar.queryByText('Pause')).toBeNull();
+    expect(bar.queryByText('Resume')).toBeNull();
+    fireEvent.click(bar.getByTestId('bulk-pause'));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => String(c[0]) === '/api/agent/agents/j1' && c[1]?.method === 'PATCH');
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call![1].body)).toEqual({ enabled: false });
+    });
+  });
+
   it('ticking a card and clearing the selection brings the normal card taps back', async () => {
     render(<MemoryRouter initialEntries={['/agent']}><Agents /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Radar')).toBeTruthy());

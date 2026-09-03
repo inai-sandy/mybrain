@@ -1,19 +1,11 @@
 {
-  "startedAt": "2026-09-02T02:50:00Z",
+  "startedAt": "2026-09-03T04:05:00Z",
   "status": "running",
-  "note": "Needs You split fix: inbox becomes the one source for Tasks + Dashboard (1596), then reason line / question detection / reply-from-dashboard (1597). Order: 1596 -> 1597.",
+  "note": "Agent on/off + schedule batch. Owner's goal: finish without bugs and without disturbing agent creation or run code. Order: 1603 -> 1604 -> 1605 -> 1606. BEA-1607 is mockup-first and NOT in this batch.",
   "issues": [
-    {
-      "id": "BEA-1596",
-      "title": "Needs You: one inbox for Tasks + Dashboard; Reminder.needsOwner retired",
-      "status": "done",
-      "sha": "4374b9a",
-      "note": "inbox is the one source; Dashboard reads inbox; needsOwner retired + cleared; watchdog/needsSandeep write inbox rows"
-    },
-    {
-      "id": "BEA-1597",
-      "title": "Needs You extras: reason line, questions without ?, reply from Dashboard",
-      "status": "in_progress"
-    }
+    { "id": "BEA-1603", "title": "Agent on/off: schedule means on, switch on the page, honest header, Keep it re-asked after first green run", "status": "pending" },
+    { "id": "BEA-1604", "title": "Keep it saves a double-encoded schedule — fix + real-save test", "status": "pending" },
+    { "id": "BEA-1605", "title": "Protect the clock: log swallowed tick errors, bad tz falls back to Asia/Kolkata", "status": "pending" },
+    { "id": "BEA-1606", "title": "Settings sheet: instant-save must not wipe an unsaved source edit", "status": "pending" }
   ]
 }

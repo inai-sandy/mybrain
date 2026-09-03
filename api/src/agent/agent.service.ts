@@ -41,6 +41,12 @@ export type RunAnswered = (runId: string, answer: string, via: string, waitpoint
  * repair itself to a later tick. A hook that throws is swallowed — a failed run must not fail twice.
  */
 export type RunFailed = (runId: string, ctx: { agentId: string | null; error: string; runKind: string }) => any;
+/**
+ * A run of a job finished cleanly (BEA-1603). The mirror of `RunFailed`, registered the same way by
+ * `GoalTrialService` — it is how a goal-built agent whose FIRST run failed still gets asked "keep
+ * it?" the day a later run works, whichever road (manual or the clock) that run came down.
+ */
+export type RunDone = (runId: string, ctx: { agentId: string | null; runKind: string; resultText: string }) => any;
 
 const FINISHED = ['done', 'failed', 'cancelled'];
 
@@ -91,6 +97,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   private flowSync: AgentFlowSync | null = null;
   private answered: RunAnswered | null = null;
   private runFailed: RunFailed | null = null;
+  private runDone: RunDone | null = null;
   private workerCleanup: WorkerCleanup | null = null;
   private journalCleanup: JournalCleanup | null = null;
 
@@ -126,6 +133,15 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    */
   setRunFailedHook(hook: RunFailed | null) {
     this.runFailed = hook;
+  }
+
+  /**
+   * Register what happens when a run finishes cleanly (BEA-1603). Called once by
+   * `GoalTrialService.onModuleInit` — the same registration seam as the failed hook, for the same
+   * reason (WorkerModule imports AgentModule, never the other way).
+   */
+  setRunDoneHook(hook: RunDone | null) {
+    this.runDone = hook;
   }
 
   /**
@@ -725,6 +741,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (patch.collectionId !== undefined) data.collectionId = patch.collectionId ?? null;
     // Switching a job back on clears why it paused itself (BEA-1358) — the same rule as a trigger binding.
     if (patch.enabled !== undefined) { data.enabled = patch.enabled; if (patch.enabled) data.pausedReason = null; }
+    // SAVING A SCHEDULE MEANS ON (BEA-1603). His Daily Email Agent was set to "every day at 23:00"
+    // and never ran: a goal-built agent is born off, its first run failed so nobody ever asked
+    // "keep it?", and the schedule he then saved sat on a switch that was off. Nobody sets a time
+    // for a thing they want to stay off. A pause the SYSTEM set (`pausedReason`) is not overridden
+    // — that is a "this is broken" verdict, and a time does not fix a broken worker.
+    if (patch.schedule !== undefined && patch.schedule && patch.enabled === undefined && !a.enabled && !a.pausedReason) {
+      data.enabled = true;
+    }
     if (patch.defaultDepth !== undefined) data.defaultDepth = this.normDepth(patch.defaultDepth);
     // Per-job settings (BEA-1095) — each job is fully independent.
     const p: any = patch;
@@ -961,6 +985,16 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // ever clear its own. A job he switched off by hand stays off, whatever it does on a manual run.
     if ((patch.status ?? 'done') === 'done' && run.agentId) {
       await this.clearSelfPause(run.agentId, id).catch(() => undefined);
+    }
+    // A run that WORKED is evidence too (BEA-1603) — the goal trial hears it and asks "keep it?"
+    // if that question was never asked. After the self-pause clear, so the hook reads the job as
+    // it now is; swallowed, because a run that finished cleanly must not fail on the way out.
+    if ((patch.status ?? 'done') === 'done' && run.agentId && this.runDone) {
+      try {
+        await this.runDone(id, { agentId: run.agentId, runKind: String((run as any).runKind || ''), resultText: String(patch.resultText ?? run.resultText ?? '') });
+      } catch {
+        /* the listener says its own piece in its own log */
+      }
     }
     // A worker that failed is evidence (BEA-1393). This runs before the callback controller drops
     // the run's journal, so the answers that broke it are still there — and it is swallowed, because

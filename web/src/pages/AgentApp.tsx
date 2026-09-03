@@ -471,17 +471,36 @@ export function AgentApp() {
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-2xl" style={{ background: color + '22' }}>{a.icon || '🤖'}</span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="min-w-0 truncate text-xl font-bold">{a.name}</h1>
+            {/* On the phone the name WRAPS instead of ending in "…" (BEA-1603) — the switch beside it
+                left "Daily E…" of "Daily Email Agent"; the laptop keeps the one-line truncate. */}
+            <h1 className="min-w-0 truncate whitespace-normal break-words text-xl font-bold sm:whitespace-nowrap">{a.name}</h1>
             <AgentKindBadge agent={a} />
+            {/* THE SWITCH (BEA-1603). There was no on/off control anywhere on this page — a goal-built
+                agent is born off, and when its first run failed nothing ever asked "keep it?", so it
+                sat off for ever while the line below still said "next: today 23:00". The same toggle
+                the Settings sheet uses for WhatsApp; saves the moment it changes. */}
+            <label data-testid="agent-switch" className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              <input type="checkbox" checked={!!a.enabled} aria-label={a.enabled ? 'On — switch it off' : 'Off — switch it on'}
+                onChange={async (e) => { const on = e.target.checked; const d = await patch({ enabled: on }); if (d) toast('success', on ? 'Switched on' : 'Switched off'); }}
+                className="h-5 w-9 accent-emerald-600" />
+              <span>{a.enabled ? 'On' : 'Off'}</span>
+            </label>
           </div>
           {/* WHAT IT DOES AND WHEN, not Codex's opening sentence (BEA-1505). A goal-built agent's
               description IS the whole goal, and Codex writes goals like a person talking — so this
               line read "I will build an agent that you run manually whenever you want. When it
               runs…" and told him nothing. The schedule is the more useful fact when there is one;
               the whole goal is one tap away under "What it does". */}
-          <p className="truncate text-sm text-zinc-500" title={a.description || undefined}>
-            {scheduleLine(a.scheduleText, parseSchedule(a.schedule), tz) || subtitleOf(a.description) || 'Your agent'}
-          </p>
+          {/* An agent that is off says so, instead of "next: today 23:00" about a run that will never
+              come (BEA-1603). The schedule is still named — it is what WOULD happen — so the line
+              tells him both facts at once. */}
+          {a.enabled ? (
+            <p className="truncate text-sm text-zinc-500" title={a.description || undefined}>
+              {scheduleLine(a.scheduleText, parseSchedule(a.schedule), tz) || subtitleOf(a.description) || 'Your agent'}
+            </p>
+          ) : (
+            <p className="truncate text-sm text-zinc-500" data-testid="off-line" title={offLine(a.scheduleText)}>{offLine(a.scheduleText)}</p>
+          )}
           {planCost && (
             <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>{creditsText(planCost)} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>
           )}
@@ -634,7 +653,7 @@ export function AgentApp() {
                 <div key={r.id} className="group flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
                   <button onClick={() => nav(`/agent/runs/${r.id}`)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
                     <span className="w-[4.6rem] shrink-0 text-xs font-bold uppercase tracking-wide" style={{ color }}>{fmtDay(r.endedAt || r.startedAt)}</span>
-                    <span className="min-w-0 flex-1 truncate">{r.status === 'failed' ? <span className="text-rose-600 dark:text-rose-400">Failed{(r.errorWords || r.error) ? ` — ${String(r.errorWords || r.error).slice(0, 50)}` : ''}</span> : (plainPreview(r.resultText, 140) || r.title || a.name)}</span>
+                    <span className="min-w-0 flex-1 truncate">{r.status === 'failed' ? <span data-testid="run-failed-words" className="block truncate text-rose-600 dark:text-rose-400">Failed{(r.errorWords || r.error) ? ` — ${String(r.errorWords || r.error).slice(0, 50)}` : ''}</span> : (plainPreview(r.resultText, 140) || r.title || a.name)}</span>
                   </button>
                   {(r.status === 'failed' || r.status === 'done') && (
                     <button onClick={() => fetch(`/api/agent/runs/${r.id}/replay`, { method: 'POST' }).then(() => { toast('success', r.status === 'failed' ? 'Retrying…' : 'Running it again…'); loadRuns(); })} title={r.status === 'failed' ? 'Retry' : 'Run again'} className={'shrink-0 rounded-lg p-1 ' + (r.status === 'failed' ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10' : 'text-zinc-300 hover:text-emerald-600 group-hover:text-zinc-400')}><RotateCcw className="h-3.5 w-3.5" /></button>
@@ -917,7 +936,7 @@ export function AgentApp() {
               <SettingsRow k="schedule" icon="⏰" title="Schedule"
                 summary={scheduleSummary(a)}
                 open={openRow === 'schedule'} onToggle={toggleRow}>
-                <SchedulePicker value={a?.schedule || null} onChange={async (s) => { setA((p: any) => ({ ...p, schedule: s, scheduleText: schedText(s) })); const d = await patch({ schedule: s, scheduleText: schedText(s) }); if (d) toast('success', schedText(s) ? `Saved — ${schedText(s)}` : 'Saved — manual only'); }} />
+                <SchedulePicker value={a?.schedule || null} onChange={async (s) => { const wasOff = !a?.enabled; setA((p: any) => ({ ...p, schedule: s, scheduleText: schedText(s) })); const d = await patch({ schedule: s, scheduleText: schedText(s) }); if (d) toast('success', scheduleSavedToast(schedText(s), wasOff, !!d.enabled)); }} />
               </SettingsRow>
 
               {/* 5 · Watch & alerts 👁 — direct-fetch jobs only (BEA-1358): the same picker as the builder */}
@@ -1141,6 +1160,27 @@ export function resultSummary(a: any): string {
     : a?.outputDest === 'task' ? 'Becomes a task'
     : 'Saved to Documents';
   return `${dest} · WhatsApp ${a?.notifyWhatsApp ? 'on' : 'off'}`;
+}
+
+/**
+ * The line under the name when the agent is off (BEA-1603). Says plainly that it will not run by
+ * itself, and names the schedule it WOULD keep — so "Off" never hides the fact that a time is set.
+ */
+export function offLine(scheduleText: string | null | undefined): string {
+  const words = String(scheduleText || '').trim();
+  if (!words) return 'Off — it will not run on its own.';
+  return `Off — it will not run on its own. Would run ${words.charAt(0).toLowerCase()}${words.slice(1)}.`;
+}
+
+/**
+ * What the toast says after a schedule is saved (BEA-1603). The server switches an off agent on when
+ * a schedule is saved (unless the system paused it), and the toast must say so — a quiet flip of the
+ * switch is how he ends up not trusting the screen.
+ */
+export function scheduleSavedToast(words: string, wasOff: boolean, nowOn: boolean): string {
+  if (!words) return 'Saved — manual only';
+  if (wasOff && nowOn) return `Saved and switched on — ${words}`;
+  return `Saved — ${words}`;
 }
 
 export function scheduleSummary(a: any): string {
