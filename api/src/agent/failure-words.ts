@@ -89,6 +89,12 @@ export const PLUMBING_CLASSES: PlumbingClass[] = [
     test: /\bmodel (returned nothing|could not be reached)/i,
     calm: 'The AI could not be reached just now — nothing was lost; it will work on the next run. It has been noted.',
   },
+  {
+    id: 'bad-timezone',
+    means: 'Setting tasks.tz holds a zone name Intl rejects — the schedulers run on the default zone until it is fixed (BEA-1605)',
+    // `badTimezoneSentence()` in hermes/schedule-clock.ts writes this sentence; its spec locks the two together.
+    test: /timezone setting .* is not a zone name/i,
+  },
 ];
 
 /**

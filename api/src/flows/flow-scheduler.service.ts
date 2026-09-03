@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { guardedTick, safeTz } from '../hermes/schedule-clock';
 import { FlowsService } from './flows.service';
 import { FlowRunnerService } from './flows-runner.service';
 
@@ -22,14 +23,15 @@ export class FlowScheduler implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.timer = setInterval(() => { this.tick().catch(() => undefined); }, 60_000);
+    // A throw is logged, never swallowed, and the next tick still runs (BEA-1605).
+    this.timer = setInterval(() => { void guardedTick('FlowScheduler', this.log, () => this.tick()); }, 60_000);
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 
   private async tz(): Promise<string> {
     const r = await this.prisma.setting.findUnique({ where: { key: 'tasks.tz' } }).catch(() => null);
-    return (r as any)?.value || 'Asia/Kolkata';
+    return safeTz((r as any)?.value, 'FlowScheduler', this.log); // a zone Intl rejects falls back, out loud (BEA-1605)
   }
 
   localParts(now: Date, tz: string): { dayKey: string; hm: string; dow: number } {

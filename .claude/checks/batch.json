@@ -13,12 +13,14 @@
     {
       "id": "BEA-1604",
       "title": "Keep it saves a double-encoded schedule \u2014 fix + real-save test",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "e830c1a",
+      "note": "readSchedule returns an object; one stored-schedule reader heals double-encoded rows; picker never throws"
     },
     {
       "id": "BEA-1605",
       "title": "Protect the clock: log swallowed tick errors, bad tz falls back to Asia/Kolkata",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1606",

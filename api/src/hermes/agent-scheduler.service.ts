@@ -3,6 +3,7 @@ import { AgentService } from '../agent/agent.service';
 import { isJobBusy } from '../agent/run-lock.service';
 import { HermesBridgeService } from './hermes-bridge.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { guardedTick, safeTz } from './schedule-clock';
 
 export type Sched = { every: 'day' | 'weekday' | 'week' | 'hour'; at?: string; dow?: number; minute?: number };
 
@@ -23,14 +24,15 @@ export class AgentScheduler implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.timer = setInterval(() => { this.tick().catch(() => undefined); }, 60_000);
+    // A throw is logged, never swallowed, and the next tick still runs (BEA-1605).
+    this.timer = setInterval(() => { void guardedTick('AgentScheduler', this.log, () => this.tick()); }, 60_000);
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 
   private async tz(): Promise<string> {
     const r = await this.prisma.setting.findUnique({ where: { key: 'tasks.tz' } }).catch(() => null);
-    return (r as any)?.value || 'Asia/Kolkata';
+    return safeTz((r as any)?.value, 'AgentScheduler', this.log); // a zone Intl rejects falls back, out loud (BEA-1605)
   }
 
   localParts(now: Date, tz: string): { dayKey: string; hm: string; dow: number } {
