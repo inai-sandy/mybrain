@@ -1206,7 +1206,7 @@ export function Agents() {
       }).catch(() => null);
       if (r?.ok) done++;
     }
-    toast(done === jobs.length ? 'success' : 'error', `${on ? 'Resumed' : 'Paused'} ${done} of ${jobs.length}`);
+    toast(done === jobs.length ? 'success' : 'error', `${on ? 'Switched on' : 'Switched off'} ${done} of ${jobs.length}`);
     setSelected(new Set());
     loadAreas();
   }
@@ -1735,12 +1735,12 @@ export function Agents() {
                 data-testid="bulk-pause"
                 onClick={() => bulkEnabled(false)}
                 className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold hover:border-amber-400 hover:text-amber-700 dark:border-zinc-700 dark:hover:text-amber-300"
-              >Pause</button>
+              >Switch off</button>
               <button
                 data-testid="bulk-resume"
                 onClick={() => bulkEnabled(true)}
                 className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:text-emerald-300"
-              >Resume</button>
+              >Switch on</button>
               <button
                 data-testid="bulk-delete"
                 onClick={bulkDelete}

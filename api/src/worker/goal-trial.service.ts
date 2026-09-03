@@ -62,6 +62,50 @@ export class GoalTrialService implements OnModuleInit {
     // replied "keep it", and NOTHING happened — the run sat waiting for ever and the agent stayed
     // switched off. The last step of the road was a dead end.
     this.owner?.setAnswerWatcher?.((runId: string, answer: string, waitpointId?: string) => this.onAnswer(runId, answer, waitpointId));
+    // …and any run of a goal agent that finishes cleanly (BEA-1603) — the mirror of the failed hook.
+    // Without this, a first run that failed meant the keep question was never asked, and nothing ever
+    // asked again: the agent stayed off for ever while manual runs (which ignore the switch) made it
+    // look alive. That is how his Daily Email Agent sat at "every day at 23:00" and never ran.
+    this.agent.setRunDoneHook?.((runId: string, ctx: { agentId: string | null; resultText: string }) => this.onRunDone(runId, ctx));
+  }
+
+  /**
+   * A run finished cleanly (BEA-1603). Ask "keep it?" if that question is still owed.
+   *
+   * Owed means: the job is still off, it belongs to an area with an approved goal, and the question
+   * has never been asked for this job — an open OR answered keep waitpoint on any of its runs counts
+   * as asked. Asked once, ever: he answered "send it back" and a later run finishing is not a reason
+   * to ask him the same thing again; the corrected goal's own trial will.
+   *
+   * `work()` still asks after a green trial run, exactly as before. On that road this hook fires
+   * first (the worker's /finish comes through `finishRun`), so `work()`'s own `askHim` finds the run
+   * already reopened and does nothing — `reopenForDecision` only reopens a run that is `done`.
+   * Whichever fires first, the other is a no-op: one question, never two.
+   */
+  private async onRunDone(runId: string, ctx: { agentId: string | null; resultText: string }): Promise<void> {
+    if (!ctx?.agentId) return;
+    const job: any = await this.prisma?.agent?.findUnique?.({ where: { id: String(ctx.agentId) } }).catch(() => null);
+    // Goal-BUILT jobs only — `jobFor()` tags them `origin:'goal'`. An ordinary job he moved under a
+    // goal area (`moveJob`) is not one, and must never be asked "does this match THE GOAL" about a
+    // goal it was not built from.
+    if (!job || job.enabled || !job.areaId || String(job.origin || '') !== 'goal') return;
+    if (await this.alreadyAsked(String(job.id))) return;
+    const goal = await this.goals.approved(String(job.areaId)).catch(() => null);
+    if (!goal || !String(goal.text || '').trim()) return;
+    await this.askHim(runId, goal, String(ctx.resultText || '')).catch((e: any) => this.log.warn(`could not reach him: ${e?.message || e}`));
+  }
+
+  /** Has this job ever carried the keep question — open, answered, expired or cancelled? */
+  private async alreadyAsked(agentId: string): Promise<boolean> {
+    const rows: any[] = (await this.prisma?.waitpoint?.findMany?.({ where: { run: { agentId } }, select: { options: true } }).catch(() => [])) || [];
+    return rows.some((wp) => {
+      try {
+        const raw = typeof wp.options === 'string' ? JSON.parse(wp.options) : wp.options;
+        return Array.isArray(raw) && raw.map((o: any) => String(o)).includes(KEEP_IT);
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**

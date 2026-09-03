@@ -358,3 +358,136 @@ describe('naming the job', () => {
     expect(titleOf('')).toBe('New agent');
   });
 });
+
+/**
+ * A LATER RUN THAT WORKS STILL ASKS (BEA-1603).
+ *
+ * The keep question was asked only after the FIRST trial run, and only if it went green. His Daily
+ * Email Agent's first run failed (Notion), so nobody asked, and nothing ever asked again — the agent
+ * stayed off for ever while manual runs made it look alive. Now every clean finish is heard through
+ * `AgentService.setRunDoneHook`, and the question is asked once, whichever run earned it.
+ */
+describe('a later run that works still asks (BEA-1603)', () => {
+  function hooked(opts: { job?: any; waitpoints?: any[]; goal?: any } = {}) {
+    const w = world();
+    const svc: any = w.svc;
+    let doneHook: ((runId: string, ctx: any) => any) | null = null;
+    const job = opts.job === undefined ? { id: 'job-1', areaId: 'ar1', enabled: false, pausedReason: null, origin: 'goal' } : opts.job;
+    svc.prisma = {
+      agent: { findUnique: async () => job },
+      agentRun: { findUnique: async () => ({ id: 'run-9', agentId: 'job-1', status: 'done' }) },
+      waitpoint: { findMany: async () => opts.waitpoints || [] },
+    };
+    svc.goals = { approved: async () => (opts.goal === undefined ? { text: 'Read his Gmail at 23:00.', version: 3 } : opts.goal), setOnApproved: () => undefined };
+    svc.agent = { ...svc.agent, setRunDoneHook: (fn: any) => { doneHook = fn; } };
+    svc.onModuleInit();
+    return { ...w, fire: (ctx: any = { agentId: 'job-1', resultText: 'Sent 2 replies.' }) => doneHook!('run-9', ctx), registered: () => !!doneHook };
+  }
+
+  it('registers itself on the done seam at boot', () => {
+    expect(hooked().registered()).toBe(true);
+  });
+
+  it('WHEN the first run failed and a later run finishes done, the question is asked — once, on THAT run, with what it did', async () => {
+    const h = hooked();
+    await h.fire();
+    expect(h.asked).toHaveLength(1);
+    expect(h.asked[0].runId).toBe('run-9');
+    expect(h.asked[0].options).toEqual([KEEP_IT, SEND_BACK]);
+    expect(h.asked[0].question).toContain('Sent 2 replies.');
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it('WHEN the agent is already on, it is NOT asked', async () => {
+    const h = hooked({ job: { id: 'job-1', areaId: 'ar1', enabled: true, origin: 'goal' } });
+    await h.fire();
+    expect(h.asked).toHaveLength(0);
+  });
+
+  it('never twice: an open keep question on any run of this job means it was asked', async () => {
+    const h = hooked({ waitpoints: [{ options: JSON.stringify([KEEP_IT, SEND_BACK]), status: 'pending' }] });
+    await h.fire();
+    expect(h.asked).toHaveLength(0);
+  });
+
+  it('never twice: an ANSWERED keep question ("send it back") counts as asked too', async () => {
+    const h = hooked({ waitpoints: [{ options: JSON.stringify([KEEP_IT, SEND_BACK]), status: 'answered', answer: '"Send it back"' }] });
+    await h.fire();
+    expect(h.asked).toHaveLength(0);
+  });
+
+  it('a question the PROGRAM asked is not the keep question — it does not block asking', async () => {
+    const h = hooked({ waitpoints: [{ options: JSON.stringify(['Write those posts', 'Stop']), status: 'answered' }] });
+    await h.fire();
+    expect(h.asked).toHaveLength(1);
+  });
+
+  it('an ordinary job he MOVED under a goal area is never asked about a goal it was not built from', async () => {
+    // `moveJob` regroups any job under any area. Only a job `jobFor()` built carries origin 'goal'.
+    const moved = hooked({ job: { id: 'job-1', areaId: 'ar1', enabled: false, origin: 'chat' } });
+    await moved.fire();
+    expect(moved.asked).toHaveLength(0);
+    const social = hooked({ job: { id: 'job-1', areaId: 'ar1', enabled: false, origin: 'social' } });
+    await social.fire();
+    expect(social.asked).toHaveLength(0);
+  });
+
+  it('asks nothing for a job outside a goal area, or one whose goal is gone, or a run with no job', async () => {
+    const noArea = hooked({ job: { id: 'job-1', areaId: null, enabled: false, origin: 'goal' } });
+    await noArea.fire();
+    expect(noArea.asked).toHaveLength(0);
+    const noGoal = hooked({ goal: null });
+    await noGoal.fire();
+    expect(noGoal.asked).toHaveLength(0);
+    const orphan = hooked();
+    await orphan.fire({ agentId: null, resultText: '' });
+    expect(orphan.asked).toHaveLength(0);
+  });
+
+  it('WHEN the trial run itself is green, it is asked ONCE — the hook and work() do not double-ask', async () => {
+    // The real order: the worker's /finish comes through `finishRun`, which fires the hook BEFORE
+    // `dispatch.run()` returns to `work()`. `reopenForDecision` then finds the run already reopened
+    // (not 'done') and refuses, so `work()`'s own askHim is a no-op. Mirror both facts here.
+    const w = world();
+    const svc: any = w.svc;
+    let doneHook: ((runId: string, ctx: any) => any) | null = null;
+    svc.agent = {
+      ...svc.agent,
+      setRunDoneHook: (fn: any) => { doneHook = fn; },
+      reopenForDecision: async (runId: string) => {
+        const r = w.runs.find((x) => x.id === runId);
+        if (!r || r.status !== 'done') return false;
+        r.status = 'awaiting_input';
+        return true;
+      },
+    };
+    svc.prisma = {
+      ...svc.prisma,
+      agent: { findFirst: async () => null, findUnique: async () => ({ id: 'job-1', areaId: 'ar1', enabled: false, origin: 'goal' }) },
+      waitpoint: { findMany: async () => w.asked.map((q) => ({ options: JSON.stringify(q.options) })) },
+    };
+    svc.dispatch = {
+      run: async (runId: string, agentId: string) => {
+        w.dispatched.push({ runId, agentId });
+        const r = w.runs.find((x) => x.id === runId);
+        if (r) r.status = 'done';
+        await doneHook!(runId, { agentId, resultText: r?.resultText || '' }); // the worker's /finish → finishRun → hook
+        return {};
+      },
+    };
+    svc.onModuleInit();
+    await svc.start('ar1');
+    await settle();
+    expect(w.dispatched).toHaveLength(1);
+    expect(w.asked).toHaveLength(1);
+    expect(w.sent).toHaveLength(1);
+  });
+
+  it('work() is untouched: with no hook registered a green trial still asks exactly as before', async () => {
+    const w = world();
+    await w.svc.start('ar1');
+    await settle();
+    expect(w.asked).toHaveLength(1);
+    expect(w.asked[0].options).toEqual([KEEP_IT, SEND_BACK]);
+  });
+});
