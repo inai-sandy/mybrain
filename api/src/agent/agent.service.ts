@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { normaliseToolArgs, toolsFor } from '../social/tool-args';
@@ -103,6 +103,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // `locks` is optional and LAST: spec harnesses build this service positionally with just Prisma,
   // and every call is `?.`-guarded, so a harness without it behaves exactly as before. (BEA-1388)
+  private readonly log = new Logger('AgentService');
+
   constructor(private readonly prisma: PrismaService, private readonly locks?: RunLockService) {}
 
   /** Register the flow-picture drawer (BEA-1366). Called once by `AgentFlowSyncService.onModuleInit`. */
@@ -870,7 +872,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return {
       ...a,
       skills: this.parse(a.skills, [] as unknown),
-      schedule: a.schedule ? this.parse(a.schedule, null) : null,
+      schedule: this.readStoredSchedule(a),
       evals: this.parse(a.evals, [] as unknown),
       ui: a.ui ? this.parse(a.ui, null) : null,
       engine: a.engine ? this.parse(a.engine, null) : null, // this job's own model (BEA-1106)
@@ -880,6 +882,22 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       toolArgs: a.toolArgs ? this.shapeToolArgs(a.toolArgs) : null,
       threshold: a.threshold ? this.parse(a.threshold, null) : null, // an Alert's number to cross (BEA-1358)
     };
+  }
+
+  /**
+   * The stored schedule as an object, or null — the ONE reader for `Agent.schedule` (BEA-1604).
+   * `shapeAgent` uses it, so the API, the scheduler (`listSchedulable`) and every other caller see
+   * the same thing. A row written double-encoded (`"{\"every\":\"day\"...}"` — the "keep it" road
+   * did this before BEA-1604) parses to a STRING; it is parsed once more and the agent is named in
+   * the log, so a row that is already wrong still fires at its time and still opens in Settings.
+   */
+  private readStoredSchedule(a: any): unknown {
+    if (!a?.schedule) return null;
+    const once = this.parse(a.schedule, null as unknown);
+    if (typeof once !== 'string') return once;
+    const twice = this.parse(once, null as unknown);
+    this.log.warn(`agent ${a.id} (${a.name || 'unnamed'}) holds a double-encoded schedule — read it as ${JSON.stringify(twice)}`);
+    return twice && typeof twice === 'object' ? twice : null;
   }
 
   /** `Agent.toolArgs` as the UI reads it: the source-id shape (`normaliseToolArgs`), null when empty or unreadable. */

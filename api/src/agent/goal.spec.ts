@@ -205,19 +205,23 @@ describe('when the agent should run', () => {
     expect(p).toContain('Do NOT invent a time');
   });
 
-  it('reads a daily time', () => {
+  // The schedule is an OBJECT (BEA-1604). It used to come back JSON-stringified, and `updateAgent()`
+  // stringified it again — the DB held a quoted string the clock could never match. One shape,
+  // decided here; the one place that turns it into text is `updateAgent()`.
+  it('reads a daily time — as an object, never a JSON string', () => {
     const got = readSchedule('{"every":"day","at":"22:00","text":"every day at 22:00"}');
-    expect(JSON.parse(got.schedule!)).toEqual({ every: 'day', at: '22:00' });
+    expect(got.schedule).toEqual({ every: 'day', at: '22:00' });
+    expect(typeof got.schedule).toBe('object');
     expect(got.text).toBe('every day at 22:00');
   });
 
   it('reads a weekly one with its day', () => {
     const got = readSchedule('{"every":"week","at":"08:00","dow":1,"text":"every Monday at 08:00"}');
-    expect(JSON.parse(got.schedule!)).toEqual({ every: 'week', at: '08:00', dow: 1 });
+    expect(got.schedule).toEqual({ every: 'week', at: '08:00', dow: 1 });
   });
 
   it('survives a fenced reply, which models keep sending', () => {
-    expect(readSchedule('```json\n{"every":"day","at":"07:30"}\n```').schedule).toBeTruthy();
+    expect(readSchedule('```json\n{"every":"day","at":"07:30"}\n```').schedule).toEqual({ every: 'day', at: '07:30' });
   });
 
   it('leaves it MANUAL when the goal never said when', () => {

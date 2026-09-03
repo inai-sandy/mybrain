@@ -383,8 +383,18 @@ ${goal}
 `;
 }
 
-/** Read the schedule reply. Anything unreadable means "he never said", never a guessed time. */
-export function readSchedule(reply: string): { schedule: string | null; text: string } {
+/** The clock shape `AgentScheduler.matches()` reads — the same object `updateAgent()` stores. */
+export type GoalSchedule = { every: 'day' | 'weekday' | 'week' | 'hour'; at?: string; dow?: number };
+
+/**
+ * Read the schedule reply. Anything unreadable means "he never said", never a guessed time.
+ *
+ * Returns an OBJECT, never a JSON string (BEA-1604): `updateAgent()` is the one place that
+ * stringifies a schedule, once. This used to stringify here too, so "keep it" stored
+ * `"{\"every\":\"day\"...}"` (a quoted string) — the clock could never match it and the
+ * Settings sheet crashed on it.
+ */
+export function readSchedule(reply: string): { schedule: GoalSchedule | null; text: string } {
   const t = String(reply || '').replace(/^\s*\`\`\`(?:json)?\s*|\s*\`\`\`\s*$/g, '').trim();
   let j: any = null;
   try { j = JSON.parse(t); } catch { return { schedule: null, text: '' }; }
@@ -394,7 +404,7 @@ export function readSchedule(reply: string): { schedule: string | null; text: st
   if (every !== 'hour' && !at) return { schedule: null, text: '' }; // a daily schedule with no time is not a schedule
   const dow = Number.isInteger(j?.dow) && j.dow >= 0 && j.dow <= 6 ? j.dow : undefined;
   return {
-    schedule: JSON.stringify({ every, ...(at ? { at } : {}), ...(every === 'week' && dow !== undefined ? { dow } : {}) }),
+    schedule: { every: every as GoalSchedule['every'], ...(at ? { at } : {}), ...(every === 'week' && dow !== undefined ? { dow } : {}) },
     text: String(j?.text || '').trim().slice(0, 120),
   };
 }

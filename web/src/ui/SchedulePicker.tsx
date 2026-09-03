@@ -23,7 +23,22 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 /** "Sunday" · "Monday" — the weekly day. No `dow` stored = Monday, because that is what the scheduler fires on (`s.dow ?? 1`, agent-scheduler.service.ts); the picker itself always stores one. */
 export const dayName = (dow?: number) => DAYS[Number.isInteger(dow) && dow! >= 0 && dow! <= 6 ? dow! : 1];
 
-export function schedSentence(s: Sched): string {
+/**
+ * Only an object is a schedule (BEA-1604). A job saved by the old "keep it" road carried its
+ * schedule as a JSON STRING, and `'event' in value` on a string is a TypeError that took the whole
+ * Settings sheet down. A string that still holds JSON is read; anything else is "manual".
+ */
+export function asSched(value: unknown): Sched {
+  if (!value) return null;
+  if (typeof value === 'object') return value as Sched;
+  if (typeof value === 'string') {
+    try { const p = JSON.parse(value); return p && typeof p === 'object' ? (p as Sched) : null; } catch { return null; }
+  }
+  return null;
+}
+
+export function schedSentence(raw: Sched): string {
+  const s = asSched(raw);
   if (!s) return 'Runs only when you press Run.';
   if ('event' in s) return EVENT_SENTENCE[s.event] || 'Runs when that happens.';
   if (s.every === 'day') return `Runs every day at ${s.at || '07:00'}.`;
@@ -33,7 +48,8 @@ export function schedSentence(s: Sched): string {
   return 'Runs only when you press Run.';
 }
 
-export function schedText(s: Sched): string | null {
+export function schedText(raw: Sched): string | null {
+  const s = asSched(raw);
   if (!s) return null;
   if ('event' in s) return EVENT_TEXT[s.event] || 'On an event';
   if (s.every === 'day') return `Every day at ${s.at || '07:00'}`;
@@ -43,7 +59,8 @@ export function schedText(s: Sched): string | null {
   return null;
 }
 
-export function SchedulePicker({ value, onChange }: { value: Sched; onChange: (s: Sched) => void }) {
+export function SchedulePicker({ value: raw, onChange }: { value: Sched; onChange: (s: Sched) => void }) {
+  const value = asSched(raw);
   const mode = !value ? 'manual' : 'event' in value ? `ev:${value.event}` : value.every;
   const at = (value && !('event' in value) && value.at) || '07:00';
   const set = (e: string, newAt = at) => {

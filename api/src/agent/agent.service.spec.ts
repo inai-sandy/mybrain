@@ -723,6 +723,50 @@ describe('deleteAgent cascades flows (BEA-1113)', () => {
  * that: saving a schedule means ON (unless the SYSTEM paused it), and a run that finishes cleanly is
  * reported through a hook so the trial can still ask.
  */
+/**
+ * A ROW ALREADY WRITTEN DOUBLE-ENCODED STILL READS AS A SCHEDULE (BEA-1604).
+ *
+ * Before this, "keep it" stored `"{\"every\":\"day\",\"at\":\"22:00\"}"` — a quoted JSON string.
+ * `shapeAgent` parsed it once, got a string, and handed that to the scheduler (never fires) and to
+ * the Settings sheet (crashed). The one reader `readStoredSchedule` heals it and names the agent.
+ */
+describe('AgentService — a double-encoded schedule is read as the object it holds (BEA-1604)', () => {
+  let prisma: ReturnType<typeof fakePrisma>;
+  let svc: AgentService;
+  let warned: string[];
+
+  beforeEach(() => {
+    prisma = fakePrisma();
+    svc = new AgentService(prisma as any);
+    warned = [];
+    (svc as any).log = { warn: (m: string) => warned.push(m), log: () => undefined, error: () => undefined };
+  });
+
+  it('WHEN the stored value parses to a string, getAgent/listAgents/listSchedulable all answer the object and the warning names the agent', async () => {
+    const a = await svc.createAgent({ name: 'Daily Email Agent', prompt: 'read mail', enabled: true });
+    // Write the column the way the old road did — straight into the row, not through updateAgent.
+    const row = (await prisma.agent.findUnique({ where: { id: a.id } })) as any;
+    row.schedule = JSON.stringify(JSON.stringify({ every: 'day', at: '22:00' }));
+    expect(row.schedule.startsWith('"')).toBe(true);
+
+    expect((await svc.getAgent(a.id)).schedule).toEqual({ every: 'day', at: '22:00' });
+    expect((await svc.listAgents())[0].schedule).toEqual({ every: 'day', at: '22:00' });
+    expect((await svc.listSchedulable())[0].schedule).toEqual({ every: 'day', at: '22:00' });
+    expect(warned[0]).toContain(a.id);
+    expect(warned[0]).toContain('Daily Email Agent');
+    expect(warned[0]).toContain('double-encoded');
+  });
+
+  it('a clean row is read exactly as before, with no warning; a string that holds no JSON reads as null', async () => {
+    const a = await svc.createAgent({ name: 'A', prompt: 'x', schedule: { every: 'week', dow: 1, at: '08:00' } });
+    expect((await svc.getAgent(a.id)).schedule).toEqual({ every: 'week', dow: 1, at: '08:00' });
+    expect(warned).toEqual([]);
+    const row = (await prisma.agent.findUnique({ where: { id: a.id } })) as any;
+    row.schedule = JSON.stringify('every day at ten'); // a quoted plain sentence — not a schedule
+    expect((await svc.getAgent(a.id)).schedule).toBeNull();
+  });
+});
+
 describe('AgentService — schedule means on, and a clean finish is reported (BEA-1603)', () => {
   let prisma: ReturnType<typeof fakePrisma>;
   let svc: AgentService;
