@@ -224,7 +224,7 @@ export function AgentApp() {
   async function load() {
     const d = await fetch(`/api/agent/agents/${id}`).then((r) => r.json()).catch(() => null);
     if (!d?.id) { setA(null); return; }
-    setA(d);
+    takeServerCopy(d); // a reload keeps an unsaved source edit, like the task/rubric guard below (BEA-1606)
     if (Array.isArray(d.chatLog)) setChatLog(d.chatLog); // the persisted conversation (BEA-1097)
     if (!dirtyRef.current) { setTask(d.prompt || ''); setRubric(d.rubric || ''); }
     if (d.ui) setSpec(d.ui);
@@ -309,7 +309,13 @@ export function AgentApp() {
   const [task, setTask] = useState('');
   const [rubric, setRubric] = useState('');
   const [cfgDirty, setCfgDirty] = useState(false); // task/rubric drafts differ from the saved agent
-  const [sourcesDirty, setSourcesDirty] = useState(false); // a source's args/pages were edited and not yet saved
+  const [sourcesDirty, setSourcesDirtyState] = useState(false); // a source's args/pages were edited and not yet saved
+  // Mirrored in a ref (like `dirtyRef` for task/rubric) so `patch()` and `load()` read the CURRENT
+  // flag after their await, not the one captured when the handler was made (BEA-1606).
+  const sourcesDirtyRef = useRef(false);
+  function setSourcesDirty(on: boolean) { sourcesDirtyRef.current = on; setSourcesDirtyState(on); }
+  /** Take the server's copy of the agent WITHOUT losing what is still only edited here (BEA-1606). */
+  function takeServerCopy(d: any, body: any = {}) { setA((p: any) => keepSourcesDraft(p, d, sourcesDirtyRef.current, body)); }
   const [openRow, setOpenRow] = useState('what'); // the one open accordion row
   // What this agent has cost over time, and how close today is to the ceiling that can pause it
   // (BEA-1526). Both are lazy — fetched when he opens the row, not on every page load — because the
@@ -374,7 +380,11 @@ export function AgentApp() {
     const r = await fetch(`/api/agent/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     // Every save may re-draw the picture on the server (BEA-1366: a Social job's from its settings,
     // any other job's task change re-plans in the background) — pick up the new state right away.
-    if (r.ok) { const d = await r.json(); setA(d); loadFlow(); return d; }
+    // The ONE place an instant-save control replaces the local agent: while a source edit is still
+    // unsaved, the server's `toolArgs`/`tools` must not wipe it — an owner who edited a hashtag and
+    // then flipped WhatsApp lost the edit, and "Save changes" then saved the server's own copy back
+    // (BEA-1606). A body that carries `toolArgs` itself (Save changes, add/remove source) is the truth.
+    if (r.ok) { const d = await r.json(); takeServerCopy(d, body); loadFlow(); return d; }
     toast('error', 'Could not save'); return null;
   }
 
@@ -1076,6 +1086,8 @@ export function AgentApp() {
             {/* Sticky Save — appears only when a drafted field changed; one patch, the same bodies the old buttons sent. */}
             {dirty && (
               <div className="sticky bottom-0 mt-1 bg-gradient-to-t from-white via-white/90 to-transparent pb-1 pt-5 dark:from-zinc-900 dark:via-zinc-900/90" data-testid="settings-save-bar">
+                {/* Names what is still unsaved, so a flipped toggle or a reload never hides it (BEA-1606). */}
+                <p className="mb-1.5 text-center text-xs font-medium text-amber-600 dark:text-amber-400" data-testid="settings-unsaved-line">{unsavedLine({ task: cfgDirty, sources: sourcesDirty, watch: modeDirty })}</p>
                 <button onClick={saveAll} disabled={savingAll} className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
                   {savingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save changes
                 </button>
@@ -1095,6 +1107,33 @@ export function AgentApp() {
 /** Appended to a closed row's summary while its drafts differ from the saved agent — the summary
  *  itself always states what is SAVED, never an edit that would vanish on a reload. */
 export const UNSAVED = ' · unsaved changes';
+
+/** The sticky bar's line naming what is still only edited here: "Sources not saved yet",
+ *  "Task and Sources not saved yet" (BEA-1606). Empty when nothing is dirty. */
+export function unsavedLine(dirty: { task?: boolean; sources?: boolean; watch?: boolean }): string {
+  const names = [dirty.task && 'Task', dirty.sources && 'Sources', dirty.watch && 'Watch'].filter(Boolean) as string[];
+  if (!names.length) return '';
+  const list = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names.join(' and ');
+  return `${list} not saved yet`;
+}
+
+/** The keys a source edit drafts locally — the server's copy of these must not replace the draft. */
+const SOURCE_DRAFT_KEYS = ['toolArgs', 'tools'] as const;
+
+/**
+ * Merge the server's copy of the agent over the local one WITHOUT losing an unsaved source edit
+ * (BEA-1606) — the one helper every instant-save control and the reload go through.
+ *  - `sourcesDirty` false → the server's copy, exactly as before.
+ *  - `sourcesDirty` true → the server's copy, but `toolArgs`/`tools` stay as edited here — unless
+ *    the PATCH `body` carried that key itself (Save changes, add/remove a source), in which case
+ *    the server's answer IS the saved draft and wins.
+ */
+export function keepSourcesDraft(local: any, server: any, sourcesDirty: boolean, body: any = {}): any {
+  if (!sourcesDirty || !local || !server) return server;
+  const out = { ...server };
+  for (const k of SOURCE_DRAFT_KEYS) if (!(body && k in body) && local[k] !== undefined) out[k] = local[k];
+  return out;
+}
 
 /**
  * One accordion row: a summary line when closed, its controls when open. A real <details> element —
