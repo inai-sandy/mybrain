@@ -1,10 +1,17 @@
 import { AgentScheduler } from './agent-scheduler.service';
 import { JobBusyError } from '../agent/run-lock.service';
 import { AgentService } from '../agent/agent.service';
+import { resetScheduleClock } from './schedule-clock';
 
 const prisma: any = { setting: { findUnique: async () => ({ value: 'Asia/Kolkata' }) } };
 
-function build(agents: any[], opts: { busyWith?: string | null } = {}) {
+/** A logger stub that keeps what the scheduler said (BEA-1605 tests read it). */
+function logStub() {
+  const said = { error: [] as string[], warn: [] as string[], log: [] as string[] };
+  return { said, log: { error: (m: string) => said.error.push(m), warn: (m: string) => said.warn.push(m), log: (m: string) => said.log.push(m), debug: () => undefined, verbose: () => undefined } };
+}
+
+function build(agents: any[], opts: { busyWith?: string | null; tz?: string } = {}) {
   const started: any[] = [];
   const marked: any[] = [];
   const steps: any[] = [];
@@ -24,7 +31,9 @@ function build(agents: any[], opts: { busyWith?: string | null } = {}) {
     },
     applyAgentSkills: async (_a: any, i: any) => i,
   };
-  return { sch: new AgentScheduler(agent, bridge, prisma), started, marked, steps };
+  // The default stub keeps `Asia/Kolkata`; a case that wants another value gets its own row.
+  const db = opts.tz === undefined ? prisma : { setting: { findUnique: async () => ({ value: opts.tz }) } };
+  return { sch: new AgentScheduler(agent, bridge, db), started, marked, steps };
 }
 const mk = (over: any = {}) => ({ id: 'a1', name: 'Brief', prompt: 'do it', collectionId: null, lastFiredKey: null, schedule: { every: 'day', at: '07:00' }, ...over });
 
@@ -135,5 +144,55 @@ describe('AgentScheduler (BEA-623)', () => {
     expect(started[0]).toMatchObject({ agentId: 'a-dbl', title: 'Daily Email Agent' });
     expect(marked[0].key).toContain(':22:00');
     expect(await sch.tick(new Date('2026-06-28T16:31:00Z'))).toBe(0); // 22:01 — same slot already fired
+  });
+});
+
+/**
+ * PROTECT THE CLOCK (BEA-1605). Before this, `tasks.tz` went straight into `Intl.DateTimeFormat`
+ * and the 60 s timer ran `tick().catch(() => undefined)`: a zone name Intl rejects threw on every
+ * tick and every scheduled agent stopped, silently, forever. `matches()`, the look-back, `markFired`
+ * and the lock skip are untouched — only where the zone comes from and what a throw does.
+ */
+describe('AgentScheduler — protect the clock (BEA-1605)', () => {
+  beforeEach(() => resetScheduleClock());
+  afterEach(() => jest.useRealTimers());
+
+  it('WHEN tasks.tz is "Asia/Kolkatta" (a typo), the tick still fires at the right IST minute and warns ONCE', async () => {
+    const { sch, started, marked } = build([mk()], { tz: 'Asia/Kolkatta' });
+    const { said, log } = logStub();
+    (sch as any).log = log;
+    expect(await sch.tick(new Date('2026-06-28T01:30:00Z'))).toBe(1); // 07:00 Asia/Kolkata — the fallback zone
+    expect(started[0]).toMatchObject({ agentId: 'a1' });
+    expect(marked[0].key).toBe('2026-06-28:07:00');
+    expect(said.warn).toHaveLength(1);
+    expect(said.warn[0]).toContain('Asia/Kolkatta'); // names the bad value
+    expect(said.error).toHaveLength(0); // a bad zone is a warning, not a failed tick
+    expect(await sch.tick(new Date('2026-06-28T01:31:00Z'))).toBe(0); // 07:01 — the slot is spent
+    expect(await sch.tick(new Date('2026-06-28T01:32:00Z'))).toBe(0);
+    expect(said.warn).toHaveLength(1); // said once, not every minute
+  });
+
+  it('WHEN a tick throws for another reason, the error is in the log and the NEXT tick still runs (the 60 s timer path)', async () => {
+    const { sch, started } = build([mk()]);
+    const { said, log } = logStub();
+    (sch as any).log = log;
+    const agent = (sch as any).agent;
+    const real = agent.listSchedulable;
+    let calls = 0;
+    agent.listSchedulable = async () => { calls++; if (calls === 1) throw new Error('database is locked'); return real(); };
+    jest.useFakeTimers({ now: new Date('2026-06-28T01:30:00Z') }); // 07:00 IST
+    try {
+      sch.onModuleInit();
+      await jest.advanceTimersByTimeAsync(60_000); // 07:01 — this tick throws
+      expect(said.error).toHaveLength(1);
+      expect(said.error[0]).toContain('database is locked'); // never swallowed silently
+      expect(started).toHaveLength(0);
+      await jest.advanceTimersByTimeAsync(60_000); // 07:02 — the next tick runs; the look-back still sees 07:00
+      expect(calls).toBe(2);
+      expect(started).toHaveLength(1);
+      expect(started[0]).toMatchObject({ agentId: 'a1' });
+    } finally {
+      sch.onModuleDestroy();
+    }
   });
 });
