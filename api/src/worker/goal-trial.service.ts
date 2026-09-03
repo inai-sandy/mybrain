@@ -8,7 +8,7 @@ import { TrialService } from './trial.service';
 import { OwnerAskService } from './owner-ask.service';
 import { saidKeepIt } from './brief-trial.service';
 import { LlmService } from '../llm/llm.service';
-import { readSchedule, schedulePrompt } from '../agent/goal';
+import { readSchedule, schedulePrompt, type GoalSchedule } from '../agent/goal';
 
 export const KEEP_IT = 'Keep it';
 export const SEND_BACK = 'Send it back';
@@ -247,7 +247,7 @@ export class GoalTrialService implements OnModuleInit {
    * which is honest. Codex wrote the goal, so Codex says what the timing in it means; this file
    * reading "every day at 22:00" out of a paragraph would be the interpreting he asked me to stop.
    */
-  private async scheduleFor(goalText: string): Promise<{ schedule: string | null; text: string }> {
+  private async scheduleFor(goalText: string): Promise<{ schedule: GoalSchedule | null; text: string }> {
     if (!goalText.trim()) return { schedule: null, text: '' };
     try {
       const reply = await this.llm?.completeHelper?.('agent-goal' as any, schedulePrompt(goalText), 300, 'agent-goal');

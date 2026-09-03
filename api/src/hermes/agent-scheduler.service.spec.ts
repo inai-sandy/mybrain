@@ -1,5 +1,6 @@
 import { AgentScheduler } from './agent-scheduler.service';
 import { JobBusyError } from '../agent/run-lock.service';
+import { AgentService } from '../agent/agent.service';
 
 const prisma: any = { setting: { findUnique: async () => ({ value: 'Asia/Kolkata' }) } };
 
@@ -109,5 +110,30 @@ describe('AgentScheduler (BEA-623)', () => {
     const { sch, started } = build([mk({ lastFiredKey: '2026-06-28:07:00', schedule: { every: 'day', at: '07:00' } })]);
     expect(await sch.tick(new Date('2026-06-28T01:31:00.100Z'))).toBe(0); // 07:01 IST; 07:00 already done
     expect(started.length).toBe(0);
+  });
+
+  /**
+   * A DOUBLE-ENCODED ROW STILL FIRES (BEA-1604). The "keep it" road once stored the schedule as a
+   * quoted JSON string (`"{\"every\":\"day\",\"at\":\"22:00\"}"`); parsed once it is a string,
+   * `matches()` saw no `every` and the agent never ran. The heal is in the ONE reader
+   * (`AgentService.readStoredSchedule`, through `listSchedulable`), so this case goes through the
+   * REAL AgentService over a prisma stub — `matches()` and the tick are untouched.
+   */
+  it('WHEN a row holds a double-encoded schedule, the real listSchedulable() heals it and the tick fires at its time', async () => {
+    const stored = JSON.stringify(JSON.stringify({ every: 'day', at: '22:00' })); // what the old road wrote
+    expect(stored.startsWith('"')).toBe(true);
+    const row = { id: 'a-dbl', name: 'Daily Email Agent', prompt: 'read his mail', collectionId: null, lastFiredKey: null, enabled: true, schedule: stored };
+    const marked: any[] = [];
+    // The real `markFired` writes `lastFiredKey` through prisma; the stub applies it to the row.
+    const realAgent = new AgentService({ agent: { findMany: async () => [row], update: async ({ where, data }: any) => { marked.push({ id: where.id, key: data.lastFiredKey }); Object.assign(row, data); return row; } } } as any);
+    const started: any[] = [];
+    const bridge: any = { startRun: async (i: any) => { started.push(i); return { id: 'run' }; }, applyAgentSkills: async (_a: any, i: any) => i };
+    const sch = new AgentScheduler(realAgent, bridge, prisma);
+    const seen = await realAgent.listSchedulable();
+    expect(seen[0].schedule).toEqual({ every: 'day', at: '22:00' }); // an object, not a string
+    expect(await sch.tick(new Date('2026-06-28T16:30:00Z'))).toBe(1); // = 22:00 Asia/Kolkata
+    expect(started[0]).toMatchObject({ agentId: 'a-dbl', title: 'Daily Email Agent' });
+    expect(marked[0].key).toContain(':22:00');
+    expect(await sch.tick(new Date('2026-06-28T16:31:00Z'))).toBe(0); // 22:01 — same slot already fired
   });
 });

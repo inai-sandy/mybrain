@@ -3,9 +3,27 @@
   "status": "running",
   "note": "Agent on/off + schedule batch. Owner's goal: finish without bugs and without disturbing agent creation or run code. Order: 1603 -> 1604 -> 1605 -> 1606. BEA-1607 is mockup-first and NOT in this batch.",
   "issues": [
-    { "id": "BEA-1603", "title": "Agent on/off: schedule means on, switch on the page, honest header, Keep it re-asked after first green run", "status": "pending" },
-    { "id": "BEA-1604", "title": "Keep it saves a double-encoded schedule — fix + real-save test", "status": "pending" },
-    { "id": "BEA-1605", "title": "Protect the clock: log swallowed tick errors, bad tz falls back to Asia/Kolkata", "status": "pending" },
-    { "id": "BEA-1606", "title": "Settings sheet: instant-save must not wipe an unsaved source edit", "status": "pending" }
+    {
+      "id": "BEA-1603",
+      "title": "Agent on/off: schedule means on, switch on the page, honest header, Keep it re-asked after first green run",
+      "status": "done",
+      "sha": "ec2dc9f",
+      "note": "schedule means on; done-hook re-asks Keep it; header switch + honest Off line; board words; migration switched the email agent on"
+    },
+    {
+      "id": "BEA-1604",
+      "title": "Keep it saves a double-encoded schedule \u2014 fix + real-save test",
+      "status": "in_progress"
+    },
+    {
+      "id": "BEA-1605",
+      "title": "Protect the clock: log swallowed tick errors, bad tz falls back to Asia/Kolkata",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1606",
+      "title": "Settings sheet: instant-save must not wipe an unsaved source edit",
+      "status": "pending"
+    }
   ]
 }

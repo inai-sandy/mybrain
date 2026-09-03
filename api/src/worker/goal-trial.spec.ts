@@ -1,4 +1,5 @@
 import { GoalTrialService, titleOf, KEEP_IT, SEND_BACK } from './goal-trial.service';
+import { AgentService } from '../agent/agent.service';
 
 /**
  * APPROVE → BUILD → RUN ONCE → JUDGE IT AGAINST THE GOAL (BEA-1465).
@@ -284,14 +285,65 @@ describe('what his answer does', () => {
     return { svc, enabled, sentBack, run: () => svc.onAnswer('run-1', reply, 'wp1') };
   }
 
+  /**
+   * THE KEEP CASE RUNS THE REAL `AgentService.updateAgent()` (BEA-1604).
+   *
+   * The old version of this test stubbed `updateAgent` and asserted the raw patch — so it stayed
+   * green while the real thing stored `"{\"every\":\"day\",\"at\":\"22:00\"}"` (a quoted string:
+   * `readSchedule` stringified, then `updateAgent` stringified again). The clock could never
+   * match that row and the Settings sheet crashed on it. Here the prisma stub records exactly
+   * what reaches the `schedule` COLUMN, so a second encoding fails the test.
+   */
+  function answeredReal(reply: string) {
+    const w = world();
+    const sentBack: string[] = [];
+    const writes: any[] = [];
+    const svc: any = w.svc;
+    // The job row as it sits before "keep it": born off, no system pause, a goal area.
+    const row: any = { id: 'job-1', name: 'Daily Email Agent', areaId: 'ar1', enabled: false, pausedReason: null, tools: '[]', schedule: null, scheduleText: null, lastFiredKey: null };
+    const prismaStub: any = {
+      agentRun: { findUnique: async () => ({ id: 'run-1', agentId: 'job-1' }) },
+      agent: {
+        findUnique: async () => row,
+        update: async ({ data }: any) => { writes.push(data); Object.assign(row, data); return row; },
+      },
+      waitpoint: { findUnique: async () => ({ id: 'wp1', options: JSON.stringify([KEEP_IT, SEND_BACK]) }) },
+    };
+    svc.prisma = prismaStub;
+    const realAgent = new AgentService(prismaStub);
+    (realAgent as any).appendStep = async () => undefined;
+    (realAgent as any).finishRun = async () => undefined;
+    svc.agent = realAgent;
+    svc.goals = {
+      sendBack: async (_a: string, note: string) => { sentBack.push(note); },
+      approved: async () => ({ text: 'Runs every day at 22:00 and reads his Gmail.' }),
+    };
+    svc.llm = { completeHelper: async () => '{"every":"day","at":"22:00","text":"every day at 22:00"}' };
+    return { svc, writes, row, realAgent, sentBack, run: () => svc.onAnswer('run-1', reply, 'wp1') };
+  }
+
   it('switches the agent ON — the first moment it may touch anything for real', async () => {
-    const a = answered('keep it');
+    const a = answeredReal('keep it');
     await a.run();
     // Live AND scheduled. Keeping an agent that never fires is the gap this closed.
-    expect(a.enabled).toHaveLength(1);
-    expect(a.enabled[0]).toMatchObject({ id: 'job-1', enabled: true, scheduleText: 'every day at 22:00' });
-    expect(JSON.parse(a.enabled[0].schedule)).toEqual({ every: 'day', at: '22:00' });
+    expect(a.writes).toHaveLength(1);
+    expect(a.writes[0]).toMatchObject({ enabled: true, scheduleText: 'every day at 22:00' });
     expect(a.sentBack).toEqual([]);
+  });
+
+  it('WHEN "keep it" is answered on a goal naming every day at 22:00, the stored schedule column starts with { and reads back as every:"day" (BEA-1604)', async () => {
+    const a = answeredReal('keep it');
+    await a.run();
+    const stored = a.writes[0].schedule;
+    expect(typeof stored).toBe('string');            // the column is text…
+    expect(stored.startsWith('{')).toBe(true);        // …holding an object, not a quoted string
+    expect(JSON.parse(stored)).toEqual({ every: 'day', at: '22:00' });
+    expect(typeof JSON.parse(stored)).toBe('object'); // parsing ONCE gives the object the clock reads
+    // What the API and the scheduler now see for this row.
+    const shaped: any = await a.realAgent.getAgent('job-1');
+    expect(shaped.schedule).toEqual({ every: 'day', at: '22:00' });
+    expect(shaped.schedule.every).toBe('day');
+    expect(shaped.enabled).toBe(true);
   });
 
   it('treats anything else as a correction to the GOAL, in his words', async () => {
