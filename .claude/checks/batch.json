@@ -1,33 +1,8 @@
 {
-  "startedAt": "2026-09-03T04:05:00Z",
+  "startedAt": "2026-09-03T18:10:00Z",
   "status": "running",
-  "note": "Agent on/off + schedule batch. Owner's goal: finish without bugs and without disturbing agent creation or run code. Order: 1603 -> 1604 -> 1605 -> 1606. BEA-1607 is mockup-first and NOT in this batch.",
+  "note": "Tooling: ship.sh real rollback + loud gate login + preflight rollback check (BEA-1608). Owner's goal: no bugs, no disturbance to agent creation/run code.",
   "issues": [
-    {
-      "id": "BEA-1603",
-      "title": "Agent on/off: schedule means on, switch on the page, honest header, Keep it re-asked after first green run",
-      "status": "done",
-      "sha": "ec2dc9f",
-      "note": "schedule means on; done-hook re-asks Keep it; header switch + honest Off line; board words; migration switched the email agent on"
-    },
-    {
-      "id": "BEA-1604",
-      "title": "Keep it saves a double-encoded schedule \u2014 fix + real-save test",
-      "status": "done",
-      "sha": "e830c1a",
-      "note": "readSchedule returns an object; one stored-schedule reader heals double-encoded rows; picker never throws"
-    },
-    {
-      "id": "BEA-1605",
-      "title": "Protect the clock: log swallowed tick errors, bad tz falls back to Asia/Kolkata",
-      "status": "done",
-      "sha": "75ac859",
-      "note": "one schedule-clock helper for both schedulers: bad tz falls back to IST out loud, thrown tick logged, next tick runs"
-    },
-    {
-      "id": "BEA-1606",
-      "title": "Settings sheet: instant-save must not wipe an unsaved source edit",
-      "status": "in_progress"
-    }
+    { "id": "BEA-1608", "title": "ship.sh rollback is real; uicheck fails loudly on login; preflight proves rollback", "status": "in_progress" }
   ]
 }

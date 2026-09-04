@@ -102,6 +102,22 @@ if grep -qE '(^|[^a-z])docker ' .claude/checks/deploy.sh 2>/dev/null; then
     need "Password-free 'sudo docker' (deploy.sh runs it and would hang overnight waiting for a password)."
   fi
 fi
+# Can a failed UI gate roll back? ship.sh runs `deploy.sh --rollback` after a gate failure, which needs
+# the previous image (mybrain-app:prev) to exist. A read-only dry run says whether it does. A missing
+# prev is worth knowing, never a blocker — the first deploy has none. (BEA-1608)
+if [ -x .claude/checks/deploy.sh ] && grep -q -- '--rollback' .claude/checks/deploy.sh; then
+  rb_rc=0
+  rb_out="$(.claude/checks/deploy.sh --rollback --dry-run 2>&1)" || rb_rc=$?
+  if [ "$rb_rc" -eq 0 ]; then
+    echo "-- rollback ready (prev image present): ${rb_out}"
+  elif [ "$rb_rc" -eq 2 ]; then
+    warn "no previous image yet — a failed gate could not roll back (the first deploy will create one)."
+  else
+    warn "could not check the rollback path (deploy.sh --rollback --dry-run exited ${rb_rc}): ${rb_out}"
+  fi
+elif [ -x .claude/checks/deploy.sh ]; then
+  warn "deploy.sh has no --rollback — a failed UI gate would leave the broken build live."
+fi
 avail="$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -dc '0-9')"
 if [ -n "$avail" ]; then
   [ "$avail" -lt 5 ]  && block "Only ${avail}GB disk free — a docker build will fail. Clear space first (/clean-server)."

@@ -147,9 +147,22 @@ STATE=".claude/checks/ui-state.json"
 # Mint a fresh session before looking (BEA-1510). The saved cookie lasts a few hours, so it expires
 # during any long working day — and an expired one makes this gate photograph a login page and fail
 # the ship. That happened three times in one day, each fixed by hand. One API call removes the whole
-# class of failure. If it cannot log in (no secrets, app down) the old state is left alone and the
-# login-wall check below still catches it honestly.
-[ -x .claude/checks/refresh-ui-session.sh ] && .claude/checks/refresh-ui-session.sh >/dev/null 2>&1
+# class of failure.
+# If it cannot log in (no secrets, app down, wrong password) this gate FAILS HERE, out loud, with the
+# refresh's own reason — before the browser opens and before any screenshot (BEA-1608). It used to be
+# silenced, so a failed refresh left the gate photographing a login page with no clue why.
+if [ -x .claude/checks/refresh-ui-session.sh ]; then
+  refresh_rc=0
+  refresh_out="$(.claude/checks/refresh-ui-session.sh 2>&1)" || refresh_rc=$?
+  if [ "$refresh_rc" -ne 0 ]; then
+    refresh_msg="$(printf '%s' "$refresh_out" | tail -1)"
+    [ -z "$refresh_msg" ] && refresh_msg="refresh-ui-session.sh exited ${refresh_rc} and said nothing"
+    echo "BROKEN (this issue is NOT done):"
+    echo "  x could not log in for the visual gate — nothing was looked at. Run .claude/checks/refresh-ui-session.sh to see why."
+    echo "== UI CHECK FAILED == (could not log in: ${refresh_msg})"
+    exit 1
+  fi
+fi
 [ -f "$STATE" ] && agent-browser state load "$STATE" >/dev/null 2>&1 || true
 
 echo "== UI CHECK: ${BASE} =="
