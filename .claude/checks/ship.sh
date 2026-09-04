@@ -120,11 +120,25 @@ if [ -x ".claude/checks/uicheck.sh" ] && [ "${UI_ROUTES:-}" != "-" ]; then
   else
     UI_STATUS="failed"
     echo "!! The UI gate failed — this issue is NOT done." >&2
-    if [ -x ".claude/checks/deploy.sh" ] && .claude/checks/deploy.sh --rollback 2>/dev/null; then
-      echo "!! Rolled back to the previous build, so the live site is not left looking broken." >&2
+    # Roll the failed build off the live site. The rollback's own output is the evidence, so it is
+    # NOT silenced, and "Rolled back" is only said when deploy.sh --rollback really exited 0.
+    # (BEA-1608: before this, deploy.sh ignored --rollback, rebuilt the same failed build, and this
+    # block still printed "Rolled back".)
+    # Only a deploy.sh that KNOWS these flags may be asked — an older one would treat any argument
+    # as a normal deploy and rebuild the failed build.
+    deploy_knows() { [ -x .claude/checks/deploy.sh ] && grep -q -- "$1" .claude/checks/deploy.sh; }
+    live_image() { if deploy_knows '--live-image'; then .claude/checks/deploy.sh --live-image || echo unknown; else echo unknown; fi; }
+    failed_image="$(live_image)"
+    if deploy_knows '--rollback'; then
+      echo "-> roll back the failed build (was image ${failed_image})" >&2
+      if .claude/checks/deploy.sh --rollback; then
+        echo "!! Rolled back — live is the previous build ($(live_image))." >&2
+      else
+        echo "!! Could NOT roll back — the site is live with THIS build ($(live_image)). Fix it or roll back by hand." >&2
+      fi
     else
       echo "!! NOTE: could not roll back automatically (deploy.sh has no --rollback)." >&2
-      echo "!! The site is live with this build. Fix it or roll back by hand." >&2
+      echo "!! The site is live with this build (${failed_image}). Fix it or roll back by hand." >&2
     fi
     echo "!! Screenshots: .claude/checks/ui-shots/${ISSUE}/" >&2
     exit 1

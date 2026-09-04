@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # deploy.sh — exact steps to put My Brain live on the VPS. The ONLY deploy path (called by ship.sh).
+#
+#   deploy.sh                       build the image from this working folder and put it live
+#   deploy.sh --rollback            NO build: put the previous image (mybrain-app:prev) back live
+#   deploy.sh --rollback --dry-run  only say whether a previous image exists (exit 0 = yes, 2 = no);
+#   deploy.sh --check-rollback        touches nothing — what preflight.sh asks
+#   deploy.sh --live-image          print the short id of the image the live container runs
+#
+# Before BEA-1608 the script parsed no arguments at all, so `deploy.sh --rollback` did a normal
+# deploy — it rebuilt the very build the UI gate had just failed and ship.sh printed "Rolled back".
 set -euo pipefail
 cd "${CLAUDE_PROJECT_DIR:-/home/sandy/mybrain}"
 
@@ -7,8 +16,22 @@ IMAGE="mybrain-app:latest"
 PREV_IMAGE="mybrain-app:prev"
 NAME="mybrain-app"
 PORT="8080"
-CADDYFILE="/opt/beakn-home-visit-app/infra/caddy/Caddyfile"
-HEALTH_URL="https://mybrain.1site.ai/api/health"
+CADDYFILE="${CADDYFILE:-/opt/beakn-home-visit-app/infra/caddy/Caddyfile}"
+HEALTH_URL="${HEALTH_URL:-https://mybrain.1site.ai/api/health}"
+
+MODE="${1:-}"
+DRY_RUN=0
+case "$MODE" in
+  "") ;;
+  --rollback)
+    [ "${2:-}" = "--dry-run" ] && DRY_RUN=1 ;;
+  --check-rollback)
+    MODE="--rollback"; DRY_RUN=1 ;;
+  --live-image) ;;
+  *)
+    echo "!! deploy.sh: unknown option '$MODE'. Use no argument (deploy), --rollback, --rollback --dry-run, --check-rollback or --live-image." >&2
+    exit 2 ;;
+esac
 
 # Load server-side secrets (admin login, session secret, service keys) — never committed.
 if [ -f .claude/checks/secrets.env ]; then set -a; . .claude/checks/secrets.env; set +a; fi
@@ -84,6 +107,59 @@ wait_healthy() {
   return 1
 }
 
+# Short image id (12 hex chars, the form `docker images` shows) of an image, or "unknown".
+image_id() {
+  local id
+  id="$(sudo docker image inspect --format '{{.Id}}' "$1" 2>/dev/null || true)"
+  id="${id#sha256:}"
+  [ -n "$id" ] && printf '%s' "${id:0:12}" || printf 'unknown'
+}
+
+# Short id of the image the live container is running right now, or "unknown" (no container).
+live_image_id() {
+  local id
+  id="$(sudo docker inspect --format '{{.Image}}' "$NAME" 2>/dev/null || true)"
+  id="${id#sha256:}"
+  [ -n "$id" ] && printf '%s' "${id:0:12}" || printf 'unknown'
+}
+
+if [ "$MODE" = "--live-image" ]; then
+  live_image_id; printf '\n'
+  exit 0
+fi
+
+# --- ROLLBACK: put the previous image back live, without building anything (BEA-1608) --------
+# Order matters: this runs BEFORE the "keep the current image as prev" step below, or a rollback
+# would first overwrite the good previous image with the build it is trying to get rid of.
+if [ "$MODE" = "--rollback" ]; then
+  if ! sudo docker image inspect "$PREV_IMAGE" >/dev/null 2>&1; then
+    echo "!! no previous image to roll back to — the site is live with the current build ($(live_image_id))." >&2
+    exit 2
+  fi
+  prev_id="$(image_id "$PREV_IMAGE")"
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "previous image $PREV_IMAGE is present ($prev_id); live now: $(live_image_id); nothing was touched"
+    exit 0
+  fi
+  echo "-> roll back: $PREV_IMAGE ($prev_id) becomes $IMAGE — no build; live now: $(live_image_id)"
+  sudo docker tag "$PREV_IMAGE" "$IMAGE"
+
+  echo "-> (re)create container on mcp-network"
+  run_container
+
+  echo "-> ensure Caddy route"
+  ensure_caddy
+
+  echo "-> confirm the rolled-back container is healthy"
+  if wait_healthy; then
+    echo "rollback: live is the previous build (image $(live_image_id))"
+    exit 0
+  fi
+  echo "!! the rolled-back container did NOT become healthy — the site is down, manual attention needed (live image: $(live_image_id))." >&2
+  exit 1
+fi
+
+# --- NORMAL DEPLOY (unchanged) ---------------------------------------------------------------
 # Keep the currently-live image as a rollback point BEFORE we overwrite the tag. No-op on first deploy.
 if sudo docker image inspect "$IMAGE" >/dev/null 2>&1; then
   sudo docker tag "$IMAGE" "$PREV_IMAGE"
