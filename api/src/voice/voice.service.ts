@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorService, ConnectorName } from '../connectors/connector.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { CURATED_MODELS, isCuratedModel } from '../llm/curated-models';
 
 export type Engine = 'openai' | 'elevenlabs' | 'deepgram' | 'gemini';
 
@@ -53,6 +54,23 @@ export class VoiceService {
   async setCleanup(on: boolean) {
     await this.setSetting('voice.cleanup', on ? '1' : '0');
     return { cleanup: on };
+  }
+  /**
+   * The model that tidies dictation (BEA-1624). Read through the named-helper road — the
+   * `voice-cleanup` entry in `LlmService.HELPERS`, whose row is `voice.cleanup.model` — so this
+   * service never carries a model id of its own, and a blank or unreadable row falls back to the
+   * helper's default rather than to anything cheaper.
+   */
+  async cleanupModel(): Promise<string> {
+    const cfg = await this.llm.helperModel?.('voice-cleanup').catch(() => null);
+    return cfg?.model || LlmService.HELPERS['voice-cleanup']!.model;
+  }
+  /** Only a model from the curated list may be saved; '' = back to the default. */
+  async setCleanupModel(model: string): Promise<{ model: string }> {
+    const m = (model || '').trim();
+    if (m && !isCuratedModel(m)) throw new Error(`Unknown model: ${m}`);
+    await this.llm.setHelperModel('voice-cleanup', m);
+    return { model: await this.cleanupModel() };
   }
   async language(): Promise<string> {
     return (await this.getSetting('voice.language')) || '';
@@ -143,7 +161,15 @@ export class VoiceService {
   }
 
   async config() {
-    return { engine: await this.getEngine(), engines: await this.engines(), cleanup: await this.cleanupOn(), language: await this.language(), vocabulary: await this.voiceVocabulary() };
+    return {
+      engine: await this.getEngine(),
+      engines: await this.engines(),
+      cleanup: await this.cleanupOn(),
+      cleanupModel: await this.cleanupModel(),
+      cleanupModels: [...CURATED_MODELS],
+      language: await this.language(),
+      vocabulary: await this.voiceVocabulary(),
+    };
   }
 
   // ---- transcription ----
@@ -401,7 +427,9 @@ export class VoiceService {
     const tmpl = await this.prompts.get('voice.cleanup');
     const hint = await this.promptHint();
     const ctx = hint ? `\n\nCONTEXT — if a name or term was clearly misheard, correct it to one of these (do NOT add anything new):\n${hint}` : '';
-    const out = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, `${tmpl}${ctx}\n\nTRANSCRIPT:\n${raw}`, Math.min(2000, Math.round(raw.length / 2) + 300), 'voice-cleanup'))?.trim();
+    // The model is the owner's setting, read through the named-helper road (BEA-1624) — never an id
+    // written here. The helper is interactive: one call, and a blank keeps the raw transcript.
+    const out = (await this.llm.completeHelper('voice-cleanup', `${tmpl}${ctx}\n\nTRANSCRIPT:\n${raw}`, Math.min(2000, Math.round(raw.length / 2) + 300), 'voice-cleanup'))?.trim();
     if (!out) return raw;
     // Guard against the model "replying" instead of cleaning (e.g. on garbled/non-speech input).
     const looksLikeMeta = /\b(i don'?t see|please provide|no (transcript|text)|i can'?t|as an ai|it (looks|seems) like)\b/i.test(out) && out.length > raw.length + 40;

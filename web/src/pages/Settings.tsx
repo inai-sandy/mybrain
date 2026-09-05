@@ -92,7 +92,7 @@ const CATS: Cat[] = [
     { label: 'Meeting summary model', keywords: 'meeting summary model' },
   ] },
   { id: 'voice', label: 'Voice', icon: Mic, desc: 'Dictation & speech', group: 'AI & voice', search: [
-    { label: 'Voice input engine', keywords: 'voice input stt engine dictation openai deepgram transcribe' },
+    { label: 'Voice input engine', keywords: 'voice input stt engine dictation openai deepgram transcribe cleanup model terra gpt' },
     { label: 'Dictation clean-up', keywords: 'voice cleanup tidy dictation ai' },
     { label: 'Spoken language', keywords: 'voice language hint spoken' },
     { label: 'Voice vocabulary', keywords: 'vocabulary custom words names get right' },
@@ -1809,6 +1809,7 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents, alsoBase }: { 
     { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5 (best, recommended)' },
     { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
     { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 (fast)' },
+    { id: 'openai/gpt-5.6-terra', name: 'GPT-5.6 Terra (fast, 1M context)' },
     { id: 'openai/gpt-5', name: 'GPT-5' },
     { id: 'openai/gpt-4o', name: 'GPT-4o' },
   ];
@@ -2111,6 +2112,7 @@ const MODEL_LABELS: Record<string, string> = {
   'anthropic/claude-sonnet-5': 'Claude Sonnet 5 — best answers',
   'anthropic/claude-sonnet-4.6': 'Claude Sonnet 4.6',
   'anthropic/claude-haiku-4.5': 'Claude Haiku 4.5 — fast & cheap',
+  'openai/gpt-5.6-terra': 'GPT-5.6 Terra — fast, 1M context',
   'openai/gpt-5': 'GPT-5',
   'openai/gpt-4o': 'GPT-4o',
 };
@@ -2278,7 +2280,7 @@ function EmoSettingsSection() {
   );
 }
 
-type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; language: string; vocabulary: string };
+type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
 function VoiceModelCard() {
   const [cfg, setCfg] = useState<VoiceCfg | null>(null);
   const toast = useToast();
@@ -2296,6 +2298,13 @@ function VoiceModelCard() {
   async function setCleanup(cleanup: boolean) {
     setCfg((c) => (c ? { ...c, cleanup } : c));
     await fetch('/api/voice/cleanup', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cleanup }) });
+  }
+  // The cleanup model is a setting, not a name in the code (BEA-1624). The LIST comes from the server.
+  async function setCleanupModel(model: string) {
+    setCfg((c) => (c ? { ...c, cleanupModel: model } : c));
+    const r = await fetch('/api/voice/cleanup-model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    if (r.ok) toast('success', 'Cleanup model saved');
+    else { toast('error', (await r.json().catch(() => ({}))).message || 'Could not save'); load(); }
   }
   async function saveLang(language: string) {
     setCfg((c) => (c ? { ...c, language } : c));
@@ -2329,6 +2338,20 @@ function VoiceModelCard() {
         </div>
         <input type="checkbox" checked={cfg.cleanup} onChange={(e) => setCleanup(e.target.checked)} className="h-4 w-4 accent-emerald-600 shrink-0" />
       </label>
+      {cfg.cleanupModels?.length ? (
+        <label className={'text-sm text-zinc-600 dark:text-zinc-400 block mt-3' + (cfg.cleanup ? '' : ' opacity-60')}>
+          Cleanup model <span className="text-zinc-400">(the AI that tidies your dictation)</span>
+          <select
+            data-testid="voice-cleanup-model"
+            value={cfg.cleanupModel || ''}
+            disabled={!cfg.cleanup}
+            onChange={(e) => setCleanupModel(e.target.value)}
+            className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          >
+            {cfg.cleanupModels.map((m) => <option key={m} value={m}>{modelLabel(m)}</option>)}
+          </select>
+        </label>
+      ) : null}
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">
         Spoken language <span className="text-zinc-400">(optional — helps accuracy)</span>
         <input

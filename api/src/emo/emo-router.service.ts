@@ -58,13 +58,6 @@ export class EmoRouterService {
   }
 
   /** Route a transcript into cards. `audioPath`/`source` are threaded onto every card (the receipt). */
-    /** Fast brain for routing — Haiku by default; overridable via `emo.router.model`. */
-  private async routerModel() {
-    const row = await this.prisma.setting.findUnique({ where: { key: 'emo.router.model' } }).catch(() => null);
-    if (row) { try { const v = JSON.parse(row.value); if (v?.provider && v?.model) return v; } catch { /* default */ } }
-    return { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
-  }
-
   async route(transcript: string, opts: { audioPath?: string | null; source?: string; lane?: EmoLane } = {}): Promise<{ cards: any[] }> {
     const text = (transcript || '').trim();
     if (!text) return { cards: [] };
@@ -76,7 +69,10 @@ export class EmoRouterService {
     } else {
       // Routing is a tiny classification job — a heavyweight default model made 5s captures take 15s+ (BEA-929).
       const routerTmpl = await this.prompts.get('emo.router');
-      const raw = await this.llm.completeWith(await this.routerModel(), `${routerTmpl}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
+      // The router's model is the `emo-router` helper (BEA-1624): its row is `emo.router.model` —
+      // the one the EMO settings screen writes — and its default lives in LlmService.HELPERS, so
+      // this service never carries a model id of its own.
+      const raw = await this.llm.completeHelper('emo-router', `${routerTmpl}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
       segments = this.parseSegments(raw, text);
       // Nothing is lost: if the router couldn't make sense of it, keep the whole thing as a note.
       if (!segments.length) {

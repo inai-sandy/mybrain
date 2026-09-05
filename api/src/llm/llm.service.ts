@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from './token-budget.service';
+import { TERRA_MODEL } from './curated-models';
 
 /**
  * 'engine' is not a provider you can call — it is the marker meaning "use whatever engine is
@@ -202,7 +203,25 @@ export class LlmService {
     'ui-spec',
     'sync-words', // the copyable prompt, re-written under his eyes after a canvas edit
     'suggest-evals', // a button in the builder UI
+    'voice-cleanup', // dictation tidy-up — the owner is watching the text land (BEA-1624)
+    'emo-router', // an EMO device turn — a blank files a note card, as it always did (BEA-1624)
   ]);
+
+  /**
+   * Helpers whose Setting row is an OWNER-FACING key, not `helper.<key>.llm` (BEA-1624).
+   *
+   * The EMO screen has written `emo.router.model` since BEA-1229, and the Voice screen writes
+   * `voice.cleanup.model`. Both `helperModel()` and `setHelperModel()` read this map, so the EMO
+   * screen, the Voice screen and `PUT /api/llm-config/helper/<key>` all move the SAME row — one
+   * reader, never a second copy of the default in the service that calls it.
+   */
+  static readonly HELPER_SETTING_KEYS: Readonly<Record<string, string>> = {
+    'voice-cleanup': 'voice.cleanup.model',
+    'emo-router': 'emo.router.model',
+  };
+  static helperSettingKey(key: string): string {
+    return LlmService.HELPER_SETTING_KEYS[key] || `helper.${key}.llm`;
+  }
 
   static readonly HELPERS: Record<string, LlmConfig | null> = {
     'chat-edit': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }, // BEA-1094
@@ -313,6 +332,13 @@ export class LlmService {
     // Small extraction jobs: a few example inputs, a few durable facts. Haiku is plenty.
     'suggest-evals': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     'agent-learn': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // ---- The owner's own choice (BEA-1624) ------------------------------------------------------
+    // Dictation cleanup and the EMO router both ran on a Haiku written inline in their services —
+    // no setting, no picker. "Why are we using Claude Haiku? Use gpt-5.6-terra." Both are settings
+    // now (rows named in HELPER_SETTING_KEYS), default terra, and a blank or unreadable row comes
+    // back HERE — never to a cheaper model.
+    'voice-cleanup': { provider: 'openrouter', model: TERRA_MODEL },
+    'emo-router': { provider: 'openrouter', model: TERRA_MODEL },
   };
 
   /**
@@ -340,7 +366,7 @@ export class LlmService {
 
   async helperModel(key: string): Promise<LlmConfig | null> {
     if (!(key in LlmService.HELPERS)) return null;
-    const row = await this.prisma.setting.findUnique({ where: { key: `helper.${key}.llm` } }).catch(() => null);
+    const row = await this.prisma.setting.findUnique({ where: { key: LlmService.helperSettingKey(key) } }).catch(() => null);
     if (row) { try { const v = JSON.parse((row as any).value); if (v?.provider && v?.model) return this.resolveEngine(v); } catch { /* fall through */ } }
     return this.resolveEngine(LlmService.HELPERS[key]);
   }
@@ -354,9 +380,10 @@ export class LlmService {
   async setHelperModel(key: string, model: string): Promise<LlmConfig | null> {
     if (!(key in LlmService.HELPERS)) throw new Error('Unknown helper');
     const cfg = model ? this.agentConfig(undefined, model) : null;
+    const settingKey = LlmService.helperSettingKey(key);
     await this.prisma.setting.upsert({
-      where: { key: `helper.${key}.llm` },
-      create: { key: `helper.${key}.llm`, value: cfg ? JSON.stringify(cfg) : '' },
+      where: { key: settingKey },
+      create: { key: settingKey, value: cfg ? JSON.stringify(cfg) : '' },
       update: { value: cfg ? JSON.stringify(cfg) : '' },
     });
     return cfg;
