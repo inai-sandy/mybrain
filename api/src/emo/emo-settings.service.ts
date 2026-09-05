@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { LlmService } from '../llm/llm.service';
+import { CURATED_MODELS } from '../llm/curated-models';
 
 /** Curated, known-good model ids (openrouter). Brain = smart; Talk = fast. */
 // The ONE allow-list the web builds its selects from — anything offered here MUST save. (BEA-1233)
-export const EMO_MODELS = ['anthropic/claude-sonnet-5', 'anthropic/claude-sonnet-4.6', 'anthropic/claude-haiku-4.5', 'openai/gpt-5', 'openai/gpt-4o'];
+// Shared with the dictation-cleanup picker since BEA-1624 (`llm/curated-models.ts`).
+export const EMO_MODELS: string[] = [...CURATED_MODELS];
 export const EMO_VOICES = ['nova', 'alloy', 'echo', 'shimmer', 'onyx', 'fable', 'coral', 'sage'];
 export const STT_ENGINES = ['openai', 'deepgram'];
 
@@ -47,7 +50,8 @@ export class EmoSettingsService {
       sttEngine: (await this.g('voice.engine')) || 'openai',
       brainModel: this.modelOf(await this.g('explore.llm'), 'anthropic/claude-sonnet-4.6'),
       talkModel: this.modelOf(await this.g('emo.talk.model'), 'anthropic/claude-haiku-4.5'),
-      routerModel: this.modelOf(await this.g('emo.router.model'), 'anthropic/claude-haiku-4.5'),
+      // The router's default is the helper's own (BEA-1624) — the screen and the call cannot drift.
+      routerModel: this.modelOf(await this.g('emo.router.model'), LlmService.HELPERS['emo-router']!.model),
       searchDefault: ['on', 'off', 'auto'].includes(searchDefault) ? searchDefault : 'auto',
       vocabulary: (await this.g('voice.vocabulary')) || '',
       deviceVolume: Math.min(100, Math.max(0, Number(await this.g('emo.device.volume')) || 60)),

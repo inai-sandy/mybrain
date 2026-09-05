@@ -15,7 +15,19 @@ function make(opts: { keys?: Record<string, any>; settings?: Record<string, stri
   };
   const keys = opts.keys ?? { openai: { apiKey: 'oa' } };
   const connectors: any = { get: async (n: string) => keys[n] ?? null };
-  const llm: any = { completeWith: jest.fn(async () => opts.clean ?? null) };
+  // Cleanup runs on the named helper 'voice-cleanup' (BEA-1624); the harness answers the model the
+  // way LlmService would — default terra, or whatever `voice.cleanup.model` holds.
+  const llm: any = {
+    completeHelper: jest.fn(async () => opts.clean ?? null),
+    helperModel: jest.fn(async (key: string) => {
+      if (key !== 'voice-cleanup') return null;
+      try { const v = JSON.parse(settings['voice.cleanup.model'] || ''); if (v?.provider && v?.model) return v; } catch { /* default */ }
+      return { provider: 'openrouter', model: 'openai/gpt-5.6-terra' };
+    }),
+    setHelperModel: jest.fn(async (_key: string, model: string) => {
+      settings['voice.cleanup.model'] = model ? JSON.stringify({ provider: 'openrouter', model }) : '';
+    }),
+  };
   const prompts: any = { get: async () => '[cleanup instruction]' };
   const calls: string[] = [];
   (global as any).fetch = jest.fn(async (url: string) => {
@@ -33,14 +45,50 @@ describe('VoiceService', () => {
     const { svc, llm } = make({ clean: 'Hello world.' });
     const text = await svc.transcribe(Buffer.from('audio'), 'a.webm', 'audio/webm');
     expect(text).toBe('Hello world.');
-    expect(llm.completeWith).toHaveBeenCalled(); // cleanup ran
+    expect(llm.completeHelper).toHaveBeenCalled(); // cleanup ran
+    // …on the NAMED helper, never on a model id written in this service (BEA-1624).
+    expect(llm.completeHelper.mock.calls[0][0]).toBe('voice-cleanup');
+    expect(llm.completeHelper.mock.calls[0][3]).toBe('voice-cleanup'); // the usage-log label
   });
 
   it('returns the raw transcript when cleanup is off', async () => {
     const { svc, llm } = make({ settings: { 'voice.cleanup': '0' } });
     const text = await svc.transcribe(Buffer.from('audio'), 'a.webm');
     expect(text).toBe('um hello world');
-    expect(llm.completeWith).not.toHaveBeenCalled();
+    expect(llm.completeHelper).not.toHaveBeenCalled();
+  });
+
+  describe('the cleanup model is a setting (BEA-1624)', () => {
+    it('defaults to gpt-5.6-terra and offers the curated list', async () => {
+      const cfg: any = await make().svc.config();
+      expect(cfg.cleanupModel).toBe('openai/gpt-5.6-terra');
+      expect(cfg.cleanupModels).toContain('openai/gpt-5.6-terra');
+      expect(cfg.cleanupModels).toContain('anthropic/claude-sonnet-5');
+    });
+
+    it('saves a curated model through the helper road and reads it back', async () => {
+      const { svc, llm, settings } = make();
+      expect(await svc.setCleanupModel('anthropic/claude-sonnet-5')).toEqual({ model: 'anthropic/claude-sonnet-5' });
+      expect(llm.setHelperModel).toHaveBeenCalledWith('voice-cleanup', 'anthropic/claude-sonnet-5');
+      expect(JSON.parse(settings['voice.cleanup.model']).model).toBe('anthropic/claude-sonnet-5');
+      expect((await svc.config() as any).cleanupModel).toBe('anthropic/claude-sonnet-5');
+    });
+
+    it('refuses a model outside the curated list, and "" goes back to the default', async () => {
+      const { svc, llm } = make();
+      await expect(svc.setCleanupModel('vendor/made-up-model')).rejects.toThrow(/Unknown model/);
+      expect(llm.setHelperModel).not.toHaveBeenCalled();
+      expect(await svc.setCleanupModel('')).toEqual({ model: 'openai/gpt-5.6-terra' });
+    });
+
+    it('a blank or unreadable row falls back to the default — never to a cheaper model', async () => {
+      for (const junk of ['', 'haiku', '{"provider":"openrouter"}', 'not json']) {
+        const { svc } = make({ settings: { 'voice.cleanup.model': junk } });
+        const m = (await svc.config() as any).cleanupModel;
+        expect(m).toBe('openai/gpt-5.6-terra');
+        expect(m).not.toMatch(/haiku/);
+      }
+    });
   });
 
   it('falls back to OpenAI when the chosen engine fails', async () => {

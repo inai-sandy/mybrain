@@ -9,6 +9,7 @@ const PRICES: { match: RegExp; price: Price }[] = [
   { match: /claude.*sonnet/i, price: { in: 3, out: 15 } },
   { match: /gpt-4o-mini|gpt-4\.1-mini|gpt-5[.\-]?\w*mini|o4-mini|o3-mini/i, price: { in: 0.15, out: 0.6 } },
   { match: /o1|o3(?!-mini)/i, price: { in: 15, out: 60 } },
+  { match: /gpt-5\.6-terra/i, price: { in: 2, out: 12 } }, // verified on OpenRouter 2026-09-05 (BEA-1624)
   { match: /gpt-5|gpt-4\.1|gpt-4o|codex/i, price: { in: 2.5, out: 10 } },
   { match: /gemini.*flash/i, price: { in: 0.15, out: 0.6 } },
   { match: /gemini.*pro/i, price: { in: 1.25, out: 5 } },

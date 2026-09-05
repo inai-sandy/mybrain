@@ -45,6 +45,16 @@ export class VoiceController {
     return this.voice.setCleanup(body?.cleanup !== false);
   }
 
+  /** The model that tidies dictation — a curated id, or '' for the default (BEA-1624). */
+  @Put('cleanup-model')
+  async setCleanupModel(@Body() body: { model?: string }) {
+    try {
+      return await this.voice.setCleanupModel(body?.model || '');
+    } catch (e: any) {
+      throw new BadRequestException(String(e?.message || 'Could not save'));
+    }
+  }
+
   @Put('language')
   async setLanguage(@Body() body: { language?: string }) {
     return this.voice.setLanguage(body?.language || '');
