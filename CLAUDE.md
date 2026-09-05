@@ -975,6 +975,22 @@ change is additive, so no promoted worker is refused. Traps: `WorkerController`'
 **masked** on the way in and never exist for Gmail/WhatsApp at all, so raw-answer tests must use a
 `SAMPLE_SERVICES` service and a real run's unmasked `data` is untested by construction.
 
+**Every device take is measured, and the server denoise pass is parked on evidence (BEA-1622).**
+`/emo/device/turn` (the road every EMO device shares) prints ONE line per take after transcription, on
+both the fast-ack and the sync road: `[emo] denoise: floor -41.0 dBFS → -41.0, applied no (server pass
+off: measured no gain, BEA-1622), speech -25.0 dBFS, snr 16 dB, 22.4s, fe none, words 31` —
+`audioStats()` in `emo/emo-audio-stats.ts` (pause floor = 10th-percentile 20 ms frame RMS, speech =
+90th, SNR = the gap). The pendant's front-end tags its uploads `fe=ns1agc` (`emo-fw-src/boards/pendant/
+design/mic-frontend-plan.md` §6): a tagged take SKIPS `normalizePcm` (no second gain stage) and the tag
+rides the pending filename (`-fe_<tag>`, before `-ans_`). **Why there is no pass:** measured on the
+owner's own hissy pendant clip and on synthetic 14/8 dB-SNR hiss, Deepgram nova-3 gained nothing from
+eight variants (own Wiener, RNNoise pure/blend, ffmpeg afftdn/arnndn) and lost words on the real clip —
+its speech sits only 16 dB above the floor; nothing on the server brings back what the mic did not
+capture (table in `specs/briefs/BEA-1622.md`, fixtures in `emo/fixtures/denoise/`). A pass may return
+only for a real sample with SNR ≥ 20 dB and loud non-stationary room noise; the line above is how such
+a sample will be recognised. Traps: the api image has no ffmpeg (Alpine); `/api/voice/config`'s engine
+is cached ~60 s, so a measurement that flips the engine must wait before trusting the next call.
+
 **Things that will bite a fresh session**
 - **Flow tool ids are load-bearing.** `flows-runner.service.ts` dispatches on them (`AGENT_TOOLS`, `toolPrompt`). Renaming an id silently breaks every flow already saved in the database. Adding ids is safe, but an id not in `AGENT_TOOLS` falls through to a plain model call — fine for reasoning, wrong for a lookup, because it will invent the answer.
 - **One tool catalog.** `api/src/tools/tool-catalog.service.ts` (`GET /api/tools/catalog`) is the single source for the agent toolbox, the builder chat and the Flows canvas. Do not start a second list.

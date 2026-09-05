@@ -1,8 +1,14 @@
 {
   "startedAt": "2026-09-03T18:10:00Z",
-  "status": "running",
+  "status": "complete",
   "note": "Tooling: ship.sh real rollback + loud gate login + preflight rollback check (BEA-1608). Owner's goal: no bugs, no disturbance to agent creation/run code.",
   "issues": [
-    { "id": "BEA-1608", "title": "ship.sh rollback is real; uicheck fails loudly on login; preflight proves rollback", "status": "in_progress" }
+    {
+      "id": "BEA-1608",
+      "title": "ship.sh rollback is real; uicheck fails loudly on login; preflight proves rollback",
+      "status": "done",
+      "sha": "d9738e2",
+      "note": "real deploy.sh --rollback (proven live), ship.sh tells the truth, uicheck fails loudly on login, preflight checks rollback readiness, 64-check shell test"
+    }
   ]
 }

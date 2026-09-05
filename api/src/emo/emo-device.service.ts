@@ -13,6 +13,7 @@ import { NotesService } from '../notes/notes.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
+import { audioStats, denoiseLine, deviceHandledLevel, feTag, wordCount, PASS_OFF_REASON } from './emo-audio-stats';
 
 /** IMA ADPCM (4:1) — the one codec the 512 KB no-PSRAM boards can afford (BEA-1595).
  *  Wire format: 256-byte blocks = [int16 LE predictor][uint8 step index][reserved] + 252 bytes
@@ -348,7 +349,7 @@ export class EmoDeviceService {
    * Trimming costs nothing: the device only ever keeps heard[160]/reply[512]/say[512]
    * (emo_turn.h), so everything past that was discarded on arrival anyway.
    */
-  async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string } = {}): Promise<DeviceTurn> {
+  async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string; fe?: string } = {}): Promise<DeviceTurn> {
     // Fast-ack (BEA-1593): every lane except ask/talk is record-first on the devices — they
     // discard the reply and sync in the background. Take custody (durable file) and confirm
     // NOW; transcribe + route async. Cuts the device's upload wait roughly in half and keeps
@@ -380,13 +381,15 @@ export class EmoDeviceService {
    *  Returns null when custody could not be taken — the caller falls back to the sync path.
    *  CUSTODY RULE: the device deletes its SD copy on any 2xx, so the file MUST be safely on
    *  disk (atomic .part + rename) before we confirm. */
-  private async turnDeferred(body: Buffer, opts: { sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string }, mode: DeviceMode): Promise<DeviceTurn | null> {
+  private async turnDeferred(body: Buffer, opts: { sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string; fe?: string }, mode: DeviceMode): Promise<DeviceTurn | null> {
     try {
       if (!body?.length) return null;
       const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
       let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : opts.codec === 'adpcm' ? decodeImaAdpcm(body) : body;
       if (!pcm.length) return null;
-      pcm = normalizePcm(pcm);
+      // fe=ns1agc: the device already set the level — a second gain stage would pump (BEA-1622)
+      const fe = feTag(opts.fe);
+      if (!deviceHandledLevel(fe)) pcm = normalizePcm(pcm);
       const wav = wavWrap(pcm, sr);
       const dir = this.pendingDir();
       fs.mkdirSync(dir, { recursive: true });
@@ -394,7 +397,7 @@ export class EmoDeviceService {
       // The random part makes it collision-proof: two devices in the same millisecond must
       // never overwrite each other's already-acked audio (review finding).
       const ans = this.answerTarget(opts.answerTo);
-      const name = `pend-${Date.now()}-${randomUUID().slice(0, 8)}-${mode}${opts.capped ? '-capped' : ''}${ans ? `-ans_${ans}` : ''}.wav`;
+      const name = `pend-${Date.now()}-${randomUUID().slice(0, 8)}-${mode}${opts.capped ? '-capped' : ''}${fe ? `-fe_${fe}` : ''}${ans ? `-ans_${ans}` : ''}.wav`;
       const part = path.join(dir, name + '.part');
       // async writes: a meeting WAV can be tens of MB — never block the event loop for it.
       // Custody holds: the 2xx only goes out after the awaited rename lands.
@@ -413,11 +416,12 @@ export class EmoDeviceService {
   private async processPending(name: string): Promise<void> {
     const dir = this.pendingDir();
     const p = path.join(dir, path.basename(name));
-    const m = /^pend-\d+-[0-9a-f]+-([a-z]+)(-capped)?(?:-ans_([0-9a-f-]+))?\.wav$/.exec(path.basename(name));
+    const m = /^pend-\d+-[0-9a-f]+-([a-z]+)(-capped)?(?:-fe_([a-z0-9]{1,16}))?(?:-ans_([0-9a-f-]+))?\.wav$/.exec(path.basename(name));
     if (!m) return;
     const mode: DeviceMode = MODES.includes(m[1] as DeviceMode) ? (m[1] as DeviceMode) : 'capture';
     const capped = !!m[2];
-    const ansCard = m[3] || null;
+    const fe = m[3] || null;
+    const ansCard = m[4] || null;
     let wav: Buffer;
     try { wav = fs.readFileSync(p); } catch (e: any) {
       if (e?.code !== 'ENOENT') console.error('[emo] pending read failed', name, e);
@@ -441,6 +445,7 @@ export class EmoDeviceService {
         await new Promise((r) => setTimeout(r, this.retryDelayMs * (i + 1)));
       }
     }
+    this.logTakeStats(wav, fe, heard);
     if (lastErr) {
       const failedDir = path.join(dir, 'failed');
       try {
@@ -482,6 +487,20 @@ export class EmoDeviceService {
     try { fs.unlinkSync(p); } catch { /* already gone */ }
   }
 
+  /** The ruler (BEA-1622): one `[emo] denoise:` line per take — floor, speech, SNR, tag, words — so a
+   *  bad clip carries its own diagnosis. The pass itself is parked (see emo-audio-stats.ts), so
+   *  `applied` is always no for now; the format is the one the day-it-ships will keep. Never throws:
+   *  a stats bug must not lose a transcript. */
+  private logTakeStats(wav: Buffer, fe: string | null, heard: string, sampleRate?: number): void {
+    try {
+      const sr = sampleRate || (wav.length >= 28 ? wav.readUInt32LE(24) : 16000) || 16000;
+      const before = audioStats(wav.subarray(44), sr);
+      console.log(denoiseLine({ before, applied: false, reason: PASS_OFF_REASON, fe, words: wordCount(heard) }));
+    } catch (e) {
+      console.error('[emo] denoise stats failed', e);
+    }
+  }
+
   /** Restart custody: whatever fast-ack accepted but never finished gets processed again. */
   onModuleInit(): void {
     setImmediate(async () => {
@@ -501,13 +520,15 @@ export class EmoDeviceService {
     });
   }
 
-  private async turnInner(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string } = {}): Promise<DeviceTurn> {
+  private async turnInner(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean; answerTo?: string; fe?: string } = {}): Promise<DeviceTurn> {
     if (!body?.length) throw new BadRequestException('No audio received');
     const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
     let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : opts.codec === 'adpcm' ? decodeImaAdpcm(body) : body;
     if (!pcm.length) throw new BadRequestException('Could not decode the audio');
-    pcm = normalizePcm(pcm);
+    // fe=ns1agc: the device already set the level — a second gain stage would pump (BEA-1622)
+    const fe = feTag(opts.fe);
+    if (!deviceHandledLevel(fe)) pcm = normalizePcm(pcm);
     const wav = wavWrap(pcm, sr);
     let audioPath: string | undefined;
     // disk guard (941): an hour-long meeting decodes to >100MB of WAV — don't hoard those
@@ -518,6 +539,7 @@ export class EmoDeviceService {
     const heard = mode === 'meeting'
       ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
       : (await this.voice.transcribeWith('deepgram', wav, 'device-turn.wav', 'audio/wav')).trim();
+    this.logTakeStats(wav, fe, heard, sr);
     if (!heard) {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
     }

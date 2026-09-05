@@ -528,3 +528,79 @@ describe('IMA ADPCM decode (BEA-1595)', () => {
     expect(decodeImaAdpcm(Buffer.alloc(0)).length).toBe(0);
   });
 });
+
+describe('the audio ruler on every device turn (BEA-1622)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-ruler-'));
+  const voice: any = {
+    transcribeWith: jest.fn(async () => 'call the supplier tomorrow'),
+    transcribeMeeting: jest.fn(async () => 'Speaker 1: hello'),
+    ttsPcm: jest.fn(async () => Buffer.alloc(48)),
+  };
+  const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1', lane: 'note', summary: 'Call the supplier' }] })) };
+  const cards: any = { create: jest.fn(async () => ({ id: 'f1' })) };
+  const mk = () =>
+    new EmoDeviceService(voice, router, { ask: jest.fn(async () => ({ mode: 'answer', summary: 'Ok.' })) } as any, { talk: jest.fn() } as any, {} as any, { create: jest.fn() } as any,
+      { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any, cards);
+  // quiet 100 ms ramp: the normaliser WOULD boost this 8x — so "not boosted" is provable
+  const quiet = Buffer.alloc(3200);
+  for (let i = 0; i < 1600; i++) quiet.writeInt16LE((i % 200) - 100, i * 2);
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+  let logs: string[] = [];
+  let logSpy: jest.SpyInstance;
+
+  beforeEach(() => { jest.clearAllMocks(); logs = []; logSpy = jest.spyOn(console, 'log').mockImplementation((...a: any[]) => { logs.push(a.map(String).join(' ')); }); });
+  afterEach(() => logSpy.mockRestore());
+  afterAll(() => { process.env.EMO_FASTACK = '0'; delete process.env.EMO_PENDING_DIR; });
+
+  const sentData = () => (voice.transcribeWith.mock.calls[0][1] as Buffer).subarray(44);
+
+  it('prints one denoise line per turn with floor, snr, tag and the word count — the pass is off', async () => {
+    process.env.EMO_FASTACK = '0';
+    const r = await mk().turn(quiet, { mode: 'ask', fe: 'ns1agc' } as any);
+    expect(r.heard).toBe('call the supplier tomorrow');
+    const line = logs.find((l) => l.startsWith('[emo] denoise:'));
+    expect(line).toMatch(/^\[emo\] denoise: floor -\d+\.\d dBFS → -\d+\.\d, applied no \(server pass off: measured no gain, BEA-1622\), speech -\d+\.\d dBFS, snr \d+ dB, 0\.1s, fe ns1agc, words 4$/);
+  });
+
+  it('fe=ns1agc means the device set the level: the transcriber gets the bytes as they came', async () => {
+    process.env.EMO_FASTACK = '0';
+    await mk().turn(quiet, { mode: 'ask', fe: 'ns1agc' } as any);
+    expect(sentData().equals(quiet)).toBe(true);
+  });
+
+  it('an untagged take is normalised exactly as before', async () => {
+    process.env.EMO_FASTACK = '0';
+    await mk().turn(quiet, { mode: 'ask' });
+    expect(sentData().equals(normalizePcm(quiet))).toBe(true);
+    expect(sentData().equals(quiet)).toBe(false);
+    expect(logs.find((l) => l.startsWith('[emo] denoise:'))).toMatch(/fe none, words 4$/);
+  });
+
+  it('a junk tag is ignored, never trusted into a filename or a line', async () => {
+    process.env.EMO_FASTACK = '0';
+    await mk().turn(quiet, { mode: 'ask', fe: '../x' } as any);
+    expect(sentData().equals(normalizePcm(quiet))).toBe(true);
+    expect(logs.find((l) => l.startsWith('[emo] denoise:'))).toMatch(/fe none/);
+  });
+
+  it('the tag rides the pending filename through fast-ack and a restart sweep, and the line still prints', async () => {
+    process.env.EMO_FASTACK = '1';
+    process.env.EMO_PENDING_DIR = tmp;
+    const s = mk();
+    const r = await s.turn(quiet, { mode: 'note', fe: 'ns1agc' } as any);
+    expect(r.reply).toMatch(/Saved/);
+    await settle();
+    expect(sentData().equals(quiet)).toBe(true);                       // no second gain stage
+    expect(logs.find((l) => l.startsWith('[emo] denoise:'))).toMatch(/fe ns1agc, words 4$/);
+    expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.wav'))).toHaveLength(0);
+    // a tagged file a restart finds: the sweep reads the tag back out of the name
+    jest.clearAllMocks(); logs = [];
+    fs.writeFileSync(path.join(tmp, 'pend-1-abcd1234-note-fe_ns1agc.wav'), wavWrap(quiet, 16000));
+    fs.writeFileSync(path.join(tmp, 'pend-2-abcd1234-note-capped-fe_ns1agc-ans_0123abcd.wav'), wavWrap(quiet, 16000));
+    s.onModuleInit();
+    await settle();
+    expect(voice.transcribeWith).toHaveBeenCalledTimes(2);
+    expect(logs.filter((l) => /fe ns1agc/.test(l))).toHaveLength(2);
+    expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.wav'))).toHaveLength(0);
+  });
+});
