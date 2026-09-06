@@ -606,7 +606,7 @@ export function Bookmarks() {
 
       {/* Sticky bulk bar — appears the moment anything is selected. (BEA-1049) */}
       {selected.size > 0 && (
-        <div className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 shadow-xl">
+        <div className="fixed bottom-24 lg:bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 shadow-xl">
           <span className="text-sm font-medium whitespace-nowrap">{selected.size} selected</span>
           <select
             aria-label="Move to folder"
@@ -639,8 +639,8 @@ export function Bookmarks() {
       )}
 
       {/* Save any URL by hand — Raindrop stops being the only door in. (BEA-1050) */}
-      {/* md:right-24 keeps it clear of the chat bubble (same fix as the Delegated FAB). */}
-      <button onClick={() => setAddingLink(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 md:bottom-8 md:right-24">
+      {/* lg:right-24 keeps it clear of the chat bubble (same fix as the Delegated FAB). */}
+      <button onClick={() => setAddingLink(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 lg:bottom-8 lg:right-24">
         <Plus className="h-4 w-4" /> Add link
       </button>
       {addingLink && <AddLinkModal onClose={() => setAddingLink(false)} onSaved={() => { setAddingLink(false); load(); }} />}

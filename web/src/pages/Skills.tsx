@@ -561,7 +561,7 @@ export function Skills() {
         emptyText="No skills yet — tap “＋ Add skill” to install one from GitHub."
       />
 
-      <button onClick={() => setAdding(true)} title="Add skill" className="fixed right-4 bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-24 md:right-6 z-30 inline-flex items-center gap-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 px-4 py-3">
+      <button onClick={() => setAdding(true)} title="Add skill" className="fixed right-4 bottom-[calc(10rem+env(safe-area-inset-bottom))] lg:bottom-24 lg:right-6 z-30 inline-flex items-center gap-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 px-4 py-3">
         <Plus size={20} />
         <span className="hidden sm:inline font-medium pr-1">Add skill</span>
       </button>
