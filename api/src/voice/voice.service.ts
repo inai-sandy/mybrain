@@ -7,6 +7,16 @@ import { CURATED_MODELS, isCuratedModel } from '../llm/curated-models';
 
 export type Engine = 'openai' | 'elevenlabs' | 'deepgram' | 'gemini';
 
+/** The ONE OpenAI speech-to-text model this app uses (BEA-1625, the owner's choice). */
+export const OPENAI_STT_MODEL = 'gpt-transcribe';
+
+/**
+ * A transcription that failed for a reason the owner should SEE. Dictation used to answer '' on
+ * every failure, so the mic looked like it had simply heard nothing — the one outcome he cannot
+ * debug. This carries a plain sentence up to the controller instead.
+ */
+export class VoiceTranscribeError extends Error {}
+
 const ENGINES: { id: Engine; name: string; connector: ConnectorName }[] = [
   { id: 'openai', name: 'OpenAI GPT Transcribe (recommended)', connector: 'openai' },
   { id: 'elevenlabs', name: 'ElevenLabs Scribe (most accurate on English)', connector: 'elevenlabs' },
@@ -178,10 +188,17 @@ export class VoiceService {
     if (!buf?.length) return '';
     const engine = await this.getEngine();
     let used: Engine = engine;
-    let text = await this.run(engine, buf, filename, mime).catch(() => null);
-    if (!text && engine !== 'openai') {
-      used = 'openai';
-      text = await this.run('openai', buf, filename, mime).catch(() => null);
+    // A VoiceTranscribeError is deliberately NOT caught here — dictation must say why it failed
+    // rather than quietly insert nothing (BEA-1625). Another engine may still fall back to OpenAI.
+    let text: string | null;
+    if (engine === 'openai') {
+      text = await this.run('openai', buf, filename, mime);
+    } else {
+      text = await this.run(engine, buf, filename, mime).catch(() => null);
+      if (!text) {
+        used = 'openai';
+        text = await this.run('openai', buf, filename, mime);
+      }
     }
     if (!text) return '';
     // Log the request (STT providers don't return a $ figure — cost stays in the provider totals).
@@ -265,41 +282,35 @@ export class VoiceService {
 
   /** The OpenAI model that produced the LAST successful transcription — so the usage log names
    *  what actually ran, not what we hoped ran (a fallback spans a real price difference). (BEA-1218) */
-  private lastOpenAiModel = 'gpt-transcribe';
+  private lastOpenAiModel = OPENAI_STT_MODEL;
 
-  /** The account rejected gpt-transcribe outright (smoke-tested live on 31 Jul — OpenAI hasn't
-   *  enabled it here yet). Remember that until the next restart so every dictation doesn't pay a
-   *  wasted round trip; each deploy retries once, so the day OpenAI turns it on we upgrade alone. */
-  private newestOpenAiDown = false;
-
+  /**
+   * ONE model, on purpose (BEA-1625). The owner's choice is `gpt-transcribe` and nothing else:
+   * no `gpt-4o-transcribe`, no `whisper-1`, and no "that model is down" latch. The chain hid which
+   * model actually ran across a real price difference, and the latch could disable dictation for
+   * the rest of the day after a single bad response. A refusal is now THROWN, never returned as
+   * null, because null reaches the mic as silence.
+   */
   private async openai(buf: Buffer, filename: string): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('openai');
-    if (!c?.apiKey) return null;
+    if (!c?.apiKey) throw new VoiceTranscribeError('No OpenAI key is connected — add one in Settings → Connections.');
     const lang = await this.language();
     const hint = await this.promptHint();
-    const call = async (model: string) => {
-      const form = new FormData();
-      form.append('file', new Blob([new Uint8Array(buf)]), filename);
-      form.append('model', model);
-      if (lang) form.append('language', lang);
-      if (hint) form.append('prompt', hint); // bias toward the user's real names/terms (BEA-888)
-      const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${c.apiKey}` }, body: form as any });
-      if (!r.ok) {
-        // A hard rejection (bad model / no access) will repeat on every try — stop paying for it.
-        if (model === 'gpt-transcribe' && [400, 403, 404].includes(r.status)) {
-          this.newestOpenAiDown = true;
-          this.log.warn('gpt-transcribe rejected by the account — using gpt-4o-transcribe until the next restart');
-        }
-        return null;
-      }
-      const d: any = await r.json();
-      const text = d?.text?.trim() || null;
-      if (text) this.lastOpenAiModel = model;
-      return text;
-    };
-    // Best model first (BEA-1218: gpt-transcribe — newer and 25% cheaper than gpt-4o-transcribe),
-    // then the older names, so an account without access to the new one still transcribes.
-    return (this.newestOpenAiDown ? null : await call('gpt-transcribe')) || (await call('gpt-4o-transcribe')) || (await call('whisper-1'));
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(buf)]), filename);
+    form.append('model', OPENAI_STT_MODEL);
+    if (lang) form.append('language', lang);
+    if (hint) form.append('prompt', hint); // bias toward the user's real names/terms (BEA-888)
+    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${c.apiKey}` }, body: form as any });
+    if (!r.ok) {
+      const detail = (await (typeof r.text === 'function' ? r.text() : Promise.resolve('')).catch(() => '')).slice(0, 200);
+      this.log.warn(`${OPENAI_STT_MODEL} refused by OpenAI (HTTP ${r.status}) ${detail}`);
+      throw new VoiceTranscribeError(`OpenAI could not transcribe that (${r.status}) — nothing was written down. Try again.`);
+    }
+    const d: any = await r.json();
+    const text = d?.text?.trim() || null;
+    if (text) this.lastOpenAiModel = OPENAI_STT_MODEL;
+    return text;
   }
 
   private async elevenlabs(buf: Buffer, filename: string, mime: string): Promise<string | null> {

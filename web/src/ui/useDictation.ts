@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useToast } from './Toast';
 
 /** Global dictation status so one floating indicator can show the live transcript for the active mic. */
 type Phase = 'idle' | 'listening' | 'transcribing';
@@ -46,6 +47,7 @@ function tidy(t: string): string {
  * your words are never lost. iOS-PWA-safe: the AudioContext is woken inside the press gesture.
  */
 export function useDictation(onText: (text: string) => void) {
+  const toast = useToast();
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
@@ -101,11 +103,18 @@ export function useDictation(onText: (text: string) => void) {
       const fd = new FormData();
       fd.append('audio', blob, `dictation.${ext}`);
       const r = await fetch('/api/voice/transcribe', { method: 'POST', body: fd });
-      const d = await r.json().catch(() => ({}));
+      const d: any = await r.json().catch(() => ({}));
+      // A failure must be SAID. Inserting nothing looks exactly like the mic hearing nothing,
+      // and there is no fallback model behind this any more (BEA-1625).
+      if (!r.ok) {
+        toast('error', d?.message || 'Could not transcribe that — nothing was written down.');
+        return;
+      }
       const text = (d?.text || '').trim();
       if (text) onText(text + ' ');
+      else toast('error', 'Nothing was heard — nothing was written down.');
     } catch {
-      /* ignore */
+      toast('error', 'Could not reach the server to transcribe that.');
     } finally {
       setStatus({ listening: false, phase: 'idle', interim: '' });
     }

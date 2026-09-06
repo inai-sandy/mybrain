@@ -334,3 +334,27 @@ describe('TelegramService', () => {
     });
   });
 });
+
+// ---- BEA-1625: transcription can now THROW; a voice note must still be answered ----
+describe('TelegramService — a failed voice note', () => {
+  it('replies plainly instead of letting the error escape handleUpdate', async () => {
+    const { svc, voice, sent } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 7 }, text: '/start' } }); // claim the chat
+    sent.length = 0;
+    // Since BEA-1625 a refused transcription throws rather than answering ''.
+    voice.transcribe = jest.fn(async () => {
+      throw new Error('OpenAI could not transcribe that (403) — nothing was written down. Try again.');
+    });
+    (global as any).fetch = jest.fn(async (url: string, opts: any) => {
+      if (opts?.body) sent.push(JSON.parse(opts.body));
+      if (String(url).includes('getFile')) return { ok: true, json: async () => ({ ok: true, result: { file_path: 'voice/f1.oga' } }) };
+      if (String(url).includes('/file/bot')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+      return { ok: true, json: async () => ({ ok: true, result: {} }), text: async () => '' };
+    });
+    await expect(
+      svc.handleUpdate({ update_id: 2, message: { chat: { id: 7 }, voice: { file_id: 'f1' } } }),
+    ).resolves.toBeUndefined(); // it must NOT throw — handleUpdate would then never mark it handled
+    const texts = sent.map((m: any) => String(m?.text || ''));
+    expect(texts.some((t) => /transcribe/i.test(t))).toBe(true); // the owner is told, not ignored
+  });
+});

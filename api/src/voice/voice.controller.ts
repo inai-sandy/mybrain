@@ -1,7 +1,7 @@
-import { BadRequestException, Body, Controller, Get, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Body, Controller, Get, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { VoiceService } from './voice.service';
+import { VoiceService, VoiceTranscribeError } from './voice.service';
 
 @Controller('voice')
 export class VoiceController {
@@ -12,8 +12,14 @@ export class VoiceController {
   @UseInterceptors(FileInterceptor('audio'))
   async transcribe(@UploadedFile() file: any) {
     if (!file?.buffer?.length) throw new BadRequestException('No audio received');
-    const text = await this.voice.transcribe(file.buffer, file.originalname || 'audio.webm', file.mimetype || 'audio/webm');
-    return { text };
+    try {
+      const text = await this.voice.transcribe(file.buffer, file.originalname || 'audio.webm', file.mimetype || 'audio/webm');
+      return { text };
+    } catch (e: any) {
+      // The owner must SEE why his words did not appear — never an empty box (BEA-1625).
+      if (e instanceof VoiceTranscribeError) throw new BadGatewayException(e.message);
+      throw e;
+    }
   }
 
   /** Mint a short-lived Deepgram streaming token for the in-app live mic (key stays server-side). */
