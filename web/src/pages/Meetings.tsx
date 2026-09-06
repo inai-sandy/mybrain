@@ -246,7 +246,7 @@ function Recorder({ onCreated }: { onCreated: (id: string) => void }) {
 
   // Recording bar pinned to the very top of the screen (the app can't draw on the macOS menu bar).
   return (
-    <div className="fixed top-0 inset-x-0 z-50 bg-zinc-900 text-white shadow-lg" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+    <div className="fixed top-0 inset-x-0 z-50 bg-zinc-900 text-white shadow-lg" style={{ paddingTop: 'var(--safe-top)' }}>
       <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-3">
         <span className={'inline-flex items-center gap-2 ' + (state === 'recording' ? 'text-rose-400' : 'text-amber-300')}>
           <span className={'h-2.5 w-2.5 rounded-full ' + (state === 'recording' ? 'bg-rose-500 animate-pulse' : 'bg-amber-400')} />

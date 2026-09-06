@@ -163,7 +163,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
       {/* Main column */}
       <div ref={slideRef} className={'transition-all duration-200 ' + (collapsed ? 'lg:pl-16' : 'lg:pl-60')}>
-        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 lg:bg-white/80 lg:dark:bg-zinc-950/80 lg:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 lg:bg-white/80 lg:dark:bg-zinc-950/80 lg:backdrop-blur" style={{ paddingTop: 'var(--safe-top)' }}>
           <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
             <button onClick={() => setDrawer(true)} aria-label="Menu" className="lg:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -245,7 +245,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         <main
           className={
             isChat
-              ? 'h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] md:h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] overflow-hidden'
+              ? 'h-[calc(var(--vvh)-3.5rem-var(--safe-top))] overflow-hidden'
               : 'p-4 sm:p-6 pb-20 lg:pb-8 max-w-4xl mx-auto'
           }
         >

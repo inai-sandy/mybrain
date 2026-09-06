@@ -1096,7 +1096,7 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
     <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-900">
       <div className="flex h-full w-full flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Header — clear the iOS/Android status bar / notch (BEA-919) */}
-        <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-3 dark:border-zinc-800" style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' }}>
+        <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-3 dark:border-zinc-800" style={{ paddingTop: 'calc(0.75rem + var(--safe-top))' }}>
           <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
           <div className="min-w-0 flex-1">
             <div className="truncate font-semibold">{data?.contactName || reminder.contact?.name || 'Contact'}</div>
