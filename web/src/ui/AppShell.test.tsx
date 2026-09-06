@@ -80,4 +80,42 @@ describe('AppShell', () => {
     const stale = files.filter((f) => /md:(bottom-|left-auto|right-24|right-6)/.test(fs.readFileSync(f, 'utf8')));
     expect(stale.map((f) => path.relative(src, f))).toEqual([]);
   });
+
+  // A bar that page content scrolls UNDER must be opaque below lg:, or the content shows through
+  // it — the owner's original "the top portion is blurred" report (BEA-1627, and again in the Vault
+  // tabs, BEA-1628). Frosted from lg: up is fine; that is what the app header does.
+  it('has no sticky bar that stays translucent below lg:', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = path.resolve(process.cwd(), 'src');
+    // Deliberate exceptions, both checked by hand:
+    //  FullScreenHtml — floating pill BUTTONS over an arbitrary document, not a bar with content
+    //    scrolling under them; translucency is the point.
+    //  BriefView — a sticky bottom bar at 95% opacity, where nothing legible comes through.
+    const allowed = new Set(['ui/FullScreenHtml.tsx', 'ui/BriefView.tsx']);
+    const offenders: string[] = [];
+    // Read whole className strings, not lines: a wrapped attribute would otherwise put `sticky`
+    // and `backdrop-blur` on different lines and slip through.
+    const CLASS_STRINGS = /className=\{?[`"'][^`"']*[`"']/g;
+    // A blur is only safe if a WIDTH gates it. `dark:backdrop-blur` is ungated — it is translucent
+    // at 390px too, which is exactly the bug this guard exists to catch.
+    const widthGated = (token: string) => /(^|:)(sm|md|lg|xl|2xl):/.test(token);
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { walk(full); continue; }
+        if (!/\.tsx$/.test(e.name)) continue;
+        const rel = path.relative(src, full);
+        if (allowed.has(rel)) continue;
+        for (const cs of fs.readFileSync(full, 'utf8').match(CLASS_STRINGS) || []) {
+          if (!/\b(sticky|fixed)\b/.test(cs)) continue;
+          for (const token of cs.split(/\s+/)) {
+            if (token.includes('backdrop-blur') && !widthGated(token)) offenders.push(rel);
+          }
+        }
+      }
+    };
+    walk(src);
+    expect([...new Set(offenders)]).toEqual([]);
+  });
 });

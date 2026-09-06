@@ -550,8 +550,10 @@ function VaultHome() {
       </div>
       {bioOpen && <BiometricSheet onClose={() => setBioOpen(false)} />}
 
-      {/* Sticky icon-only type tabs + view toggle (BEA-391) */}
-      <div className="sticky top-0 z-20 -mx-4 px-4 py-2 mb-2 bg-white/85 dark:bg-zinc-950/85 backdrop-blur border-b border-zinc-200/60 dark:border-zinc-800/60">
+      {/* Sticky icon-only type tabs + view toggle (BEA-391). Solid below lg: — at 85% the vault
+          content scrolled straight through it, on the phone as well as the tablet (BEA-1628); the
+          frosted look is kept from lg: up, matching the app header. */}
+      <div className="sticky top-0 z-20 -mx-4 px-4 py-2 mb-2 bg-white dark:bg-zinc-950 lg:bg-white/85 lg:dark:bg-zinc-950/85 lg:backdrop-blur border-b border-zinc-200/60 dark:border-zinc-800/60">
         <div className="flex items-center gap-2">
           <div className="flex-1 flex flex-wrap gap-1">
             {tabs.map((t) => {
