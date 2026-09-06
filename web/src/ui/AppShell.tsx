@@ -85,7 +85,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       {/* App-wide scroll save/restore so Back returns you to where you were (BEA-1001) */}
       <ScrollMemory />
       {/* Desktop sidebar (collapsible to an icon-only rail) */}
-      <aside className={'hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'md:w-16' : 'md:w-60')}>
+      <aside className={'hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'lg:w-16' : 'lg:w-60')}>
         <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>
           <Logo size={collapsed ? 30 : 34} /> {!collapsed && 'My Brain'}
         </div>
@@ -122,7 +122,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
       {/* Mobile drawer */}
       {drawer && (
-        <div className="md:hidden fixed inset-0 z-40" onClick={() => setDrawer(false)}>
+        <div className="lg:hidden fixed inset-0 z-40" onClick={() => setDrawer(false)}>
           <div className="absolute inset-0 bg-black/50" />
           <aside className="absolute inset-y-0 left-0 w-64 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 px-3 py-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-2 mb-6">
@@ -162,19 +162,19 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       )}
 
       {/* Main column */}
-      <div ref={slideRef} className={'transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
-        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+      <div ref={slideRef} className={'transition-all duration-200 ' + (collapsed ? 'lg:pl-16' : 'lg:pl-60')}>
+        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 lg:bg-white/80 lg:dark:bg-zinc-950/80 lg:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
-            <button onClick={() => setDrawer(true)} aria-label="Menu" className="md:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <button onClick={() => setDrawer(true)} aria-label="Menu" className="lg:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
               <Menu size={20} />
             </button>
-            <div className="md:hidden flex items-center gap-2 font-bold">
+            <div className="lg:hidden flex items-center gap-2 font-bold">
               <Logo size={30} /> My Brain
             </div>
             <button
               onClick={openSearch}
-              className="hidden md:flex items-center gap-2 flex-1 max-w-md rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:border-emerald-500/50"
+              className="hidden lg:flex items-center gap-2 flex-1 max-w-md rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:border-emerald-500/50"
             >
               <Search size={15} /> <span>Search your brain…</span>
               <kbd className="ml-auto hidden lg:inline text-[10px] rounded border border-zinc-300 dark:border-zinc-600 px-1 py-0.5">⌘K</kbd>
@@ -183,7 +183,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
           <div className="flex items-center gap-1 shrink-0">
           {/* Mobile search */}
-          <button onClick={openSearch} aria-label="Search" className="md:hidden p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500">
+          <button onClick={openSearch} aria-label="Search" className="lg:hidden p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500">
             <Search size={20} />
           </button>
           {/* Help / support menu */}
@@ -246,7 +246,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           className={
             isChat
               ? 'h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] md:h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] overflow-hidden'
-              : 'p-4 sm:p-6 pb-20 md:pb-8 max-w-4xl mx-auto'
+              : 'p-4 sm:p-6 pb-20 lg:pb-8 max-w-4xl mx-auto'
           }
         >
           {isChat ? (
@@ -279,7 +279,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           onClick={() => navigate('/chat')}
           title="Chat with your brain"
           aria-label="Chat with your brain"
-          className="fixed right-4 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] md:bottom-6 z-40 inline-flex items-center justify-center rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 h-12 w-12"
+          className="fixed right-4 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] lg:bottom-6 z-40 inline-flex items-center justify-center rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 h-12 w-12"
         >
           <MessageCircle size={22} />
         </button>

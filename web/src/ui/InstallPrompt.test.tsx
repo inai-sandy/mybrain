@@ -22,17 +22,20 @@ describe('InstallPrompt — never on top of the page on a phone', () => {
     localStorage.clear();
   });
 
-  it('is in the page flow on phones and only floats from md: up', () => {
+  it('is in the page flow on phones AND tablets, and only floats from lg: up', () => {
     showBanner();
     const card = screen.getByText('Install My Brain').closest('.rounded-xl');
     const cls = card?.className || '';
     expect(card).toBeTruthy();
 
-    expect(cls).toContain('md:fixed'); // desktop keeps the floating top-right card
+    // BEA-1627 moved this from md: to lg: — a tablet in portrait now gets the phone's
+    // in-flow banner too, because it has no room to spare beside the content.
+    expect(cls).toContain('lg:fixed');
+    expect(cls).not.toContain('md:fixed');
     // A bare `fixed`/`absolute` is what caused the overlap — the phone layout must stay in flow.
     expect(cls.split(/\s+/)).not.toContain('fixed');
     expect(cls.split(/\s+/)).not.toContain('absolute');
-    // ...and it must not claim a viewport-anchored offset outside the md: breakpoint either.
+    // ...and it must not claim a viewport-anchored offset outside the lg: breakpoint either.
     expect(cls).not.toMatch(/(^|\s)(top-|inset-x-|right-)/);
   });
 

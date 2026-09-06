@@ -57,8 +57,9 @@ export function InstallPrompt() {
   return (
     // On phones this sits in the page flow, so it pushes the page down instead of floating on top
     // of it — as `fixed` it covered the Tasks tab row by 20px and made it untappable (BEA-1270).
-    // On desktop there is room beside the content, so it stays the floating top-right card it was.
-    <div className="mb-4 md:mb-0 md:fixed md:top-[calc(4.25rem+env(safe-area-inset-top))] md:right-4 md:w-80 md:z-40 rounded-xl border border-emerald-500/40 bg-white dark:bg-zinc-900 shadow-lg p-3 flex items-center gap-3">
+    // From 1024px up there is room beside the content, so it becomes the floating top-right card.
+    // Below that — phone AND tablet — it stays in the flow (BEA-1627).
+    <div className="mb-4 lg:mb-0 lg:fixed lg:top-[calc(4.25rem+env(safe-area-inset-top))] lg:right-4 lg:w-80 lg:z-40 rounded-xl border border-emerald-500/40 bg-white dark:bg-zinc-900 shadow-lg p-3 flex items-center gap-3">
       <img src="/icons/icon-192.png" alt="" className="h-9 w-9 rounded-lg shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold">Install My Brain</div>

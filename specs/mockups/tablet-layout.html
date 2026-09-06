@@ -1,0 +1,363 @@
+<title>The Tablet Band</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --ground: #f7f7f8;
+    --panel: #ffffff;
+    --line: #e2e2e6;
+    --ink: #18181b;
+    --muted: #63636d;
+    --faint: #8e8e99;
+    --accent: #047857;
+    --accent-soft: #ecfdf5;
+    --warn: #b45309;
+    --warn-soft: #fffbeb;
+    --shadow: 0 1px 2px rgba(24, 24, 27, .06), 0 8px 24px rgba(24, 24, 27, .06);
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101013;
+      --panel: #17171b;
+      --line: #2a2a30;
+      --ink: #f2f2f4;
+      --muted: #a0a0ac;
+      --faint: #74747f;
+      --accent: #34d399;
+      --accent-soft: #0d2c22;
+      --warn: #fbbf24;
+      --warn-soft: #2b2110;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #101013;
+    --panel: #17171b;
+    --line: #2a2a30;
+    --ink: #f2f2f4;
+    --muted: #a0a0ac;
+    --faint: #74747f;
+    --accent: #34d399;
+    --accent-soft: #0d2c22;
+    --warn: #fbbf24;
+    --warn-soft: #2b2110;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1140px; margin: 0 auto; padding: 40px 24px 72px; }
+
+  header.top { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  h1 {
+    font-family: var(--display); font-weight: 700; font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.12; margin: 0; text-wrap: balance; letter-spacing: -.02em;
+  }
+  .standfirst { color: var(--muted); max-width: 62ch; margin: 0; font-size: 17px; }
+
+  .measure {
+    margin: 32px 0 40px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel); box-shadow: var(--shadow); overflow-x: auto;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 520px; }
+  caption {
+    text-align: left; padding: 14px 18px 0; font-family: var(--mono);
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+  }
+  th, td { padding: 10px 18px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--body); font-weight: 600; font-size: 12px; color: var(--muted); letter-spacing: .03em; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  tr.flag td { background: var(--warn-soft); }
+  tr.flag td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+  .bad { color: var(--warn); font-weight: 600; }
+
+  h2 {
+    font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--faint); margin: 0 0 18px;
+  }
+
+  .options { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); align-items: start; }
+  .opt {
+    border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+    box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden;
+  }
+  .opt.pick { border-color: var(--accent); }
+  .opt-head { padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .opt-name { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spacing: -.01em; }
+  .tag {
+    align-self: flex-start; font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+  .tag.now { background: var(--warn-soft); color: var(--warn); }
+  .tag.rec { background: var(--accent-soft); color: var(--accent); }
+  .tag.alt { background: var(--ground); color: var(--faint); border: 1px solid var(--line); }
+
+  /* ---- the device frames: My Brain's own dark UI, drawn to scale from a 820px tablet ---- */
+  .stage { padding: 0 18px 4px; }
+  .frame {
+    --sb: 0px;
+    background: #09090b; border: 1px solid #27272a; border-radius: 8px;
+    overflow: hidden; height: 232px; display: grid;
+    grid-template-columns: var(--sb) 1fr; position: relative;
+    font-size: 7.5px; line-height: 1.35;
+  }
+  .frame.wide { --sb: 84px; }
+  .frame.rail { --sb: 24px; }
+  .frame:not(.wide):not(.rail) { grid-template-columns: 1fr; }
+
+  .sb { background: #18181b; border-right: 1px solid #27272a; padding: 8px 6px; overflow: hidden; }
+  .sb-brand { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 3px; background: #10b981; flex: none; }
+  .sb-brand span { color: #fafafa; font-weight: 700; font-size: 8px; }
+  .nav { display: flex; flex-direction: column; gap: 3px; }
+  .nav i {
+    display: block; height: 5px; width: 5px; border-radius: 1.5px;
+    background: #52525b; flex: none;
+  }
+  .nav a { display: flex; align-items: center; gap: 5px; color: #a1a1aa; padding: 2.5px 4px; border-radius: 3px; text-decoration: none; }
+  .nav a.on { background: #10b981; color: #04120c; }
+  .nav a.on i { background: #04120c; }
+  .rail .nav a { justify-content: center; padding: 3px 0; }
+
+  .col { display: flex; flex-direction: column; min-width: 0; position: relative; }
+  .hdr {
+    height: 22px; flex: none; border-bottom: 1px solid #27272a;
+    display: flex; align-items: center; gap: 5px; padding: 0 7px;
+    color: #fafafa; font-weight: 700; font-size: 8px;
+    position: relative; z-index: 2;
+  }
+  .hdr.solid { background: #09090b; }
+  .hdr { white-space: nowrap; }
+  .hdr.glass { background: rgba(9, 9, 11, .8); backdrop-filter: blur(3px); }
+  .burger { display: flex; flex-direction: column; gap: 1.5px; }
+  .burger b { display: block; width: 8px; height: 1px; background: #d4d4d8; }
+  .hdr .spacer { flex: 1; }
+  .pill { width: 34px; height: 9px; border-radius: 999px; background: #27272a; }
+
+  .body { flex: 1; padding: 6px 7px; overflow: hidden; position: relative; }
+  /* The scrolled-under line: sits behind the header so the 80% glass shows it through. */
+  .under {
+    position: absolute; top: 6px; left: 7px; right: 7px; z-index: 1;
+    color: #ffffff; font-weight: 600; font-size: 7.5px;
+    white-space: nowrap; overflow: hidden;
+  }
+  .row { display: flex; gap: 4px; margin-bottom: 5px; }
+  .tile { flex: 1; background: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 5px; }
+  .tile b { display: block; color: #fafafa; font-size: 10px; font-weight: 700; }
+  .tile span { color: #71717a; font-size: 6.5px; }
+  .bar { height: 5px; border-radius: 2px; background: #27272a; margin-bottom: 4px; }
+  .bar.s { width: 55%; }
+  .bar.m { width: 78%; }
+  .card { background: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 5px 6px; margin-bottom: 4px; }
+  .card b { color: #fafafa; font-size: 7.5px; display: block; margin-bottom: 3px; }
+
+  .width-note {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    padding: 10px 18px 0; font-variant-numeric: tabular-nums;
+  }
+  .width-note strong { color: var(--ink); font-weight: 600; }
+  .opt.pick .width-note strong { color: var(--accent); }
+
+  .notes { padding: 12px 18px 18px; margin: 0; display: flex; flex-direction: column; gap: 7px; font-size: 14px; color: var(--muted); }
+  .notes li { list-style: none; padding-left: 15px; position: relative; }
+  .notes li::before { content: ""; position: absolute; left: 0; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+  .notes li.plus::before { background: var(--accent); }
+  .notes li.minus::before { background: var(--warn); }
+
+  .verdict {
+    margin-top: 40px; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 10px; background: var(--panel); padding: 20px 22px; box-shadow: var(--shadow);
+  }
+  .verdict h3 { font-family: var(--display); font-size: 17px; margin: 0 0 8px; font-weight: 600; }
+  .verdict p { margin: 0 0 10px; color: var(--muted); max-width: 68ch; }
+  .verdict p:last-child { margin-bottom: 0; }
+  code {
+    font-family: var(--mono); font-size: .88em; background: var(--ground);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+  .foot { margin-top: 36px; color: var(--faint); font-size: 13px; font-family: var(--mono); }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">BEA-1627 · decide before building</div>
+    <h1>The tablet band: 768 to 1023 pixels</h1>
+    <p class="standfirst">
+      Everything in the app shell — the hamburger, the drawer, the sidebar, the content padding and the
+      frosted header — switches at one breakpoint, Tailwind's <code>md:</code> (768px). An iPad in portrait
+      is 768–834px wide, so it gets the full desktop treatment on a screen that cannot carry it.
+    </p>
+  </header>
+
+  <div class="measure">
+    <table>
+      <caption>Measured on the live app, logged in — 6 Sep 2026</caption>
+      <thead>
+        <tr><th>Viewport</th><th>Header</th><th>Sidebar</th><th>Left for your content</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>390 — phone</td><td>solid</td><td class="num">0px</td><td class="num">390px</td></tr>
+        <tr class="flag"><td>768 — iPad portrait</td><td>80% + blur(8px)</td><td class="num">240px</td><td class="num bad">528px</td></tr>
+        <tr class="flag"><td>820 — tablet</td><td>80% + blur(8px)</td><td class="num">240px</td><td class="num bad">580px</td></tr>
+        <tr><td>1180 — laptop</td><td>80% + blur(8px)</td><td class="num">240px</td><td class="num">940px</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Three ways to fix it — drawn at 820px</h2>
+
+  <div class="options">
+
+    <!-- ---------- CURRENT ---------- -->
+    <article class="opt">
+      <div class="opt-head">
+        <span class="tag now">What you have now</span>
+        <div class="opt-name">Desktop layout, squeezed</div>
+      </div>
+      <div class="stage">
+        <div class="frame wide">
+          <nav class="sb">
+            <div class="sb-brand"><span class="dot"></span><span>My Brain</span></div>
+            <div class="nav">
+              <a class="on"><i></i>Home</a><a><i></i>Today</a><a><i></i>Tasks</a>
+              <a><i></i>Activity</a><a><i></i>Contacts</a><a><i></i>Chats</a>
+              <a><i></i>Emo</a><a><i></i>Recordings</a><a><i></i>Explore</a>
+              <a><i></i>Capture</a><a><i></i>Documents</a><a><i></i>Notes</a>
+            </div>
+          </nav>
+          <div class="col">
+            <div class="under">Training was more than half done today, so closing the last piece is</div>
+            <div class="hdr glass">
+              <span class="dot" style="width:7px;height:7px"></span>My Brain
+              <span class="spacer"></span><span class="pill"></span>
+            </div>
+            <div class="body">
+              <div class="row">
+                <div class="tile"><b>15</b><span>Open today</span></div>
+                <div class="tile"><b>0</b><span>Done today</span></div>
+              </div>
+              <div class="card"><b>Today's must-dos</b><div class="bar m"></div><div class="bar s"></div></div>
+              <div class="card"><b>Who owes you</b><div class="bar m"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="width-note"><span>content width</span><strong>580px</strong></div>
+      <ul class="notes">
+        <li class="minus">The line above the header is scrolled content showing <em>through</em> it. That is the blur you reported.</li>
+        <li class="minus">Navigation takes 240px — nearly a third of the screen — to show what a tap could.</li>
+      </ul>
+    </article>
+
+    <!-- ---------- OPTION A ---------- -->
+    <article class="opt pick">
+      <div class="opt-head">
+        <span class="tag rec">Recommended</span>
+        <div class="opt-name">Menu behind a tap</div>
+      </div>
+      <div class="stage">
+        <div class="frame">
+          <div class="col">
+            <div class="hdr solid">
+              <span class="burger"><b></b><b></b><b></b></span>
+              <span class="dot" style="width:7px;height:7px"></span>My Brain
+              <span class="spacer"></span><span class="pill"></span>
+            </div>
+            <div class="body">
+              <div class="row">
+                <div class="tile"><b>15</b><span>Open today</span></div>
+                <div class="tile"><b>0</b><span>Done today</span></div>
+                <div class="tile"><b>15</b><span>Carried over</span></div>
+              </div>
+              <div class="card"><b>Today's must-dos</b><div class="bar m"></div><div class="bar m"></div><div class="bar s"></div></div>
+              <div class="card"><b>Who owes you</b><div class="bar m"></div><div class="bar s"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="width-note"><span>content width</span><strong>820px</strong></div>
+      <ul class="notes">
+        <li class="plus">The whole screen is yours — 240 more pixels, so three tiles fit where two did.</li>
+        <li class="plus">Exactly the drawer your phone already uses. Nothing new to build or learn.</li>
+        <li class="plus">Solid header. Nothing shows through it.</li>
+        <li>Reaching the nav is one tap instead of nought.</li>
+      </ul>
+    </article>
+
+    <!-- ---------- OPTION B ---------- -->
+    <article class="opt">
+      <div class="opt-head">
+        <span class="tag alt">Alternative</span>
+        <div class="opt-name">Icons down the edge</div>
+      </div>
+      <div class="stage">
+        <div class="frame rail">
+          <nav class="sb">
+            <div class="sb-brand" style="justify-content:center"><span class="dot"></span></div>
+            <div class="nav">
+              <a class="on"><i></i></a><a><i></i></a><a><i></i></a><a><i></i></a>
+              <a><i></i></a><a><i></i></a><a><i></i></a><a><i></i></a>
+              <a><i></i></a><a><i></i></a><a><i></i></a><a><i></i></a>
+            </div>
+          </nav>
+          <div class="col">
+            <div class="hdr solid">
+              <span class="dot" style="width:7px;height:7px"></span>My Brain
+              <span class="spacer"></span><span class="pill"></span>
+            </div>
+            <div class="body">
+              <div class="row">
+                <div class="tile"><b>15</b><span>Open today</span></div>
+                <div class="tile"><b>0</b><span>Done today</span></div>
+                <div class="tile"><b>15</b><span>Carried</span></div>
+              </div>
+              <div class="card"><b>Today's must-dos</b><div class="bar m"></div><div class="bar s"></div></div>
+              <div class="card"><b>Who owes you</b><div class="bar m"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="width-note"><span>content width</span><strong>756px</strong></div>
+      <ul class="notes">
+        <li class="plus">Navigation stays on screen — no tap to switch section.</li>
+        <li class="plus">Reuses the collapsed rail the app already has from BEA-440.</li>
+        <li class="minus">Icons with no labels. You would be reading 12 small glyphs to find Recordings.</li>
+      </ul>
+    </article>
+
+  </div>
+
+  <div class="verdict">
+    <h3>What I would do</h3>
+    <p>
+      <strong>Option A.</strong> Move the shell's breakpoints from <code>md:</code> to <code>lg:</code> — one
+      consistent change across the hamburger, the drawer, the sidebar and the content padding — and make the
+      header solid at every width. A tablet in portrait then behaves exactly like your phone, which is the
+      layout you already use every day; a tablet in landscape is 1024px or wider, so it still gets the full
+      sidebar. Nothing at 390px or 1180px moves.
+    </p>
+    <p>
+      Option B keeps navigation visible, but it buys that with unlabelled icons, and the whole reason this is
+      worth fixing is that the tablet is short of room, not short of taps.
+    </p>
+  </div>
+
+  <p class="foot">specs/mockups/tablet-layout.html · frames drawn to scale from a 820 × 1180 tablet</p>
+</div>

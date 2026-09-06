@@ -134,7 +134,7 @@ export function BrainEatersTab({ onCountChange }: { onCountChange?: (open: numbe
       {/* Reserve room so the floating button can never sit on top of the content below it. (BEA-1131) */}
       <div aria-hidden className="h-20" />
 
-      <button onClick={() => setDumping(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg transition-colors hover:bg-emerald-500 md:bottom-8 md:right-24">
+      <button onClick={() => setDumping(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg transition-colors hover:bg-emerald-500 lg:bottom-8 lg:right-24">
         <Plus className="h-4 w-4" /> Dump brain eaters
       </button>
 

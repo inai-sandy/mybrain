@@ -8,7 +8,7 @@ export function DictationIndicator() {
 
   if (phase === 'transcribing') {
     return (
-      <div className="fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2.5 rounded-full bg-zinc-900 text-white px-4 py-2.5 shadow-xl bottom-[calc(6rem+env(safe-area-inset-bottom))] md:bottom-6">
+      <div className="fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2.5 rounded-full bg-zinc-900 text-white px-4 py-2.5 shadow-xl bottom-[calc(6rem+env(safe-area-inset-bottom))] lg:bottom-6">
         <Loader2 size={15} className="animate-spin text-emerald-300" />
         <span className="text-sm">{interim || 'Tidying up…'}</span>
       </div>
@@ -16,7 +16,7 @@ export function DictationIndicator() {
   }
 
   return (
-    <div className="fixed left-1/2 -translate-x-1/2 z-[60] w-[92vw] max-w-md bottom-[calc(6rem+env(safe-area-inset-bottom))] md:bottom-6">
+    <div className="fixed left-1/2 -translate-x-1/2 z-[60] w-[92vw] max-w-md bottom-[calc(6rem+env(safe-area-inset-bottom))] lg:bottom-6">
       <div className="rounded-2xl bg-zinc-900 text-white px-4 py-3 shadow-xl ring-1 ring-white/10">
         <div className="flex items-center gap-2.5 mb-1.5">
           <span className="relative flex h-3 w-3 shrink-0">
