@@ -1,55 +1,59 @@
 import { useEffect, useRef } from 'react';
-import { Mic } from 'lucide-react';
+import { Mic, Square } from 'lucide-react';
 import { useDictation } from './useDictation';
 
 /**
- * Hold-to-talk mic button. Press & hold to dictate (audio streams live), release to insert the
- * cleaned text. Release is caught GLOBALLY (anywhere you lift your finger) — iPad/iOS don't always
- * deliver pointerup to the button itself, which would leave the mic stuck on. Renders nothing when
- * the device can't record.
+ * Tap-to-talk mic (BEA-1626). One tap starts, a second tap stops.
+ *
+ * It used to be hold-to-talk: press and keep pressing, and lifting a finger ANYWHERE ended it. The
+ * owner asked for the change because holding a button through a whole thought on a phone is
+ * genuinely hard — and it matches the call already made on EMO Nano ("tap to talk, never hold").
+ *
+ * The thing hold-to-talk gave away for free was certainty: his own finger told him the mic was on.
+ * Nothing does that now, so the button becomes an unmistakable red STOP while live, and the global
+ * `DictationIndicator` shows the words arriving with its own Stop button beside them.
+ *
+ * Renders nothing when the device cannot record.
  */
 export function DictateButton({ onText, size = 16, className = '' }: { onText: (text: string) => void; size?: number; className?: string }) {
   const { supported, active, start, stop } = useDictation(onText);
-  const holdingRef = useRef(false);
-  const endRef = useRef<() => void>(() => undefined);
 
-  // Always have a current "release" handler that detaches the global listeners + stops.
+  // Always hold a CURRENT stop, so the unmount cleanup below can never call a stale closure.
+  const endRef = useRef<() => void>(() => undefined);
   endRef.current = () => {
-    if (!holdingRef.current) return;
-    holdingRef.current = false;
-    for (const ev of RELEASE_EVENTS) window.removeEventListener(ev, endRef.current as any);
-    stop();
+    if (active) stop();
   };
 
-  // Safety: if the button unmounts mid-hold, release.
+  // Safety: if the button unmounts mid-recording (a sheet closing, a route change), release the mic.
   useEffect(() => () => endRef.current(), []);
 
   if (!supported) return null;
 
-  const begin = (e: React.PointerEvent<HTMLButtonElement>) => {
+  // pointerdown, not click: it fires on the first touch, so the mic opens the instant he taps.
+  const toggle = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    if (holdingRef.current) return;
-    holdingRef.current = true;
-    for (const ev of RELEASE_EVENTS) window.addEventListener(ev, endRef.current as any);
-    start();
+    if (active) stop();
+    else start();
   };
 
   return (
     <button
       type="button"
-      onPointerDown={begin}
+      onPointerDown={toggle}
       onContextMenu={(e) => e.preventDefault()}
-      title="Hold to talk"
-      aria-label="Hold to talk"
+      title={active ? 'Tap to stop' : 'Tap to talk'}
+      aria-label={active ? 'Stop dictation' : 'Start dictation'}
+      aria-pressed={active}
+      data-recording={active ? 'yes' : 'no'}
       className={
         'p-2 rounded-xl select-none touch-none transition ' +
-        (active ? 'bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/30' : 'text-zinc-400 hover:text-emerald-600 active:scale-95') +
+        (active
+          ? 'bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/30 ring-2 ring-rose-300/70 animate-pulse'
+          : 'text-zinc-400 hover:text-emerald-600 active:scale-95') +
         (className ? ' ' + className : '')
       }
     >
-      <Mic size={size} className={active ? 'animate-pulse' : ''} />
+      {active ? <Square size={Math.max(10, size - 3)} className="fill-current" /> : <Mic size={size} />}
     </button>
   );
 }
-
-const RELEASE_EVENTS = ['pointerup', 'pointercancel', 'touchend', 'touchcancel', 'mouseup', 'blur'] as const;

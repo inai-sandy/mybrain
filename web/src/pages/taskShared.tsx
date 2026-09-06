@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw, CalendarClock, Ban } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { isDictating } from '../ui/useDictation';
+import { finishDictation } from '../ui/useDictation';
 import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
 import { loadDraft, clearDraft, useDraftPersist } from '../ui/useDraft';
@@ -311,7 +311,7 @@ export function DumpModal({ onClose, onDone, onCreated, initialQuestion, followU
   }
 
   return (
-    <Sheet onClose={onClose} canClose={() => !isDictating()} blockBackdropClose={() => text.trim().length > 0}>
+    <Sheet onClose={onClose} canClose={() => !finishDictation()} blockBackdropClose={() => text.trim().length > 0}>
       {(close) => (
         <>
           <div className="flex items-center justify-between mb-3">
