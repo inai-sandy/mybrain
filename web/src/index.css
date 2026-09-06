@@ -6,6 +6,32 @@
    area shrinks above the on-screen keyboard instead of being pushed behind it (iOS). */
 :root {
   --vvh: 100vh;
+
+  /* THE TOP INSET. Read this before using env(safe-area-inset-top) anywhere.
+     index.html asks for `black-translucent` + `viewport-fit=cover`, which tells iOS NOT to reserve
+     the status bar: an installed app is drawn UNDER the clock and battery and must pad itself.
+     A notched iPhone reports 44-59px here and that works. An iPad has no notch, so it reports 0 —
+     while the status bar still overlays the page — and the header ends up under the clock, which
+     is exactly what the owner hit on his installed iPad.
+     In a browser tab there is nothing to clear, so this stays the plain inset. */
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+/* Installed. Guarantee the status bar's own height when iOS under-reports it. 24px is the Face-ID
+   iPad Pro status bar; a home-button iPad wants 20px, and 4px of extra padding is invisible where
+   4px short would leave the clock still clipping the header — so the floor takes the larger.
+   max() makes this safe everywhere: a real inset above the floor wins and nothing changes. */
+@media (display-mode: standalone) {
+  :root {
+    --safe-top: max(env(safe-area-inset-top, 0px), 24px);
+  }
+}
+
+/* iOS came late to `display-mode`, and this codebase already distrusts it — InstallPrompt.tsx ORs
+   the same media query with `navigator.standalone`. main.tsx stamps this attribute from EITHER
+   signal, so the floor still lands on an iPad where the media query alone might not match. */
+html[data-standalone='yes'] {
+  --safe-top: max(env(safe-area-inset-top, 0px), 24px);
 }
 
 /* Prevent stray horizontal scroll at the viewport edge only —

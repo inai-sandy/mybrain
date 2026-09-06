@@ -118,4 +118,36 @@ describe('AppShell', () => {
     walk(src);
     expect([...new Set(offenders)]).toEqual([]);
   });
+
+  // An installed iOS app is drawn UNDER the status bar (black-translucent + viewport-fit=cover) and
+  // must pad itself. A notched iPhone reports a real inset; an iPad reports 0 and the clock lands on
+  // the header. Everything therefore goes through --safe-top, which floors it when standalone.
+  it('routes every top inset through --safe-top, with a standalone floor', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = path.resolve(process.cwd(), 'src');
+
+    const css = fs.readFileSync(path.join(src, 'index.css'), 'utf8');
+    expect(css).toMatch(/--safe-top:\s*env\(safe-area-inset-top/);
+    expect(css).toMatch(/@media\s*\(display-mode:\s*standalone\)/);
+    expect(css).toMatch(/--safe-top:\s*max\(env\(safe-area-inset-top[^)]*\)[^,]*,\s*24px\)/);
+    // iOS may not match the media query at all — the attribute hook is the belt to that braces.
+    expect(css).toMatch(/html\[data-standalone=['"]yes['"]\]/);
+    const main = fs.readFileSync(path.join(src, 'main.tsx'), 'utf8');
+    expect(main).toMatch(/navigator as any\)\.standalone/);
+    expect(main).toMatch(/dataset\.standalone = 'yes'/);
+
+    // …and nothing may reach for the raw inset again.
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { walk(full); continue; }
+        if (!/\.tsx?$/.test(e.name)) continue;
+        if (/env\(safe-area-inset-top/.test(fs.readFileSync(full, 'utf8'))) offenders.push(path.relative(src, full));
+      }
+    };
+    walk(src);
+    expect(offenders).toEqual([]);
+  });
 });
