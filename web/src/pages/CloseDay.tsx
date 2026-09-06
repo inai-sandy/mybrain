@@ -4,7 +4,7 @@ import { Sheet } from '../ui/Sheet';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/Toast';
 import { DictateButton } from '../ui/DictateButton';
-import { isDictating } from '../ui/useDictation';
+import { finishDictation } from '../ui/useDictation';
 import { clearDraft, loadObjectDraft, useObjectDraftPersist } from '../ui/useDraft';
 
 /**
@@ -382,7 +382,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
 
   return (
     <>
-    <Sheet onClose={onClose} canClose={() => !isDictating()} blockBackdropClose={() => true}>
+    <Sheet onClose={onClose} canClose={() => !finishDictation()} blockBackdropClose={() => true}>
       {(close) => (
         <>
           <div className="mb-1 flex items-center justify-between">

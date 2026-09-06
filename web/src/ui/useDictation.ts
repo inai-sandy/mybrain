@@ -3,16 +3,38 @@ import { useToast } from './Toast';
 
 /** Global dictation status so one floating indicator can show the live transcript for the active mic. */
 type Phase = 'idle' | 'listening' | 'transcribing';
-type Status = { listening: boolean; phase: Phase; interim: string; stop: () => void };
+type Status = { listening: boolean; phase: Phase; interim: string; stop: () => void | Promise<void> };
 let status: Status = { listening: false, phase: 'idle', interim: '', stop: () => {} };
 const subs = new Set<() => void>();
 function setStatus(s: Partial<Status>) {
   status = { ...status, ...s };
   subs.forEach((f) => f());
 }
-/** True while ANY mic is recording/transcribing — used to protect modals from closing mid-dictation. */
+/**
+ * True while ANY mic is recording or transcribing — used to stop a modal closing mid-dictation.
+ *
+ * This deliberately still covers 'listening'. It looks tempting to narrow it to the transcribing
+ * window now that tap-to-talk (BEA-1626) can hold the mic open for minutes — but the spoken text
+ * only reaches the host component in `onText`, which runs at the END of `stop()`. Unmount the box
+ * before then and the whole dictation is gone. Releasing the mic is not the same as keeping the
+ * words. The dead-end this used to create ("Close does nothing") is solved by `finishDictation()`
+ * below instead, which is what the sheets call.
+ */
 export function isDictating(): boolean {
   return status.phase !== 'idle';
+}
+
+/**
+ * Ask whichever mic is live to finish now. Returns true if there was one.
+ *
+ * A modal asked to close while dictating uses this: the first tap ends the dictation (so the words
+ * land in the box) and the second tap closes. `Sheet` ignores a refused close silently, so a plain
+ * `return false` would read as a broken button.
+ */
+export function finishDictation(): boolean {
+  if (status.phase === 'idle') return false;
+  void status.stop();
+  return true;
 }
 export function useDictationStatus(): Status {
   const [, force] = useState(0);
@@ -26,7 +48,13 @@ export function useDictationStatus(): Status {
   return status;
 }
 
-const MAX_MS = 120_000; // hard safety cap on a single hold
+/**
+ * Hard safety cap on ONE recording. This was 2 minutes when the mic was hold-to-talk — the length
+ * of time a finger can realistically stay on a button. Since BEA-1626 a tap starts it and a tap
+ * ends it, so the cap has to allow a whole spoken thought (his own EMO takes run past 6 minutes).
+ * Reaching it calls the ordinary stop(), so whatever was said IS kept and inserted — never dropped.
+ */
+const MAX_MS = 600_000;
 
 /** Instant, no-network tidy: drop the most common spoken fillers + de-dupe immediate repeats.
  *  (Deepgram smart_format already handles caps/punctuation/numbers.) */
@@ -41,10 +69,11 @@ function tidy(t: string): string {
 }
 
 /**
- * Hold-to-talk dictation. Held → audio streams live to Deepgram (real-time words) AND is recorded
- * in parallel as a safety net. On release: if streaming produced text it's cleaned + inserted; if it
- * produced nothing (streaming unavailable/blocked), the recorded clip is transcribed instead — so
- * your words are never lost. iOS-PWA-safe: the AudioContext is woken inside the press gesture.
+ * Tap-to-talk dictation (BEA-1626 — a tap starts it, a tap ends it). While it runs, audio streams
+ * live to Deepgram (real-time words) AND is recorded in parallel as a safety net. On stop: if
+ * streaming produced text it's cleaned + inserted; if it produced nothing (streaming unavailable or
+ * blocked), the recorded clip is transcribed instead — so your words are never lost. iOS-PWA-safe:
+ * the AudioContext is woken inside the tap gesture, before any await.
  */
 export function useDictation(onText: (text: string) => void) {
   const toast = useToast();
@@ -222,7 +251,21 @@ export function useDictation(onText: (text: string) => void) {
 
   async function start() {
     if (runningRef.current) return;
+    // Claim the slot SYNCHRONOUSLY, before the await below. A second tap landing during that await
+    // would otherwise pass this guard again and run a second start() over the same refs, orphaning
+    // the first stream with nothing left pointing at it to close.
     runningRef.current = true;
+    // ONE mic at a time. Hold-to-talk made this impossible in practice — you cannot hold two
+    // buttons through two sentences — but a page can carry three mics (Agents has three), and
+    // tapping a second one on is easy now. Two open mics would mean two getUserMedia streams and
+    // two Deepgram sockets writing into two different boxes, so close the other one first.
+    if (status.phase !== 'idle') {
+      try {
+        await status.stop();
+      } catch {
+        /* the other mic is going away regardless */
+      }
+    }
     finalRef.current = '';
     interimRef.current = '';
     preBufRef.current = [];
