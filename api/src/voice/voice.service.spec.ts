@@ -1,6 +1,6 @@
-import { VoiceService } from './voice.service';
+import { VoiceService, VoiceTranscribeError, OPENAI_STT_MODEL } from './voice.service';
 
-function make(opts: { keys?: Record<string, any>; settings?: Record<string, string>; clean?: string; contacts?: { name: string }[] } = {}) {
+function make(opts: { keys?: Record<string, any>; settings?: Record<string, string>; clean?: string; contacts?: { name: string }[]; openaiStatus?: number } = {}) {
   const settings: Record<string, string> = { ...(opts.settings || {}) };
   const prisma: any = {
     setting: {
@@ -30,14 +30,21 @@ function make(opts: { keys?: Record<string, any>; settings?: Record<string, stri
   };
   const prompts: any = { get: async () => '[cleanup instruction]' };
   const calls: string[] = [];
-  (global as any).fetch = jest.fn(async (url: string) => {
+  const models: string[] = []; // every OpenAI STT model actually asked for (BEA-1625)
+  (global as any).fetch = jest.fn(async (url: string, init?: any) => {
     calls.push(url);
-    if (url.includes('api.openai.com/v1/audio')) return { ok: true, json: async () => ({ text: 'um hello world' }) };
+    if (url.includes('api.openai.com/v1/audio')) {
+      try { models.push(String(init?.body?.get?.('model') ?? '')); } catch { /* body shape varies */ }
+      if (opts.openaiStatus && opts.openaiStatus >= 400) {
+        return { ok: false, status: opts.openaiStatus, text: async () => 'refused', json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ text: 'um hello world' }) };
+    }
     if (url.includes('api.elevenlabs.io')) return { ok: true, json: async () => ({ text: 'eleven labs text' }) };
     if (url.includes('api.deepgram.com')) return { ok: false, json: async () => ({}) }; // simulate no/failed deepgram
     return { ok: false, json: async () => ({}) };
   });
-  return { svc: new VoiceService(prisma, connectors, llm, prompts), settings, llm, calls };
+  return { svc: new VoiceService(prisma, connectors, llm, prompts), settings, llm, calls, models };
 }
 
 describe('VoiceService', () => {
@@ -98,40 +105,14 @@ describe('VoiceService', () => {
     expect(text).toBe('um hello world'); // OpenAI fallback result
   });
 
-  it('logs the model that ACTUALLY ran when the newest one is unavailable (BEA-1218)', async () => {
+  // BEA-1218's two fallback tests were REMOVED by BEA-1625: there is no chain and no latch to
+  // test any more. What replaces them is the promise that the usage log still names what ran.
+  it('logs the one model that ran (BEA-1625)', async () => {
     const { svc } = make({ settings: { 'voice.cleanup': '0' } });
     const logged: any[] = [];
     (svc as any).prisma.usageLog = { create: async ({ data }: any) => { logged.push(data); return {}; } };
-    let audioCalls = 0;
-    (global as any).fetch = jest.fn(async (url: string) => {
-      if (url.includes('api.openai.com/v1/audio')) {
-        audioCalls++;
-        if (audioCalls === 1) return { ok: false, json: async () => ({}) }; // account can't use gpt-transcribe
-        return { ok: true, json: async () => ({ text: 'hello' }) };
-      }
-      return { ok: false, json: async () => ({}) };
-    });
-    const text = await svc.transcribe(Buffer.from('x'), 'a.webm', 'audio/webm');
-    expect(text).toBe('hello');
-    expect(audioCalls).toBe(2); // gpt-transcribe → gpt-4o-transcribe, chain stops at first success
-    expect(logged[0].model).toBe('gpt-4o-transcribe'); // the log names what ran, not what we hoped
-  });
-
-  it('remembers a hard rejection of gpt-transcribe — later dictations skip the wasted call (BEA-1218)', async () => {
-    const { svc } = make({ settings: { 'voice.cleanup': '0' } });
-    (svc as any).prisma.usageLog = { create: async () => ({}) };
-    let audioCalls = 0;
-    (global as any).fetch = jest.fn(async (url: string) => {
-      if (url.includes('api.openai.com/v1/audio')) {
-        audioCalls++;
-        if (audioCalls === 1) return { ok: false, status: 404, json: async () => ({}) }; // model not enabled here
-        return { ok: true, json: async () => ({ text: 'hello' }) };
-      }
-      return { ok: false, json: async () => ({}) };
-    });
-    await svc.transcribe(Buffer.from('x'), 'a.webm', 'audio/webm'); // pays the failed call once
-    await svc.transcribe(Buffer.from('y'), 'b.webm', 'audio/webm'); // goes straight to the fallback
-    expect(audioCalls).toBe(3); // 2 for the first (fail+success), only 1 for the second
+    await svc.transcribe(Buffer.from('x'), 'a.webm', 'audio/webm');
+    expect(logged[0].model).toBe(OPENAI_STT_MODEL);
   });
 
   it('ignores a chatty "reply" from cleanup and keeps the raw transcript', async () => {
@@ -160,5 +141,39 @@ describe('VoiceService', () => {
     expect(byId.elevenlabs).toBe(true);
     expect(byId.deepgram).toBe(false);
     expect(cfg.engine).toBe('openai');
+  });
+});
+
+// ---- BEA-1625: one model, no fallback chain, and a refusal is never silent ----
+describe('VoiceService — gpt-transcribe only', () => {
+  it('asks OpenAI for gpt-transcribe and for no other model', async () => {
+    const { svc, models } = make({ settings: { 'voice.cleanup': '0' } });
+    await svc.transcribe(Buffer.from('audio'), 'a.webm', 'audio/webm');
+    expect(models).toEqual([OPENAI_STT_MODEL]);
+    expect(models).not.toContain('gpt-4o-transcribe');
+    expect(models).not.toContain('whisper-1');
+  });
+
+  it('never falls back to an older model when OpenAI refuses', async () => {
+    const { svc, models } = make({ settings: { 'voice.cleanup': '0' }, openaiStatus: 400 });
+    await expect(svc.transcribe(Buffer.from('audio'), 'a.webm', 'audio/webm')).rejects.toBeInstanceOf(VoiceTranscribeError);
+    expect(models).toEqual([OPENAI_STT_MODEL]); // one attempt, one model — no chain behind it
+  });
+
+  it('says why it failed instead of answering an empty transcript', async () => {
+    const { svc } = make({ settings: { 'voice.cleanup': '0' }, openaiStatus: 500 });
+    await expect(svc.transcribe(Buffer.from('audio'), 'a.webm', 'audio/webm')).rejects.toThrow(/could not transcribe/i);
+  });
+
+  it('has no disable latch — a refusal does not stop the next attempt trying again', async () => {
+    const { svc, models } = make({ settings: { 'voice.cleanup': '0' }, openaiStatus: 403 });
+    await expect(svc.transcribe(Buffer.from('a'), 'a.webm', 'audio/webm')).rejects.toBeInstanceOf(VoiceTranscribeError);
+    await expect(svc.transcribe(Buffer.from('b'), 'b.webm', 'audio/webm')).rejects.toBeInstanceOf(VoiceTranscribeError);
+    expect(models).toEqual([OPENAI_STT_MODEL, OPENAI_STT_MODEL]); // tried again, not latched off
+  });
+
+  it('says so plainly when no OpenAI key is connected', async () => {
+    const { svc } = make({ keys: {}, settings: { 'voice.cleanup': '0' } });
+    await expect(svc.transcribe(Buffer.from('audio'), 'a.webm', 'audio/webm')).rejects.toThrow(/No OpenAI key/i);
   });
 });

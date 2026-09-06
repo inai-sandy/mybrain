@@ -1424,8 +1424,17 @@ export class TelegramService implements OnModuleInit {
       return null;
     }
     const name = path.split('/').pop() || 'voice.oga';
-    // Use the app-wide voice engine (GPT-4o Transcribe + cleanup) so Telegram matches the in-app mic.
-    return (await this.voice.transcribe(buf, name, 'audio/ogg')) || null;
+    // Use the app-wide voice engine (gpt-transcribe + cleanup) so Telegram matches the in-app mic.
+    // Since BEA-1625 a refused transcription THROWS rather than answering ''. Swallow it to null
+    // here on purpose: the caller already replies "Couldn't transcribe that…", and letting it
+    // escape would reach handleUpdate's catch, which does NOT advance telegram.lastUpdateId
+    // (BEA-824) — so the same voice note would be retried for ever and never answered.
+    try {
+      return (await this.voice.transcribe(buf, name, 'audio/ogg')) || null;
+    } catch (e: any) {
+      this.log.warn(`voice note not transcribed: ${e?.message || e}`);
+      return null;
+    }
   }
 
 }
