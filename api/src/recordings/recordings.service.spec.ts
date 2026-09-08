@@ -79,7 +79,9 @@ describe('RecordingsService', () => {
       },
       emoCard: { create: jest.fn(async ({ data }: any) => ({ id: 'card1', ...data })) },
     };
-    voice = { transcribeWith: jest.fn(async () => 'the client agreed to five hundred pieces') };
+    // 2026-09-08: a mark follows Settings → Voice input; it used to be pinned to Deepgram, which
+    // loses the owner's Telugu (69 words on gpt-transcribe vs 41 on Deepgram, measured).
+    voice = { getEngine: jest.fn(async () => 'openai'), transcribeWith: jest.fn(async () => 'the client agreed to five hundred pieces') };
     svc = new RecordingsService(db, voice);
   });
 
@@ -117,7 +119,8 @@ describe('RecordingsService', () => {
     const m = [...marks.values()][0];
     expect(m.status).toBe('done');
     expect(m.transcript).toContain('five hundred');
-    expect(voice.transcribeWith).toHaveBeenCalled();
+    expect(voice.getEngine).toHaveBeenCalled();          // never a hard-coded engine
+    expect(voice.transcribeWith).toHaveBeenCalledWith('openai', expect.any(Buffer), 'mark.wav', 'audio/wav');
   });
 
   it('wallTime = session start + offset (the spoken moment, not the transcribed moment)', async () => {

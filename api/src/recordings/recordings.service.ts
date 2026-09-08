@@ -191,7 +191,12 @@ export class RecordingsService implements OnModuleInit {
         const pcm = await this.extractPcm(recId, from, to);
         if (!pcm.length) throw new Error('no audio in window');
         const wav = wavWrap(normalizePcm(pcm));
-        const text = (await this.voice.transcribeWith('deepgram', wav, 'mark.wav', 'audio/wav')).trim();
+        // 2026-09-08: a mark is the OWNER's own voice, one speaker, no diarization — so it follows
+        // Settings → Voice input like his dictation does, instead of being pinned to Deepgram.
+        // Measured on his real mixed Telugu/English speech: gpt-transcribe 69 words with the
+        // code-switching right, Deepgram nova-3 41 with the Telugu lost. (Meetings keep Deepgram:
+        // they need the speaker labels.)
+        const text = (await this.voice.transcribeWith(await this.voice.getEngine(), wav, 'mark.wav', 'audio/wav')).trim();
         await this.prisma.recordingMark.update({ where: { id: m.id }, data: { status: 'done', transcript: text || '(nothing heard)' } });
       } catch {
         await this.prisma.recordingMark.update({ where: { id: m.id }, data: { status: 'failed' } });

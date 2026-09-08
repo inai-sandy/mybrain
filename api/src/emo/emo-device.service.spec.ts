@@ -11,6 +11,10 @@ process.env.EMO_FASTACK = '0'; // these suites exercise the synchronous path; th
 describe('EmoDeviceService (BEA-926)', () => {
   const voice: any = {
     transcribe: jest.fn(async () => 'call the supplier tomorrow'),
+    // 2026-09-08: device audio follows Settings → Voice input like everything else. It was pinned
+    // to Deepgram here, which on the owner's mixed Telugu/English speech read 41 words where
+    // gpt-transcribe read 69 and kept the code-switching right.
+    getEngine: jest.fn(async () => 'openai'),
     transcribeWith: jest.fn(async () => 'call the supplier tomorrow'),
     transcribeMeeting: jest.fn(async () => 'Speaker 1: shall we ship friday?\nSpeaker 2: yes, agreed.'),
     ttsPcm: jest.fn(async () => {
@@ -166,7 +170,8 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('capture mode routes the transcript and answers with a confirmation', async () => {
     const r = await svc.turn(pcm, { mode: 'capture' });
-    expect(voice.transcribeWith).toHaveBeenCalledWith('deepgram', expect.any(Buffer), 'device-turn.wav', 'audio/wav');
+    expect(voice.getEngine).toHaveBeenCalled();          // never a hard-coded engine again
+    expect(voice.transcribeWith).toHaveBeenCalledWith('openai', expect.any(Buffer), 'device-turn.wav', 'audio/wav');
     expect(router.route).toHaveBeenCalledWith('call the supplier tomorrow', { source: 'emo-device', lane: undefined, audioPath: expect.stringMatching(/^turn-.*\.wav$/) });
     expect(r.ok).toBe(true);
     expect(r.say).toContain('Got it');
@@ -325,6 +330,7 @@ describe('EmoDeviceService (BEA-926)', () => {
 describe('fast-ack for deferred lanes (BEA-1593)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-pending-'));
   const voice: any = {
+    getEngine: jest.fn(async () => 'openai'),
     transcribeWith: jest.fn(async () => 'remember to call the supplier'),
     transcribeMeeting: jest.fn(async () => 'Speaker 1: hello'),
     ttsPcm: jest.fn(async () => Buffer.alloc(48)),
@@ -393,6 +399,7 @@ describe('fast-ack for deferred lanes (BEA-1593)', () => {
 
 describe('INPUT inbox: agent questions + answers (BEA-1594)', () => {
   const voice: any = {
+    getEngine: jest.fn(async () => 'openai'),
     transcribeWith: jest.fn(async () => 'go with the second vendor'),
     transcribeMeeting: jest.fn(async () => ''),
     ttsPcm: jest.fn(async () => Buffer.alloc(48)),
@@ -532,6 +539,7 @@ describe('IMA ADPCM decode (BEA-1595)', () => {
 describe('the audio ruler on every device turn (BEA-1622)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-ruler-'));
   const voice: any = {
+    getEngine: jest.fn(async () => 'openai'),
     transcribeWith: jest.fn(async () => 'call the supplier tomorrow'),
     transcribeMeeting: jest.fn(async () => 'Speaker 1: hello'),
     ttsPcm: jest.fn(async () => Buffer.alloc(48)),

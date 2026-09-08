@@ -437,7 +437,7 @@ export class EmoDeviceService {
       try {
         heard = mode === 'meeting'
           ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
-          : (await this.voice.transcribeWith('deepgram', wav, 'device-turn.wav', 'audio/wav')).trim();
+          : (await this.voice.transcribeWith(await this.voice.getEngine(), wav, 'device-turn.wav', 'audio/wav')).trim();
         lastErr = undefined;
         break;
       } catch (e) {
@@ -535,10 +535,15 @@ export class EmoDeviceService {
     if (wav.length <= 15 * 1024 * 1024) {
       try { audioPath = this.saveRecording(wav); } catch { /* keep the turn alive without audio */ }
     }
+    // The engine was hard-coded to Deepgram here, ignoring Settings → Voice input entirely — the
+    // same class of bug as BEA-888 on phone dictation. Measured on the owner's own recordings
+    // (2026-09-08), on his real mixed Telugu/English speech: gpt-transcribe 69 words and the
+    // code-switching correct, Deepgram nova-3 41 words with the Telugu lost, whisper-1 unusable.
+    // Device audio now follows the chosen engine like everything else.
     // meetings get speaker labels (Speaker 1/2…) via diarization (941)
     const heard = mode === 'meeting'
       ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
-      : (await this.voice.transcribeWith('deepgram', wav, 'device-turn.wav', 'audio/wav')).trim();
+      : (await this.voice.transcribeWith(await this.voice.getEngine(), wav, 'device-turn.wav', 'audio/wav')).trim();
     this.logTakeStats(wav, fe, heard, sr);
     if (!heard) {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
