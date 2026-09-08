@@ -43,6 +43,51 @@ export class EmoRouterService {
     private readonly agentLane: EmoAgentLaneService,
   ) {}
 
+  /** How much of a transcript has to survive the router before we call it intact. */
+  private static readonly COVERAGE_MIN = 0.85;
+
+  /**
+   * The router's `text` is written by an LLM, not sliced out of the transcript — so a lazy or
+   * truncated answer used to throw your words away silently. Found 2026-09-08: a 24.7 s recording
+   * that Deepgram transcribed as 27 words ("This is demo recording to understand how it performs
+   * well…") reached the card as **"This is"**. Three recordings in a row lost the same way, and
+   * nothing anywhere noticed.
+   *
+   * Two rules now make that impossible:
+   *   * ONE segment means nothing was split, so the card carries the transcript VERBATIM. The LLM
+   *     still supplies the lane and the summary — it just no longer gets to rewrite your words.
+   *   * SEVERAL segments keep their own text (the lanes read it: a research card must not inherit
+   *     a task's words), but if the pieces together have lost more than 15% of what you said, the
+   *     whole transcript is filed as an extra note as well. We cannot know WHICH words the LLM
+   *     dropped, so we keep all of them rather than guess.
+   */
+  private keepEveryWord(segments: Segment[], transcript: string): Segment[] {
+    const words = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+    const total = words(transcript);
+    if (!total) return segments;
+
+    if (segments.length === 1) {
+      const kept = words(segments[0].text);
+      if (kept < total) {
+        this.log.warn(`router rewrote a single segment down to ${kept}/${total} words — filing your transcript verbatim instead`);
+      }
+      return [{ ...segments[0], text: transcript }];
+    }
+
+    // KNOWN LIMIT, deliberately left: this counts words, it does not check they are HIS words, so
+    // a paraphrase of roughly the right length still passes. Matching word-for-word instead was
+    // written and thrown away — a real split legitimately rephrases ("remind Dharmendra on Friday"
+    // out of "can you remind Dharmendra on Friday please"), so an identity check fired on ordinary
+    // recordings and would have buried him in duplicate note cards. Picking a threshold that
+    // separates a rephrase from a fabrication needs measurements of the live router we do not have
+    // yet. The case that actually bit him — one segment, truncated — is covered exactly, above.
+    const covered = segments.reduce((n, s) => n + words(s.text), 0);
+    if (covered >= total * EmoRouterService.COVERAGE_MIN) return segments;
+
+    this.log.warn(`router segments cover only ${covered}/${total} words — adding a note card with the full transcript`);
+    return [...segments, { lane: 'note' as EmoLane, summary: transcript.replace(/\s+/g, ' ').slice(0, 120), text: transcript }];
+  }
+
   private parseSegments(raw: string | null, transcript: string): Segment[] {
     try {
       const m = (raw || '').match(/\{[\s\S]*\}/);
@@ -79,6 +124,7 @@ export class EmoRouterService {
         this.log.warn('router produced no segments — filing a fallback note card');
         segments = [{ lane: 'note', summary: text.replace(/\s+/g, ' ').slice(0, 120), text }];
       }
+      segments = this.keepEveryWord(segments, text);
     }
 
     // A story told before noon belongs to a still-open yesterday (BEA-981); every other lane keeps the real day.

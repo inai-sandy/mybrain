@@ -107,4 +107,53 @@ describe('EmoRouterService story day (BEA-981)', () => {
     expect(created.find((c) => c.lane === 'story').day).toBe('2026-07-15');
     expect(created.find((c) => c.lane === 'task').day).toBe(await svc.todayKey());
   });
+
+  // ---- 2026-09-08: the router was silently eating the owner's words ----
+  // A 24.7 s pendant recording that Deepgram transcribed as 27 words reached the card as
+  // "This is". The card stores the ROUTER'S text, and nothing checked it against the transcript.
+  // Three recordings in a row were lost that way. These lock the two rules that stop it.
+  describe('never loses a word of the transcript (2026-09-08)', () => {
+    const REAL = 'This is demo recording to understand how it performs well. This is basically very slow voice. It has to capture everything and transcribe everything.';
+
+    it('files the transcript VERBATIM when the router truncates a single segment', async () => {
+      const llm: any = { completeHelper: async () => JSON.stringify({ segments: [{ lane: 'note', summary: 'a recording', text: 'This is' }] }) };
+      const { svc, created } = makeCards();
+      await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any, { handle: async () => undefined } as any).route(REAL);
+      expect(created).toHaveLength(1);
+      expect(created[0].rawTranscript).toBe(REAL);           // not 'This is'
+      expect(created[0].summary).toBe('a recording');        // the LLM still writes the summary
+    });
+
+    it('keeps a faithful single segment as it is', async () => {
+      const llm: any = { completeHelper: async () => JSON.stringify({ segments: [{ lane: 'note', summary: 's', text: REAL }] }) };
+      const { svc, created } = makeCards();
+      await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any, { handle: async () => undefined } as any).route(REAL);
+      expect(created[0].rawTranscript).toBe(REAL);
+    });
+
+    it('keeps a genuine split intact — each lane keeps its own words', async () => {
+      const llm: any = { completeHelper: async () => JSON.stringify({ segments: [
+        { lane: 'task', summary: 'call the vendor', text: 'It has to capture everything and transcribe everything.' },
+        { lane: 'note', summary: 'a note', text: 'This is demo recording to understand how it performs well. This is basically very slow voice.' },
+      ] }) };
+      const { svc, created } = makeCards();
+      await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any, { handle: async () => undefined } as any).route(REAL);
+      expect(created).toHaveLength(2);                        // no extra rescue card
+      expect(created[0].rawTranscript).not.toContain('demo recording');
+      expect(created[1].rawTranscript).toContain('demo recording');
+    });
+
+    it('rescues the whole transcript when a split drops most of it', async () => {
+      const llm: any = { completeHelper: async () => JSON.stringify({ segments: [
+        { lane: 'task', summary: 'a task', text: 'capture everything' },
+        { lane: 'note', summary: 'a note', text: 'This is' },
+      ] }) };
+      const { svc, created } = makeCards();
+      await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any, { handle: async () => undefined } as any).route(REAL);
+      expect(created).toHaveLength(3);                        // the two lanes + the full transcript
+      expect(created.map((c: any) => c.rawTranscript)).toContain(REAL);
+      expect(created[2].lane).toBe('note');
+    });
+  });
+
 });
