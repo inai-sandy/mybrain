@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { Request, Response } from 'express';
 import { AuthService, SESSION_TTL_SECONDS } from './auth.service';
 import { IS_PUBLIC } from './public.decorator';
+import { SESSION_ONLY } from './session-only.decorator';
 
 export const SESSION_COOKIE = 'mb_session';
 
@@ -40,9 +41,21 @@ export class AuthGuard implements CanActivate {
       res.cookie(SESSION_COOKIE, this.auth.issueToken(user), cookieOpts());
       return true;
     }
+    // A device key manages nothing — least of all itself. Without this, whoever holds the LEAKED key
+    // could read the brand-new one out of GET /auth/device-token during the grace period and the
+    // rotation would buy nothing. (DEVICE-TOKEN-ROTATION)
+    const sessionOnly = this.reflector.getAllAndOverride<boolean>(SESSION_ONLY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
+    if (sessionOnly) throw new UnauthorizedException('Sign in on the website to manage the device key.');
+
     // EMO hardware: a long-lived device token in the X-Device-Token header (no cookie / no sliding expiry).
+    // The route (path only — never the query string, which can carry secrets) rides along so a device
+    // still on the OLD token can be named in the log. (DEVICE-TOKEN-ROTATION)
     const deviceToken = (req.headers['x-device-token'] as string) || '';
-    const owner = deviceToken && this.auth.verifyDeviceToken(deviceToken) ? this.auth.deviceUser() : null;
+    const route = `${req.method} ${(req as any).path || (req.url || '').split('?')[0]}`;
+    const owner = deviceToken && this.auth.verifyDeviceToken(deviceToken, route) ? this.auth.deviceUser() : null;
     if (owner) {
       (req as any).user = owner;
       return true;
