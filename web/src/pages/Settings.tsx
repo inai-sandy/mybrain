@@ -2117,9 +2117,12 @@ const MODEL_LABELS: Record<string, string> = {
   'openai/gpt-4o': 'GPT-4o',
 };
 const modelLabel = (id: string) => MODEL_LABELS[id] || id;
-function EmoSettingsSection() {
+/** The old device key, while it still works — never carries the key itself. (DEVICE-TOKEN-ROTATION) */
+type PreviousDeviceToken = { active: boolean; until: string | null; lastSeenAt: string | null; count: number };
+export function EmoSettingsSection() {
   const toast = useToast();
   const [token, setToken] = useState('');
+  const [previous, setPrevious] = useState<PreviousDeviceToken | null>(null);
   const [reveal, setReveal] = useState(false);
   const [ttsVoice, setTtsVoice] = useState('nova');
   const [ttsVoices, setTtsVoices] = useState<string[]>([]);
@@ -2132,17 +2135,32 @@ function EmoSettingsSection() {
   const [search, setSearch] = useState('auto');
   const [devVol, setDevVol] = useState(60);
   useEffect(() => {
-    fetch('/api/auth/device-token').then((r) => r.json()).then((d) => setToken(d.token || '')).catch(() => undefined);
+    fetch('/api/auth/device-token').then((r) => r.json()).then((d) => { setToken(d.token || ''); setPrevious(d.previous || null); }).catch(() => undefined);
     fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setTtsVoice(d.voice || 'nova'); setTtsVoices(d.voices || []); }).catch(() => undefined);
     fetch('/api/voice/config').then((r) => r.json()).then((d) => { setEars(d.engine || ''); setEarsEngines(d.engines || []); }).catch(() => undefined);
     fetch('/api/explore/model').then((r) => r.json()).then((d) => setBrain(d.model || '')).catch(() => undefined);
     fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setRouter(d.routerModel || ''); setModelOpts(d.models || []); setSearch(d.searchDefault || 'auto'); setDevVol(typeof d.deviceVolume === 'number' ? d.deviceVolume : 60); }).catch(() => undefined);
   }, []);
   async function regen() {
-    if (!window.confirm('Generate a new device token? The current one stops working — you’ll need to reflash your EMO device with the new token.')) return;
-    const d = await fetch('/api/auth/device-token/regenerate', { method: 'POST' }).then((r) => r.json()).catch(() => null);
-    if (d?.token) { setToken(d.token); setReveal(true); toast('success', 'New device token generated'); }
-    else toast('error', 'Could not regenerate');
+    // Rotating twice would kill the FIRST old key on the spot — the server refuses unless the owner
+    // says so here, in words. (DEVICE-TOKEN-ROTATION)
+    const again = !!previous?.active;
+    const warning = again
+      ? 'Rotate again?\n\nThe key from your last rotation is STILL live. Rotating now stops it immediately, so any device still running that old firmware will stop working right away.\n\nOnly do this if that key has leaked too.'
+      : 'Rotate the device token?\n\nYou get a new key straight away. Your devices keep working on the OLD key for 30 more days, so nothing breaks while you flash them one by one.\n\nFlash the new key into every device, then tap “Revoke now” to stop the old key for good.';
+    if (!window.confirm(warning)) return;
+    const d = await fetch('/api/auth/device-token/regenerate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: again }) }).then((r) => r.json()).catch(() => null);
+    if (d?.token) { setToken(d.token); setPrevious(d.previous || null); setReveal(true); toast('success', 'New device token generated — the old one still works for 30 days'); }
+    else toast('error', d?.message || 'Could not rotate the token');
+  }
+  async function revokePrevious() {
+    const warning = previous?.active
+      ? 'Stop the old key now?\n\nAny device still running the old firmware will stop working immediately. Only do this once every device has the new key.'
+      : 'Clear the old key away?\n\nIt already expired and no longer works, so nothing will change for your devices.';
+    if (!window.confirm(warning)) return;
+    const d = await fetch('/api/auth/device-token/revoke-previous', { method: 'POST' }).then((r) => r.json()).catch(() => null);
+    if (d?.ok) { setPrevious(null); toast('success', previous?.active ? 'Old device key revoked' : 'Old device key cleared'); }
+    else toast('error', d?.message || 'Could not revoke the old key');
   }
   function copy() { navigator.clipboard?.writeText(token).then(() => toast('success', 'Device token copied')).catch(() => undefined); }
   async function pickEars(e: string) {
@@ -2196,7 +2214,25 @@ function EmoSettingsSection() {
           <button onClick={() => setReveal((r) => !r)} className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700">{reveal ? 'Hide' : 'Show'}</button>
           <button onClick={copy} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500">Copy</button>
         </div>
-        <button onClick={regen} className="mt-3 text-xs text-rose-500 hover:text-rose-400">Regenerate — invalidates the current token</button>
+        <button onClick={regen} data-testid="device-token-rotate" className="mt-3 rounded-lg border border-amber-400/60 px-3 py-1.5 text-xs font-medium text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10">Rotate the key</button>
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">You get a new key straight away. Your devices keep working on the old key for 30 days, so nothing breaks while you flash them one by one. Revoke the old key once they are all done.</p>
+        {previous && (
+          <div data-testid="device-token-previous" className="mt-4 rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+            {previous.active ? (
+              <>
+                <p className="text-amber-800 dark:text-amber-200">
+                  {previous.lastSeenAt
+                    ? <>The old key was last used <b>{fmtRelative(previous.lastSeenAt)}</b> ({previous.count} request{previous.count === 1 ? '' : 's'}). Revoke it once every device is updated.</>
+                    : <>The old key has not been used yet (0 requests). Revoke it once every device is updated.</>}
+                </p>
+                {previous.until && <p className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/70">It stops working on its own on {fmtWhen(previous.until)}.</p>}
+              </>
+            ) : (
+              <p className="text-amber-800 dark:text-amber-200">The old key has expired and no longer works{previous.lastSeenAt ? <> — it was last used {fmtRelative(previous.lastSeenAt)} ({previous.count} request{previous.count === 1 ? '' : 's'})</> : null}. You can clear it away.</p>
+            )}
+            <button onClick={revokePrevious} data-testid="device-token-revoke" className="mt-3 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-500">{previous.active ? 'Revoke now' : 'Clear it away'}</button>
+          </div>
+        )}
       </AccordionCard>
 
       <AccordionCard title="Ears — how EMO hears you" icon={Mic}>
