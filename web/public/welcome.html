@@ -920,9 +920,13 @@
 
   @media (max-width:900px){
     .b-sec{padding:56px 20px 72px}
-    .b-stage{grid-template-columns:1fr;gap:34px;min-height:0}
-    .b-stack{height:360px;overflow:hidden}
-    .b-card{width:min(230px,72vw)}
+    .b-stage{grid-template-columns:1fr;gap:28px;min-height:0}
+    /* on a phone the fanned stack cannot fit — show the three cards it pulled, in order, in normal flow */
+    .b-stack{position:static;height:auto;overflow:visible;display:flex;flex-direction:column-reverse;gap:12px}
+    .b-card{position:static;left:auto;top:auto;width:100%;transform:none!important;visibility:hidden;
+      transition:visibility 0s,opacity .45s var(--soft),box-shadow .45s}
+    .b-card:not(:nth-last-child(-n+3)){display:none}
+    .b-card.b-pull{visibility:visible;box-shadow:0 12px 28px rgba(0,0,0,.10)}
   }
 </style>
 </head>
