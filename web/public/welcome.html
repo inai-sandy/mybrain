@@ -921,6 +921,9 @@
   @media (max-width:900px){
     .b-sec{padding:56px 20px 72px}
     .b-stage{grid-template-columns:1fr;gap:28px;min-height:0}
+    .b-q{min-height:3.5em}
+    .b-ansline{min-height:7em}
+    .b-act{margin-top:26px}
     /* on a phone the fanned stack cannot fit — show the three cards it pulled, in order, in normal flow */
     .b-stack{position:static;height:auto;overflow:visible;display:flex;flex-direction:column-reverse;gap:12px}
     .b-card{position:static;left:auto;top:auto;width:100%;transform:none!important;visibility:hidden;
@@ -1108,7 +1111,7 @@
 <section class="sec reveal device-sec">
 <section class="d-pen">
     <div>
-      <div class="d-pk"><i></i>First look at the device</div>
+      <div class="d-pk"><i></i>The EMO device · coming soon</div>
       <h2>This is EMO.</h2>
       <p class="d-lead">One round thing you wear. <b>Tap it, talk to it, put it back.</b> Everything on this page then happens on its own, while the screen goes dark again.</p>
       <ul class="d-facts">
@@ -1515,7 +1518,7 @@
   };
   addEventListener('resize', () => { if (W.length) { const drawn = W.map((p) => p.classList.contains('a-drawn')); build(); W.forEach((p, i) => { if (drawn[i]) p.classList.add('a-drawn'); }); } });
   if (reduced) { $('said').textContent = '“Every night at eleven, read my mail, keep the important ones, write me a page in Notion and send me the link.”'; ['n0','n1','n2'].forEach((n) => $(n).classList.add('on')); ['o0','o1'].forEach((n) => $(n).classList.add('on')); $('c1').textContent='1,500'; $('c2').textContent='51,721'; $('c3').textContent='1,426'; $('gate').classList.add('in'); build(); W.forEach((p) => p.classList.add('a-drawn')); }
-  else { arrive(document.querySelector('.a-said'), () => { resetAgents(); run(); }, { replay: true }); }
+  else { arrive(document.querySelector('.a-said'), () => { resetAgents(); run(); }, { replay: !matchMedia('(max-width: 900px)').matches }); }
 })();
 
 
@@ -1560,17 +1563,22 @@
     $('meta').classList.remove('in'); $('act').classList.remove('in');
     cards.forEach((c, i) => { c.classList.remove('b-pull'); c.style.cssText = base[i]; });
   };
+  const narrow = matchMedia('(max-width: 900px)').matches;
+  const QTEXT = '“When did I last service the car, and what did they say to fix next?”';
+  const ATEXT = 'On <b>12 April</b>, at 42,000 kilometres. They wrote that the <b>front brake pads</b> would need doing at the next service. That was four months ago.';
   const run = async () => {
-    await type($('q'), '“When did I last service the car, and what did they say to fix next?”', 28);
+    if (narrow) { $('q').innerHTML = QTEXT; $('q').classList.remove('b-cur'); await sleep(400); }
+    else await type($('q'), QTEXT, 28);
     $('q').firstChild && $('q').classList && document.querySelector('#brq').classList.remove('b-cur');
     await sleep(500);
     for (let i = 0; i < 3; i++) { pull(i); await sleep(520); }
     await sleep(300);
-    await type($('ans'), 'On <b>12 April</b>, at 42,000 kilometres. They wrote that the <b>front brake pads</b> would need doing at the next service. That was four months ago.', 17);
+    if (narrow) { $('ans').innerHTML = ATEXT; await sleep(300); }
+    else await type($('ans'), ATEXT, 17);
     await sleep(300); $('meta').classList.add('in'); await sleep(800); $('act').classList.add('in');
   };
   if (reduced) { $('q').innerHTML = '“When did I last service the car, and what did they say to fix next?”'; $('q').classList.remove('b-cur'); [0,1,2].forEach(pull); $('ans').innerHTML = 'On 12 April, at 42,000 kilometres. They wrote that the front brake pads would need doing at the next service.'; $('meta').classList.add('in'); $('act').classList.add('in'); }
-  else { arrive(document.querySelector('.b-stage'), () => { resetBrain(); run(); }, { replay: true }); }
+  else { arrive(document.querySelector('.b-stage'), () => { resetBrain(); run(); }, { replay: !matchMedia('(max-width: 900px)').matches }); }
 })();
 
   // ---------- the ledger board ----------
