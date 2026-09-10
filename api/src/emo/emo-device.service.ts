@@ -366,11 +366,14 @@ export class EmoDeviceService {
   /** ONE transcription road for a device take (both the fast-ack and the sync path): the owner's
    *  engine first, then the whisper rescue when that answer is implausibly short for the audio
    *  (whisper-rescue.ts). Meetings keep their own road (speaker labels). */
-  private async transcribeTake(wav: Buffer): Promise<string> {
+  private async transcribeTake(wav: Buffer, label?: string): Promise<string> {
     const sr = (wav.length >= 28 ? wav.readUInt32LE(24) : 16000) || 16000;   /* the WAV's own header */
     const secs = Math.max(1, (wav.length - 44) / 2 / Math.max(8000, sr));
     const first = (await this.voice.transcribeWith(await this.voice.getEngine(), wav, 'device-turn.wav', 'audio/wav')).trim();
-    return (await this.voice.whisperRescue(wav, 'device-turn.wav', 'audio/wav', first, secs)).trim();
+    const out = (await this.voice.whisperRescue(wav, 'device-turn.wav', 'audio/wav', first, secs)).trim();
+    // the audit trail (cross-change review): a rescued card can be traced back to its recording file
+    if (out !== first) console.log(`[emo] whisper rescue KEPT for ${label || 'a take'}: ${first ? first.split(/\s+/).length : 0} -> ${out.split(/\s+/).length} words`);
+    return out;
   }
 
   /** How long to wait between transcription retries (tests shrink this). */
@@ -447,7 +450,7 @@ export class EmoDeviceService {
       try {
         heard = mode === 'meeting'
           ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
-          : await this.transcribeTake(wav);
+          : await this.transcribeTake(wav, audioPath || name);
         lastErr = undefined;
         break;
       } catch (e) {
@@ -553,7 +556,7 @@ export class EmoDeviceService {
     // meetings get speaker labels (Speaker 1/2…) via diarization (941)
     const heard = mode === 'meeting'
       ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
-      : await this.transcribeTake(wav);
+      : await this.transcribeTake(wav, audioPath);
     this.logTakeStats(wav, fe, heard, sr);
     if (!heard) {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
