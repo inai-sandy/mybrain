@@ -38,6 +38,10 @@ type RadarStatus = {
   pendingTranslation: number;
   categories: string[];
   sources: string[];
+  /// Content freshness, not fetch success — see RadarFeedService.STALE_AFTER_HOURS.
+  newestItemAt?: string | null;
+  staleHours?: number | null;
+  stale?: boolean;
 };
 
 /** The list endpoint pages at 100; the API prunes at 48h (~900 rows max), ten pages covers it. */
@@ -359,6 +363,16 @@ export function RadarView({ publicMode = false }: { publicMode?: boolean } = {})
         )}
         {!publicMode && notice && <span>{notice}</span>}
       </div>
+
+      {/* Nothing new for a long time. A failing sync already says so above; this is the OTHER
+          case, and the one that actually bit: every sync succeeding while the source itself sat
+          frozen. Without this the page just quietly showed old news. (radar staleness) */}
+      {status?.stale && !status?.lastError && !error && (rows || []).length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+          Nothing new has arrived for {status.staleHours} hours — the newest story here is that old.
+          Syncing is working, so the collector that feeds it has probably stopped publishing.
+        </div>
+      )}
 
       {(status?.lastError || error) && (rows || []).length > 0 && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">

@@ -49,6 +49,23 @@ const CJK_RE = /[぀-ヿ㐀-䶿一-鿿豈-﫿]/;
 @Injectable()
 export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
   static readonly BASE_URL = process.env.RADAR_BASE_URL || 'https://inai-sandy.github.io/ai-news-radar/data';
+
+  /**
+   * How old the NEWEST story may be before the radar counts as stale.
+   *
+   * A sync that succeeds tells you nothing about whether the collector is still working: on
+   * 2026-09-09 its hourly job began exceeding its time limit and stopped publishing, and for 21
+   * hours this service went on fetching the same frozen file and reporting `ok` every time
+   * ("fetched 284, stored 0, known 284"). Health has to be measured by whether anything NEW
+   * arrived, not by whether the fetch worked.
+   *
+   * 16 hours is measured, not guessed. Over the 30 days to 2026-09-10 the collector published 384
+   * times: median gap 1.0h, 90th percentile 4.1h, 99th 15.4h, longest 24.2h. So 16h sits just above
+   * normal behaviour — it would have cried wolf 3 times in a month where 8h would have done so 10
+   * times, and a warning nobody believes is worse than no warning. The outage that prompted this
+   * ran past 21h, so it is still caught, about five hours before the owner noticed it himself.
+   */
+  static readonly STALE_AFTER_HOURS = 16;
   /** The fork's workflow runs hourly (cron minute 17), so hourly here matches it. */
   static readonly POLL_MS = 60 * 60 * 1000;
   /** Politeness cap per sync on the free translate endpoint; the rest stay pending and retry. */
@@ -453,13 +470,19 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
 
   /** Distinct filter values for the view's dropdowns, plus the sync state. */
   async status() {
-    const [state, categories, sources, total, pending] = await Promise.all([
+    const [state, categories, sources, total, pending, newest] = await Promise.all([
       this.prisma.radarSync.findUnique({ where: { id: 'singleton' } }),
       this.prisma.radarItem.findMany({ where: { pendingTranslation: false, category: { not: '' } }, distinct: ['category'], select: { category: true }, orderBy: { category: 'asc' } }),
       this.prisma.radarItem.findMany({ where: { pendingTranslation: false, source: { not: '' } }, distinct: ['source'], select: { source: true }, orderBy: { source: 'asc' } }),
       this.prisma.radarItem.count({ where: { pendingTranslation: false } }),
       this.prisma.radarItem.count({ where: { pendingTranslation: true } }),
+      // `lte: now` on purpose: sources do sometimes publish a future timestamp, and one such row
+      // would otherwise be "the newest story", make staleHours negative and suppress the warning —
+      // silently recreating the very outage this exists to catch.
+      this.prisma.radarItem.findFirst({ where: { pendingTranslation: false, publishedAt: { lte: new Date() } }, orderBy: { publishedAt: 'desc' }, select: { publishedAt: true } }),
     ]);
+    const newestItemAt: Date | null = newest?.publishedAt || null;
+    const staleHours = newestItemAt ? Math.floor((Date.now() - newestItemAt.getTime()) / 3_600_000) : null;
     return {
       lastSyncAt: state?.lastSyncAt || null,
       lastOkAt: state?.lastOkAt || null,
@@ -467,6 +490,11 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
       counts: this.parseJson(state?.counts, {}),
       total,
       pendingTranslation: pending,
+      /// When the newest story we hold was published, and how long ago that is — the ONLY honest
+      /// measure of whether the radar is alive. `lastOkAt` can be seconds old while this is a day.
+      newestItemAt,
+      staleHours,
+      stale: staleHours !== null && staleHours >= RadarFeedService.STALE_AFTER_HOURS,
       categories: categories.map((c: any) => c.category),
       sources: sources.map((s: any) => s.source),
     };
@@ -502,7 +530,10 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
   /** Public status: what the filters need and when the news was last fresh — never our error text. */
   async publicStatus() {
     const s = await this.status();
-    return { lastOkAt: s.lastOkAt, total: s.total, categories: s.categories, sources: s.sources };
+    // `stale`/`staleHours` are carried through deliberately: /radar is the page meant to be shared,
+    // so a stranger reading day-old news must see the same warning the owner does. `newestItemAt`
+    // stays private — the two flags say everything the banner needs.
+    return { lastOkAt: s.lastOkAt, total: s.total, categories: s.categories, sources: s.sources, stale: s.stale, staleHours: s.staleHours };
   }
 
   /**

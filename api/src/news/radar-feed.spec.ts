@@ -52,12 +52,29 @@ function makePrisma() {
     }
     if (where.title?.contains && !String(row.title).toLowerCase().includes(String(where.title.contains).toLowerCase())) return false;
     if (where.heat?.gte !== undefined && !(Number(row.heat) >= where.heat.gte)) return false;
+    // status() asks for publishedAt <= now so a future-dated row cannot pose as the newest story.
+    if (where.publishedAt?.lte !== undefined && !(new Date(row.publishedAt) <= new Date(where.publishedAt.lte))) return false;
     return true;
   };
   return {
     items,
     state,
     radarItem: {
+      // status() reads the newest story to judge freshness (radar staleness).
+      findFirst: async ({ where, orderBy }: any = {}) => {
+        const rows = [...items.values()].filter((r) => matches(r, where));
+        if (orderBy) {
+          const first = Array.isArray(orderBy) ? orderBy[0] : orderBy;
+          const key = Object.keys(first || {})[0];
+          // Honour the direction. Sorting desc regardless would let a flipped orderBy — the oldest
+          // story posing as the newest — sail past these tests.
+          if (key) {
+            const dir = first[key] === 'asc' ? -1 : 1;
+            rows.sort((a, b) => (a[key] < b[key] ? 1 : -1) * dir);
+          }
+        }
+        return rows[0] ?? null;
+      },
       findMany: async ({ where, select, distinct, skip, take, orderBy }: any = {}) => {
         let rows = [...items.values()].filter((r) => matches(r, where));
         if (orderBy) {
@@ -467,5 +484,71 @@ describe('the public radar is a separate, narrower shape (BEA-1325)', () => {
     prisma.items.get('en-2').title = 'OpenAI ships a new eval suite'; // same story, second outlet
     const m: any = await svc.ogMeta('https://mybrain.example');
     expect(m.description.match(/OpenAI ships a new eval suite/g)).toHaveLength(1);
+  });
+});
+
+// ---- A sync that works tells you nothing about whether the SOURCE is alive (radar staleness) ----
+describe('RadarFeedService.status — freshness is measured by content, not by the fetch', () => {
+  const item = (id: string, publishedAt: Date) => ({
+    id, title: id, titleOriginal: id, translated: false, pendingTranslation: false,
+    url: `https://x/${id}`, source: 'src', category: 'ai_general', aiScore: 0.5,
+    storyId: '', sources: '[]', isPick: false, heat: 1, whyItMatters: null,
+    publishedAt, firstSeenAt: new Date(), lastSeenAt: new Date(),
+  });
+
+  it('is not stale when the newest story is recent', async () => {
+    const prisma = makePrisma();
+    prisma.items.set('a', item('a', new Date(Date.now() - 2 * 3_600_000)));
+    const svc = new RadarFeedService(prisma as any);
+    const st: any = await svc.status();
+    expect(st.staleHours).toBe(2);
+    expect(st.stale).toBe(false);
+  });
+
+  it('IS stale when nothing new has arrived for longer than the threshold', async () => {
+    const prisma = makePrisma();
+    prisma.items.set('a', item('a', new Date(Date.now() - 21 * 3_600_000)));
+    const svc = new RadarFeedService(prisma as any);
+    const st: any = await svc.status();
+    expect(st.staleHours).toBe(21);
+    expect(st.stale).toBe(true);
+  });
+
+  it('stays stale even when the last sync succeeded seconds ago — the exact 2026-09-09 failure', async () => {
+    const prisma = makePrisma();
+    prisma.items.set('a', item('a', new Date(Date.now() - 21 * 3_600_000)));
+    prisma.state.row = { id: 'singleton', lastSyncAt: new Date(), lastOkAt: new Date(), lastError: null, counts: '{"ok":true,"fetched":284,"stored":0}' };
+    const svc = new RadarFeedService(prisma as any);
+    const st: any = await svc.status();
+    expect(st.lastError).toBeNull();     // the fetch was fine…
+    expect(st.stale).toBe(true);         // …and the radar was still dead
+  });
+
+  it('says nothing either way when there are no stories at all', async () => {
+    const svc = new RadarFeedService(makePrisma() as any);
+    const st: any = await svc.status();
+    expect(st.newestItemAt).toBeNull();
+    expect(st.staleHours).toBeNull();
+    expect(st.stale).toBe(false);
+  });
+
+  it('a single future-dated story cannot pose as the newest and hide the outage', async () => {
+    const prisma = makePrisma();
+    prisma.items.set('old', item('old', new Date(Date.now() - 21 * 3_600_000)));
+    prisma.items.set('future', item('future', new Date(Date.now() + 6 * 3_600_000))); // a source got its clock wrong
+    const svc = new RadarFeedService(prisma as any);
+    const st: any = await svc.status();
+    expect(st.staleHours).toBe(21); // judged on the newest REAL story, not the impossible one
+    expect(st.stale).toBe(true);
+  });
+
+  it('the public radar is told too — it is the page built to be shared', async () => {
+    const prisma = makePrisma();
+    prisma.items.set('a', item('a', new Date(Date.now() - 21 * 3_600_000)));
+    const svc = new RadarFeedService(prisma as any);
+    const pub: any = await svc.publicStatus();
+    expect(pub.stale).toBe(true);
+    expect(pub.staleHours).toBe(21);
+    expect(pub.newestItemAt).toBeUndefined(); // kept private — the flags say enough
   });
 });
