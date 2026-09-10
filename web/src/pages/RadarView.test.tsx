@@ -279,3 +279,28 @@ describe('states stay honest (carried from BEA-1313)', () => {
     expect(fetchMock.mock.calls.some(([u, init]: any[]) => String(u).includes('/radar/sync') && init?.method === 'POST')).toBe(true);
   });
 });
+
+// ---- The page must SAY when the radar has gone quiet (radar staleness) ----
+describe('stale radar warning', () => {
+  it('says so, and for how long, when nothing new has arrived', async () => {
+    vi.stubGlobal('fetch', mockFetch({ status: { ...STATUS, stale: true, staleHours: 21 } }));
+    render(<RadarView />);
+    await waitFor(() => expect(screen.getByText(/Nothing new has arrived for 21 hours/i)).toBeTruthy());
+    // and it names the likely cause, so it is actionable rather than just alarming
+    expect(screen.getByText(/collector that feeds it has probably stopped publishing/i)).toBeTruthy();
+  });
+
+  it('stays quiet when the radar is fresh', async () => {
+    vi.stubGlobal('fetch', mockFetch({ status: { ...STATUS, stale: false, staleHours: 2 } }));
+    render(<RadarView />);
+    await waitFor(() => expect(screen.getAllByText(/State of Open Models/i).length).toBeGreaterThan(0));
+    expect(screen.queryByText(/Nothing new has arrived/i)).toBeNull();
+  });
+
+  it('does not double up with the sync-failed warning', async () => {
+    vi.stubGlobal('fetch', mockFetch({ status: { ...STATUS, stale: true, staleHours: 30, lastError: 'boom' } }));
+    render(<RadarView />);
+    await waitFor(() => expect(screen.getAllByText(/State of Open Models/i).length).toBeGreaterThan(0));
+    expect(screen.queryByText(/Nothing new has arrived/i)).toBeNull(); // the error banner speaks instead
+  });
+});
