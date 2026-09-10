@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmoAgentLaneService } from './emo-agent-lane.service';
+import { wordCount } from '../voice/whisper-rescue';
 import { EmoCardsService, EmoLane } from './emo-cards.service';
 import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
@@ -62,7 +63,7 @@ export class EmoRouterService {
    *     dropped, so we keep all of them rather than guess.
    */
   private keepEveryWord(segments: Segment[], transcript: string): Segment[] {
-    const words = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+    const words = wordCount;                      /* one word-counter for the app (cross-change review) */
     const total = words(transcript);
     if (!total) return segments;
 
