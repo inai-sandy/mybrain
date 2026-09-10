@@ -15,6 +15,7 @@ describe('EmoDeviceService (BEA-926)', () => {
     // to Deepgram here, which on the owner's mixed Telugu/English speech read 41 words where
     // gpt-transcribe read 69 and kept the code-switching right.
     getEngine: jest.fn(async () => 'openai'),
+    whisperRescue: jest.fn(async (_b: Buffer, _f: string, _m: string, first: string) => first),   // 2026-09-10: the guarded second look (whisper-rescue.spec.ts proves the guard)
     transcribeWith: jest.fn(async () => 'call the supplier tomorrow'),
     transcribeMeeting: jest.fn(async () => 'Speaker 1: shall we ship friday?\nSpeaker 2: yes, agreed.'),
     ttsPcm: jest.fn(async () => {
@@ -168,10 +169,17 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(r.say).toContain('What is on your mind');
   });
 
+  it('a rescued transcript is what gets routed — the whole point of the second look (2026-09-10)', async () => {
+    voice.whisperRescue.mockResolvedValueOnce('This is just a demo recording. Now I am starting to put the capture in my mouth.');
+    await svc.turn(pcm, { mode: 'capture' });
+    expect(router.route).toHaveBeenCalledWith('This is just a demo recording. Now I am starting to put the capture in my mouth.', expect.objectContaining({ source: 'emo-device' }));
+  });
+
   it('capture mode routes the transcript and answers with a confirmation', async () => {
     const r = await svc.turn(pcm, { mode: 'capture' });
     expect(voice.getEngine).toHaveBeenCalled();          // never a hard-coded engine again
     expect(voice.transcribeWith).toHaveBeenCalledWith('openai', expect.any(Buffer), 'device-turn.wav', 'audio/wav');
+    expect(voice.whisperRescue).toHaveBeenCalledWith(expect.any(Buffer), 'device-turn.wav', 'audio/wav', 'call the supplier tomorrow', expect.any(Number));   // the second look runs on the same audio, with its length
     expect(router.route).toHaveBeenCalledWith('call the supplier tomorrow', { source: 'emo-device', lane: undefined, audioPath: expect.stringMatching(/^turn-.*\.wav$/) });
     expect(r.ok).toBe(true);
     expect(r.say).toContain('Got it');
@@ -331,6 +339,7 @@ describe('fast-ack for deferred lanes (BEA-1593)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-pending-'));
   const voice: any = {
     getEngine: jest.fn(async () => 'openai'),
+    whisperRescue: jest.fn(async (_b: Buffer, _f: string, _m: string, first: string) => first),   // 2026-09-10: the guarded second look (whisper-rescue.spec.ts proves the guard)
     transcribeWith: jest.fn(async () => 'remember to call the supplier'),
     transcribeMeeting: jest.fn(async () => 'Speaker 1: hello'),
     ttsPcm: jest.fn(async () => Buffer.alloc(48)),
@@ -400,6 +409,7 @@ describe('fast-ack for deferred lanes (BEA-1593)', () => {
 describe('INPUT inbox: agent questions + answers (BEA-1594)', () => {
   const voice: any = {
     getEngine: jest.fn(async () => 'openai'),
+    whisperRescue: jest.fn(async (_b: Buffer, _f: string, _m: string, first: string) => first),   // 2026-09-10: the guarded second look (whisper-rescue.spec.ts proves the guard)
     transcribeWith: jest.fn(async () => 'go with the second vendor'),
     transcribeMeeting: jest.fn(async () => ''),
     ttsPcm: jest.fn(async () => Buffer.alloc(48)),
@@ -540,6 +550,7 @@ describe('the audio ruler on every device turn (BEA-1622)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-ruler-'));
   const voice: any = {
     getEngine: jest.fn(async () => 'openai'),
+    whisperRescue: jest.fn(async (_b: Buffer, _f: string, _m: string, first: string) => first),   // 2026-09-10: the guarded second look (whisper-rescue.spec.ts proves the guard)
     transcribeWith: jest.fn(async () => 'call the supplier tomorrow'),
     transcribeMeeting: jest.fn(async () => 'Speaker 1: hello'),
     ttsPcm: jest.fn(async () => Buffer.alloc(48)),

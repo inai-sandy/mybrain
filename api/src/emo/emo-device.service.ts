@@ -363,6 +363,16 @@ export class EmoDeviceService {
     return clampForDevice(await this.turnInner(body, opts));
   }
 
+  /** ONE transcription road for a device take (both the fast-ack and the sync path): the owner's
+   *  engine first, then the whisper rescue when that answer is implausibly short for the audio
+   *  (whisper-rescue.ts). Meetings keep their own road (speaker labels). */
+  private async transcribeTake(wav: Buffer): Promise<string> {
+    const sr = (wav.length >= 28 ? wav.readUInt32LE(24) : 16000) || 16000;   /* the WAV's own header */
+    const secs = Math.max(1, (wav.length - 44) / 2 / Math.max(8000, sr));
+    const first = (await this.voice.transcribeWith(await this.voice.getEngine(), wav, 'device-turn.wav', 'audio/wav')).trim();
+    return (await this.voice.whisperRescue(wav, 'device-turn.wav', 'audio/wav', first, secs)).trim();
+  }
+
   /** How long to wait between transcription retries (tests shrink this). */
   retryDelayMs = 30_000;
 
@@ -437,7 +447,7 @@ export class EmoDeviceService {
       try {
         heard = mode === 'meeting'
           ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
-          : (await this.voice.transcribeWith(await this.voice.getEngine(), wav, 'device-turn.wav', 'audio/wav')).trim();
+          : await this.transcribeTake(wav);
         lastErr = undefined;
         break;
       } catch (e) {
@@ -543,7 +553,7 @@ export class EmoDeviceService {
     // meetings get speaker labels (Speaker 1/2…) via diarization (941)
     const heard = mode === 'meeting'
       ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
-      : (await this.voice.transcribeWith(await this.voice.getEngine(), wav, 'device-turn.wav', 'audio/wav')).trim();
+      : await this.transcribeTake(wav);
     this.logTakeStats(wav, fe, heard, sr);
     if (!heard) {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };

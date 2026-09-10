@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorService, ConnectorName } from '../connectors/connector.service';
+import { gptTooShort, judgeRescue, wordCount, WhisperVerbose } from './whisper-rescue';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { CURATED_MODELS, isCuratedModel } from '../llm/curated-models';
@@ -207,6 +208,39 @@ export class VoiceService {
     await this.prisma.usageLog.create({ data: { feature: 'voice-transcribe', model: loggedModel, cost: null } }).catch(() => undefined);
     if (await this.cleanupOn()) text = await this.clean(text).catch(() => text);
     return (text || '').trim();
+  }
+
+  /** The whisper rescue (2026-09-10, whisper-rescue.ts): when the first engine's answer is implausibly
+   *  short for the audio, ask whisper-1 for the same audio WITH its confidence, and keep whisper's
+   *  answer only if the guard believes it. Off switch: Setting voice.whisperRescue = '0'. One log line
+   *  per decision, so a wrong rescue can be found and the guard tightened from evidence. */
+  async whisperRescue(buf: Buffer, filename: string, mime: string, firstText: string, secs: number): Promise<string> {
+    const first = (firstText || '').trim();
+    if (!buf?.length || !Number.isFinite(secs) || !gptTooShort(first, secs)) return first;
+    /* EVERYTHING from here is inside the net: a DB hiccup on the setting read, a missing key, an HTTP
+       error or bad JSON must all degrade to "keep the first answer" — never to a thrown take (review). */
+    try {
+      if ((await this.getSetting('voice.whisperRescue')) === '0') return first;
+      const c = await this.connectors.get<{ apiKey: string }>('openai');
+      if (!c?.apiKey) return first;
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(buf)]), filename || 'audio.wav');
+      form.append('model', 'whisper-1');
+      form.append('response_format', 'verbose_json');
+      const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${c.apiKey}` }, body: form as any });
+      if (!r.ok) { this.log.warn(`whisper rescue: HTTP ${r.status} — keeping the first answer`); return first; }
+      const v = (await r.json()) as WhisperVerbose;
+      const verdict = judgeRescue(v, first, secs);
+      this.log.log(`whisper rescue: ${verdict.accept ? 'KEPT whisper' : 'declined'} — ${verdict.why} (first: ${wordCount(first)} words, ${secs.toFixed(0)} s)`);
+      if (verdict.accept) {
+        await this.prisma.usageLog.create({ data: { feature: 'voice-rescue', model: 'whisper-1', cost: null } }).catch(() => undefined);
+        return verdict.text;
+      }
+      return first;
+    } catch (e: any) {
+      this.log.warn(`whisper rescue: ${e?.message || e} — keeping the first answer`);
+      return first;
+    }
   }
 
   /** Transcribe with a SPECIFIC engine (Meetings module — per-meeting choice). No dictation cleanup; OpenAI fallback. */
