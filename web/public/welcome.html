@@ -177,7 +177,12 @@
   @keyframes pathC{0%{transform:translate(0,0)}30%{transform:translate(-120px,-40px)}65%{transform:translate(-40px,-110px)}100%{transform:translate(60px,-30px)}}
 
   @media (max-width:760px){
-    .navl{display:none}
+    /* keep the device reachable on a phone: drop the wordy pills, keep the two that matter */
+    .nav{padding:12px 16px;gap:8px}
+    .navl{display:flex;gap:6px;margin:0}
+    .navl .pill:first-child{display:none}
+    .nav .pill{height:32px;padding:0 12px;font-size:13.5px}
+    .navr .pill:first-child{display:none}
     .hero{padding-top:56px}
     .hero-in,.lede-wrap{padding-left:0}
     .lede-wrap{margin-top:30px}
