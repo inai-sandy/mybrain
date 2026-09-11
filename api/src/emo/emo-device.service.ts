@@ -109,6 +109,23 @@ export function decodeOpusStream(body: Buffer): Buffer {
   return Buffer.concat(parts);
 }
 
+/** 16 kHz mono PCM → the device's own Opus stream (2-byte little-endian length + packet, 20 ms
+ *  frames, 32 kbps VOIP) — the mirror of decodeOpusStream, used to keep long takes small. */
+export function encodeOpusStream(pcm: Buffer): Buffer {
+  const opus = new OpusScript(16000, 1, OpusScript.Application.VOIP);
+  try { opus.encoderCTL(4002, 32000); } catch { /* bitrate CTL missing on this build: the default holds */ }
+  const frame = 320;                                    // 20 ms at 16 kHz
+  const parts: Buffer[] = [];
+  const n = Math.floor(pcm.length / 2);
+  for (let i = 0; i + frame <= n; i += frame) {
+    const pkt = Buffer.from(opus.encode(pcm.subarray(i * 2, (i + frame) * 2), frame));
+    const head = Buffer.alloc(2); head.writeUInt16LE(pkt.length, 0);
+    parts.push(head, pkt);
+  }
+  try { opus.delete(); } catch { /* wasm cleanup */ }
+  return Buffer.concat(parts);
+}
+
 /** Every device take goes through the clarity chain — high-pass 200 Hz → presence shelf → speech level
  *  to -16 dBFS with a soft limiter (emo-clarity.ts, chosen by the owner's ear on 2026-09-11). Kept
  *  under this name because three callers and two specs know it. */
@@ -428,9 +445,11 @@ export class EmoDeviceService {
       return;
     }
     let audioPath: string | undefined;
-    if (wav.length <= 15 * 1024 * 1024) {
-      try { audioPath = this.saveRecording(wav); } catch { /* keep going without audio */ }
-    }
+    /* 2026-09-11 (meeting-road review): a long take used to be dropped here — over 15 MB of WAV was
+       not kept, and on success the pending file was deleted, so an hour-long meeting left no audio
+       to re-run when the labels were wrong. Now a big take is kept as Opus (~14 MB an hour, the
+       device's own stream format, decodable by readAudio) instead of not at all. */
+    try { audioPath = wav.length <= 15 * 1024 * 1024 ? this.saveRecording(wav) : this.saveRecordingOpus(wav); } catch (e) { console.error('[emo] keep audio failed', e); }
     let heard = '';
     let lastErr: unknown;
     for (let i = 0; i < 3; i++) {
@@ -642,12 +661,32 @@ export class EmoDeviceService {
     return name;
   }
 
-  /** Read a kept recording by its stored name (path-traversal safe). */
+  /** A long take (an hour of meeting = ~115 MB of WAV) kept as Opus at 32 kbps in the device's own
+   *  length-prefixed stream format — ~14 MB an hour, and `decodeOpusStream` reads it back. Counts
+   *  against the same newest-50 rule as the WAVs. */
+  private saveRecordingOpus(wav: Buffer): string {
+    const dir = process.env.EMO_DEVICE_AUDIO_DIR || '/app/data/emo/recordings';
+    fs.mkdirSync(dir, { recursive: true });
+    const name = `turn-${Date.now()}.opus`;
+    fs.writeFileSync(path.join(dir, name), encodeOpusStream(wav.subarray(44)));
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.wav') || f.endsWith('.opus')).sort();
+    while (files.length > 50) {
+      const old = files.shift();
+      if (old) fs.unlinkSync(path.join(dir, old));
+    }
+    return name;
+  }
+
+  /** Read a kept recording by its stored name (path-traversal safe). A `.opus` keeper comes back as
+   *  16 kHz WAV, so every caller keeps seeing WAV. */
   readAudio(name: string): Buffer | null {
     const safe = path.basename(name || '');
-    if (!safe.endsWith('.wav')) return null;
     const dir = process.env.EMO_DEVICE_AUDIO_DIR || '/app/data/emo/recordings';
     const p = path.join(dir, safe);
+    if (safe.endsWith('.opus')) {
+      try { return wavWrap(decodeOpusStream(fs.readFileSync(p)), 16000); } catch { return null; }
+    }
+    if (!safe.endsWith('.wav')) return null;
     try { return fs.readFileSync(p); } catch { return null; }
   }
 

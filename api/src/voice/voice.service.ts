@@ -18,6 +18,19 @@ export const OPENAI_STT_MODEL = 'gpt-transcribe';
  */
 export class VoiceTranscribeError extends Error {}
 
+/** A provider could not be REACHED or answered badly (timeout, HTTP 5xx, network). Distinct from
+ *  "no speech" (an empty string): a caller with a retry loop (the device road) retries THIS and
+ *  files an empty answer as silence. 2026-09-11 meeting-road review: transcribeMeeting swallowed
+ *  every provider error into '', so the device's 3-try loop never ran and one Deepgram hiccup filed
+ *  an hour-long meeting as "Nothing heard". */
+export class VoiceTransportError extends Error {}
+/** Deepgram on an hour of audio takes tens of seconds; the default undici limit (5 min) sat between
+ *  "slow" and "dead" with nothing deciding. 15 minutes is the ceiling, then it is a transport error. */
+export const DEEPGRAM_TIMEOUT_MS = 15 * 60 * 1000;
+/** OpenAI's transcription upload limit is 25 MB; an hour of 16 kHz WAV is ~115 MB. Past this the
+ *  OpenAI leg is not even tried — it would refuse, and the refusal used to read as "no speech". */
+export const OPENAI_MAX_UPLOAD_BYTES = 24 * 1024 * 1024;
+
 const ENGINES: { id: Engine; name: string; connector: ConnectorName }[] = [
   { id: 'openai', name: 'OpenAI GPT Transcribe (recommended)', connector: 'openai' },
   { id: 'elevenlabs', name: 'ElevenLabs Scribe (most accurate on English)', connector: 'elevenlabs' },
@@ -28,6 +41,20 @@ const ENGINES: { id: Engine; name: string; connector: ConnectorName }[] = [
 const ttsCache = new Map<string, Buffer>(); // spoken fillers/ack repeat → instant after first generation (BEA-889)
 
 /** One transcription engine for the whole app (in-app mic + Telegram voice): record → STT → optional AI cleanup. */
+/** Deepgram utterances → "Speaker N: …" lines, consecutive same-speaker utterances merged. Pure. */
+export function utterancesToLines(utts: any[]): string[] {
+  const lines: string[] = [];
+  let curSpeaker = -1;
+  for (const u of utts || []) {
+    const sp = Number.isFinite(u?.speaker) ? Number(u.speaker) : 0;
+    const text = String(u?.transcript || '').trim();
+    if (!text) continue;
+    if (sp !== curSpeaker) { lines.push(`Speaker ${sp + 1}: ${text}`); curSpeaker = sp; }
+    else lines[lines.length - 1] += ` ${text}`;
+  }
+  return lines;
+}
+
 @Injectable()
 export class VoiceService {
   private readonly log = new Logger('Voice');
@@ -263,41 +290,63 @@ export class VoiceService {
 
   /** Meeting transcription with speaker labels (BEA-941): Deepgram diarization →
    *  "Speaker 1: …" lines (consecutive same-speaker utterances merged).
-   *  Falls back to the plain engine path when diarization isn't available. */
+   *
+   *  The ladder (2026-09-11 review): labelled → plain Deepgram (labels lost, said in the log) →
+   *  OpenAI only when the file fits its 25 MB limit → otherwise THROW VoiceTransportError so the
+   *  device road's retry loop runs and, after 3 tries, files "Recording kept — transcription
+   *  failed" with the audio kept. An empty string means one thing only: the provider answered and
+   *  heard no speech. */
   async transcribeMeeting(buf: Buffer, mime = 'audio/wav'): Promise<string> {
     if (!buf?.length) return '';
     const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
+    let lastErr = 'no Deepgram key is connected';
     if (c?.apiKey) {
+      const model = await this.getDeepgramModel();
       try {
-        const model = await this.getDeepgramModel();
         const r = await fetch(
           `https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true&diarize=true&utterances=true${await this.keytermQuery(model)}`,
-          { method: 'POST', headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime }, body: new Uint8Array(buf) },
+          { method: 'POST', headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime }, body: new Uint8Array(buf), signal: AbortSignal.timeout(DEEPGRAM_TIMEOUT_MS) },
         );
         if (r.ok) {
           const d: any = await r.json();
           const utts: any[] = Array.isArray(d?.results?.utterances) ? d.results.utterances : [];
-          const lines: string[] = [];
-          let curSpeaker = -1;
-          for (const u of utts) {
-            const sp = Number.isFinite(u.speaker) ? Number(u.speaker) : 0;
-            const text = String(u.transcript || '').trim();
-            if (!text) continue;
-            if (sp !== curSpeaker) {
-              lines.push(`Speaker ${sp + 1}: ${text}`);
-              curSpeaker = sp;
-            } else {
-              lines[lines.length - 1] += ` ${text}`;
-            }
-          }
-          if (lines.length) {
-            await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: `${model}+diarize`, cost: null } }).catch(() => undefined);
-            return lines.join('\n');
-          }
+          const lines = utterancesToLines(utts);
+          await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: `${model}+diarize`, cost: null } }).catch(() => undefined);
+          if (lines.length) return lines.join('\n');
+          /* the provider answered and heard nothing: silence, not a failure */
+          const plain = String(d?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '').trim();
+          return plain;
         }
-      } catch { /* fall through to the plain path */ }
+        lastErr = `Deepgram diarize HTTP ${r.status}`;
+      } catch (e: any) {
+        lastErr = `Deepgram diarize: ${e?.name === 'TimeoutError' ? `no answer in ${DEEPGRAM_TIMEOUT_MS / 60000} min` : e?.message || e}`;
+      }
+      this.log.warn(`meeting: ${lastErr} — trying plain Deepgram (speaker labels will be missing)`);
+      try {
+        const plain = await this.deepgram(buf, mime, { throwOnTransport: true });
+        if (plain !== null) {
+          await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model, cost: null } }).catch(() => undefined);
+          return plain;
+        }
+      } catch (e: any) {
+        lastErr = `plain Deepgram: ${e?.message || e}`;
+      }
     }
-    return this.transcribeWith('deepgram', buf, 'meeting.wav', mime);
+    if (buf.length <= OPENAI_MAX_UPLOAD_BYTES) {
+      this.log.warn(`meeting: ${lastErr} — trying OpenAI (no speaker labels)`);
+      try {
+        const text = await this.run('openai', buf, 'meeting.wav', mime);
+        if (text !== null) {
+          await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: this.lastOpenAiModel, cost: null } }).catch(() => undefined);
+          return (text || '').trim();
+        }
+      } catch (e: any) {
+        lastErr = `OpenAI: ${e?.message || e}`;
+      }
+    } else {
+      lastErr += `; the file (${(buf.length / 1048576).toFixed(0)} MB) is over OpenAI's 25 MB limit`;
+    }
+    throw new VoiceTransportError(`meeting transcription failed — ${lastErr}`);
   }
 
   private async run(engine: Engine, buf: Buffer, filename: string, mime: string): Promise<string | null> {
@@ -434,18 +483,28 @@ export class VoiceService {
       .map((w) => `&keyterm=${encodeURIComponent(w)}`).join('');
   }
 
-  private async deepgram(buf: Buffer, mime: string): Promise<string | null> {
+  /** Plain Deepgram. Engine road (default): null on anything but text, as every runner does.
+   *  `throwOnTransport` (the meeting ladder): a transport failure THROWS, and "heard nothing" is ''. */
+  private async deepgram(buf: Buffer, mime: string, opts: { throwOnTransport?: boolean } = {}): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('deepgram');
-    if (!c?.apiKey) return null;
+    if (!c?.apiKey) { if (opts.throwOnTransport) throw new VoiceTransportError('no Deepgram key is connected'); return null; }
     const model = await this.getDeepgramModel();
-    const r = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true${await this.keytermQuery(model)}`, {
-      method: 'POST',
-      headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime || 'audio/webm' },
-      body: new Uint8Array(buf),
-    });
-    if (!r.ok) return null;
+    let r: Response;
+    try {
+      r = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true${await this.keytermQuery(model)}`, {
+        method: 'POST',
+        headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime || 'audio/webm' },
+        body: new Uint8Array(buf),
+        signal: AbortSignal.timeout(DEEPGRAM_TIMEOUT_MS),
+      });
+    } catch (e: any) {
+      if (opts.throwOnTransport) throw new VoiceTransportError(e?.name === 'TimeoutError' ? `no answer in ${DEEPGRAM_TIMEOUT_MS / 60000} min` : String(e?.message || e));
+      return null;
+    }
+    if (!r.ok) { if (opts.throwOnTransport) throw new VoiceTransportError(`HTTP ${r.status}`); return null; }
     const d: any = await r.json();
-    return d?.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() || null;
+    const text = d?.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() || '';
+    return opts.throwOnTransport ? text : text || null;
   }
 
   private async gemini(buf: Buffer, filename: string): Promise<string | null> {
