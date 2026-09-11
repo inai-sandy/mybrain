@@ -55,9 +55,33 @@ export class NewsReadService {
   }
 
   /** The newest edition's day, so the page knows where to land. */
+  /**
+   * How many days without a new edition before the paper counts as stale.
+   *
+   * Measured, not guessed: across the 18 editions to 2026-09-01 the gaps between them were
+   * 1,1,1,1,1,1,1,1,1,2,2,2,3,3,3,4,5 days — the source (news.smol.ai) skips weekends and quiet
+   * days, so a 5-day gap is normal and must not cry wolf. 7 sits just above that. The outage
+   * that prompted this ran 11 days with the page still showing "Issue No. 18" as if it were
+   * current, and the noon run failing honestly every day where nobody was looking.
+   */
+  static readonly STALE_AFTER_DAYS = 7;
+
   async latestDay(): Promise<string | null> {
     const row = await this.prisma.newsEdition.findFirst({ where: { published: true }, orderBy: { day: 'desc' }, select: { day: true } });
     return row?.day || null;
+  }
+
+  /**
+   * The newest edition's day AND its age — because a page that only knows the day cannot tell
+   * "today's paper" from "a paper from two weeks ago", and for 11 days it could not.
+   * `day` is YYYY-MM-DD in the owner's timezone (IST), the same convention news-write uses.
+   */
+  async latest(): Promise<{ day: string | null; staleDays: number | null; stale: boolean }> {
+    const day = await this.latestDay();
+    if (!day) return { day: null, staleDays: null, stale: false };
+    const then = new Date(`${day}T00:00:00+05:30`).getTime();
+    const staleDays = Number.isFinite(then) ? Math.max(0, Math.floor((Date.now() - then) / 86_400_000)) : null;
+    return { day, staleDays, stale: staleDays !== null && staleDays >= NewsReadService.STALE_AFTER_DAYS };
   }
 
   /**

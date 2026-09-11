@@ -71,6 +71,9 @@ export default function News() {
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Age of the newest edition, from /editions/latest. Only meaningful when we LANDED on the
+  // latest (no dayParam) — an archived day is old by definition and must not warn.
+  const [latestAge, setLatestAge] = useState<{ stale: boolean; staleDays: number | null } | null>(null);
   // This is a single-purpose PAGE now (BEA-1321): AI Tweets Daily at /news/tweets and
   // /news/:day. The radar lives on its own page. The archive stays a sub-view here,
   // reached by the hero's "Past editions" link.
@@ -94,6 +97,7 @@ export default function News() {
           const r = await fetch('/api/news/editions/latest');
           const d = await r.json().catch(() => ({}));
           target = d?.day || undefined;
+          if (alive) setLatestAge({ stale: !!d?.stale, staleDays: typeof d?.staleDays === 'number' ? d.staleDays : null });
         }
         if (!target) {
           editionLoadedFor.current = dayParam || 'latest';
@@ -164,7 +168,7 @@ export default function News() {
           <Newspaper size={30} className="mx-auto mb-3 text-zinc-300 dark:text-zinc-600" />
           <p className="font-semibold">No edition yet</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-zinc-500">
-            AI Tweets Daily writes one every day at noon. The first one will appear here as soon as it runs.
+            AI Tweets Daily writes one at noon on each day its source publishes a new issue. The first one will appear here as soon as that happens.
           </p>
         </div>
       </NewsShell>
@@ -194,6 +198,15 @@ export default function News() {
         )
       ) : (
         <>
+          {/* Nothing new for a long time. The noon run may be failing honestly every day — the feed
+              this paper is built from went offline for 11 days once — but a page that only shows
+              "Issue No. 18" cannot tell the reader that. Say it. Archived days never warn. */}
+          {!dayParam && latestAge?.stale && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+              No new edition for {latestAge.staleDays} days — this is the most recent one. The source this paper is built
+              from has not published since; the noon run keeps trying and reports each failure.
+            </div>
+          )}
           {/* The hero card (BEA-1319) — replaces the old newspaper masthead. */}
           <header className="mb-4 rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50 via-white to-white p-5 dark:border-indigo-900/50 dark:from-indigo-950/40 dark:via-zinc-900 dark:to-zinc-900">
             <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-indigo-500 dark:text-indigo-300">A I &nbsp; T W E E T S &nbsp; D A I L Y</p>
