@@ -581,10 +581,16 @@ describe('the audio ruler on every device turn (BEA-1622)', () => {
     expect(line).toMatch(/^\[emo\] denoise: floor -\d+\.\d dBFS → -\d+\.\d, applied no \(server pass off: measured no gain, BEA-1622\), speech -\d+\.\d dBFS, snr \d+ dB, 0\.1s, fe ns1agc, words 4$/);
   });
 
-  it('fe=ns1agc means the device set the level: the transcriber gets the bytes as they came', async () => {
+  it('a tagged take is normalised too — the "device set the level" tag was measured false (2026-09-11)', async () => {
     process.env.EMO_FASTACK = '0';
     await mk().turn(quiet, { mode: 'ask', fe: 'ns1agc' } as any);
-    expect(sentData().equals(quiet)).toBe(true);
+    expect(sentData().equals(normalizePcm(quiet))).toBe(true);
+    expect(sentData().equals(quiet)).toBe(false);
+    // and the normaliser really lifts it: one static gain, up to x8 (+18 dB), peak toward 70% of scale
+    let peak = 0, was = 0; const d = sentData();
+    for (let i = 0; i < d.length; i += 2) peak = Math.max(peak, Math.abs(d.readInt16LE(i)));
+    for (let i = 0; i < quiet.length; i += 2) was = Math.max(was, Math.abs(quiet.readInt16LE(i)));
+    expect(peak).toBe(Math.min(Math.round(32767 * 0.7), was * 8));
   });
 
   it('an untagged take is normalised exactly as before', async () => {
@@ -609,7 +615,7 @@ describe('the audio ruler on every device turn (BEA-1622)', () => {
     const r = await s.turn(quiet, { mode: 'note', fe: 'ns1agc' } as any);
     expect(r.reply).toMatch(/Saved/);
     await settle();
-    expect(sentData().equals(quiet)).toBe(true);                       // no second gain stage
+    expect(sentData().equals(normalizePcm(quiet))).toBe(true);        // 2026-09-11: normalised on this road too — one static gain, never a second AGC
     expect(logs.find((l) => l.startsWith('[emo] denoise:'))).toMatch(/fe ns1agc, words 4$/);
     expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.wav'))).toHaveLength(0);
     // a tagged file a restart finds: the sweep reads the tag back out of the name
