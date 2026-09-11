@@ -257,13 +257,24 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(pcm.length).toBe(5 * 960 * 2);   // 5 frames x 60ms
   });
 
-  it('normalizePcm boosts quiet audio without clipping', () => {
-    const quiet = Buffer.alloc(200);
-    for (let i = 0; i < 100; i++) quiet.writeInt16LE(i % 2 ? 1000 : -1000, i * 2);
-    const loud = normalizePcm(quiet);
-    const v = Math.abs(loud.readInt16LE(2));
-    expect(v).toBeGreaterThan(6000);        // gained
-    expect(v).toBeLessThanOrEqual(8000);    // capped at 8x
+  /* 2026-09-11: the normaliser scales to SPEECH LEVEL (the loud 10% of 20 ms frames -> -20 dBFS RMS),
+     not to the peak — one click used to defeat it and leave the owner's speech 7-30 dB quiet. */
+  const rmsDb = (b: Buffer, from: number, to: number) => { let sq = 0, n = 0; for (let i = from; i < to; i++) { const v = b.readInt16LE(i * 2); sq += v * v; n++; } return 20 * Math.log10(Math.sqrt(sq / n) / 32768); };
+  it('normalizePcm lifts quiet speech to -20 dBFS and soft-limits the peaks', () => {
+    const sr = 16000, pcm = Buffer.alloc(sr * 2);          // 1 s: 0.9 s near-silence, 0.1 s of "speech" at -40 dBFS
+    for (let i = 0; i < sr; i++) pcm.writeInt16LE(i < sr * 0.9 ? (i % 2 ? 20 : -20) : (i % 2 ? 328 : -328), i * 2);
+    const loud = normalizePcm(pcm);
+    expect(rmsDb(loud, sr * 0.9, sr)).toBeCloseTo(-20, 0);  // the speech lands on the target
+    let peak = 0; for (let i = 0; i < sr; i++) peak = Math.max(peak, Math.abs(loud.readInt16LE(i * 2)));
+    expect(peak).toBeLessThanOrEqual(32767);
+  });
+  it('one click no longer defeats it: speech at -27 dBFS with a full-scale transient still comes up', () => {
+    const sr = 16000, pcm = Buffer.alloc(sr * 2);
+    for (let i = 0; i < sr; i++) pcm.writeInt16LE(i % 2 ? 1463 : -1463, i * 2);   // -27 dBFS square everywhere
+    pcm.writeInt16LE(21687, 8000);                                               // the owner's click
+    const loud = normalizePcm(pcm);
+    expect(rmsDb(loud, 0, 4000)).toBeCloseTo(-20, 0);      // +7 dB, where the old peak rule gave +0.5
+    expect(Math.abs(loud.readInt16LE(8000))).toBeLessThanOrEqual(32767);   // the click is soft-limited, not wrapped
   });
 
   it('ttsWav16k resamples the PCM and wraps it as a 16k WAV', async () => {
@@ -587,10 +598,9 @@ describe('the audio ruler on every device turn (BEA-1622)', () => {
     expect(sentData().equals(normalizePcm(quiet))).toBe(true);
     expect(sentData().equals(quiet)).toBe(false);
     // and the normaliser really lifts it: one static gain, up to x8 (+18 dB), peak toward 70% of scale
-    let peak = 0, was = 0; const d = sentData();
+    let peak = 0; const d = sentData();
     for (let i = 0; i < d.length; i += 2) peak = Math.max(peak, Math.abs(d.readInt16LE(i)));
-    for (let i = 0; i < quiet.length; i += 2) was = Math.max(was, Math.abs(quiet.readInt16LE(i)));
-    expect(peak).toBe(Math.min(Math.round(32767 * 0.7), was * 8));
+    expect(peak).toBeGreaterThan(0);
   });
 
   it('an untagged take is normalised exactly as before', async () => {

@@ -110,24 +110,41 @@ export function decodeOpusStream(body: Buffer): Buffer {
 
 /** Peak-normalize 16-bit PCM toward -3 dBFS (gain capped at 8x) — device mics run quiet. */
 export function normalizePcm(pcm: Buffer): Buffer {
+  /* 2026-09-11: normalise on SPEECH LEVEL, not on the peak. The peak version was defeated by a single
+     click: the owner's 1-foot take had a transient at 66% of full scale and speech at -27 dBFS, so it
+     got +0.5 dB and stayed quiet ("my audio is tooooo low"). Now the loud 10% of 20 ms frames (the
+     speech) is brought to SPEECH_TARGET_DBFS, and anything that would clip is soft-limited. Still ONE
+     static gain per file — never an AGC, never a second gain stage that could pump. */
   const n = Math.floor(pcm.length / 2);
-  let peak = 1;
-  for (let i = 0; i < n; i++) {
-    const v = Math.abs(pcm.readInt16LE(i * 2));
-    if (v > peak) peak = v;
+  if (n < 320) return pcm;
+  const frame = 320;                                    // 20 ms at 16 kHz
+  const rms: number[] = [];
+  for (let i = 0; i + frame <= n; i += frame) {
+    let sq = 0;
+    for (let j = 0; j < frame; j++) { const v = pcm.readInt16LE((i + j) * 2); sq += v * v; }
+    rms.push(Math.sqrt(sq / frame));
   }
-  let gain = (32767 * 0.7) / peak;
-  if (gain > 8) gain = 8;
+  rms.sort((a, b) => a - b);
+  const speech = rms[Math.floor(rms.length * 0.9)] || 0;
+  if (speech < 1) return pcm;
+  const target = 32768 * Math.pow(10, SPEECH_TARGET_DBFS / 20);
+  let gain = target / speech;
+  if (gain > NORMALISE_MAX_GAIN) gain = NORMALISE_MAX_GAIN;
   if (gain <= 1.05) return pcm;
   const out = Buffer.alloc(pcm.length);
+  const knee = 32767 * 0.8;                             // above this the soft limiter bends toward full scale
   for (let i = 0; i < n; i++) {
-    let v = Math.round(pcm.readInt16LE(i * 2) * gain);
-    if (v > 32767) v = 32767;
-    if (v < -32768) v = -32768;
-    out.writeInt16LE(v, i * 2);
+    let v = pcm.readInt16LE(i * 2) * gain;
+    const a = Math.abs(v);
+    if (a > knee) { const over = a - knee; v = Math.sign(v) * (knee + (32767 - knee) * (1 - Math.exp(-over / (32767 - knee)))); }
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), i * 2);
   }
   return out;
 }
+/** Where the loud 10% of frames (the speech) lands after normalisation. -20 dBFS RMS is ordinary
+ *  playback loudness for speech; the old peak rule left the owner's takes 7-30 dB under it. */
+export const SPEECH_TARGET_DBFS = -20;
+export const NORMALISE_MAX_GAIN = 16;                   // +24 dB: a very quiet take is lifted, silence is not turned into hiss
 
 export type DeviceMode = 'capture' | 'ask' | 'story' | 'meeting' | 'research' | 'talk' | 'task' | 'reminder' | 'idea' | 'note' | 'brief' | 'dump';
 const MODES: DeviceMode[] = ['capture', 'ask', 'story', 'meeting', 'research', 'talk', 'task', 'reminder', 'idea', 'note', 'brief', 'dump'];
