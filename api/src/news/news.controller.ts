@@ -170,10 +170,10 @@ export class NewsController {
     return this.read.list(Number.isFinite(n) && n > 0 ? Math.floor(n) : 60);
   }
 
-  /** The newest edition's day, so the page knows where to land. (BEA-1260) */
+  /** The newest edition's day — and how old it is, so the page can say so. (BEA-1260, staleness) */
   @Get('editions/latest')
   latest() {
-    return this.read.latestDay().then((day) => ({ day }));
+    return this.read.latest();
   }
 
   /** One whole edition — every story, under its category. (BEA-1260) */

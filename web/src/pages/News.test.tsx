@@ -49,7 +49,7 @@ const EDITION = {
 function mockFetch(over: Record<string, any> = {}) {
   global.fetch = vi.fn(async (url: any) => {
     const u = String(url);
-    if (u.includes('/editions/latest')) return { ok: true, json: async () => ({ day: '2026-07-31' }) };
+    if (u.includes('/editions/latest')) return { ok: true, json: async () => over.latest ?? { day: '2026-07-31' } };
     if (u.includes('/editions/2026-07-31')) return { ok: true, json: async () => over.edition ?? EDITION };
     if (u.endsWith('/editions')) {
       if (over.archiveFails) throw new Error('offline');
@@ -225,7 +225,7 @@ describe('when there is nothing to show (BEA-1260)', () => {
     global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ day: null }) })) as any;
     show();
     await waitFor(() => expect(screen.getByText('No edition yet')).toBeTruthy());
-    expect(screen.getByText(/every day at noon/)).toBeTruthy();
+    expect(screen.getByText(/on each day its source publishes/)).toBeTruthy(); // was 'every day at noon' — retired, the source skips days
   });
 
   it('a broken edition request shows a real error, not an empty page', async () => {
@@ -236,5 +236,31 @@ describe('when there is nothing to show (BEA-1260)', () => {
     ) as any;
     show();
     await waitFor(() => expect(screen.getByText(/could not be opened/)).toBeTruthy());
+  });
+});
+
+// ---- The page must SAY when the paper has gone quiet (paper staleness) ----
+describe('stale paper warning', () => {
+  it('says so, and for how long, when no new edition has come for a week', async () => {
+    mockFetch({ latest: { day: '2026-07-31', stale: true, staleDays: 11 } });
+    show();
+    await waitFor(() => expect(screen.getByText(/No new edition for 11 days/)).toBeTruthy());
+    // …and it still shows the paper it has, rather than hiding it behind the warning.
+    expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy();
+  });
+
+  it('stays quiet when the newest edition is recent', async () => {
+    mockFetch({ latest: { day: '2026-07-31', stale: false, staleDays: 1 } });
+    show();
+    await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
+    expect(screen.queryByText(/No new edition for/)).toBeNull();
+  });
+
+  it('no longer promises an edition every day', async () => {
+    mockFetch({ latest: { day: null } });
+    show();
+    await waitFor(() => expect(screen.getByText(/No edition yet/)).toBeTruthy());
+    expect(screen.queryByText(/every day at noon/)).toBeNull();
+    expect(screen.getByText(/on each day its source publishes/)).toBeTruthy();
   });
 });

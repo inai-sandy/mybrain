@@ -153,3 +153,32 @@ describe('the archive (BEA-1260)', () => {
     expect(await svc({ latest: null }).latestDay()).toBeNull();
   });
 });
+
+// ---- latest(): the page must be able to tell today's paper from a two-week-old one ----
+describe('NewsReadService.latest — the newest edition says how old it is', () => {
+  // A YYYY-MM-DD in the owner's timezone (IST), n days back — the same convention the editions use.
+  const dayAgo = (n: number) => new Date(Date.now() - n * 86_400_000 + 330 * 60_000).toISOString().slice(0, 10);
+
+  it('is fresh when the newest edition is a couple of days old — weekends are normal', async () => {
+    const out = await svc({ latest: { day: dayAgo(2) } }).latest();
+    expect(out.day).toBe(dayAgo(2));
+    expect(out.staleDays).toBe(2);
+    expect(out.stale).toBe(false);
+  });
+
+  it('is fresh at the longest gap the source has ever really had (5 days)', async () => {
+    const out = await svc({ latest: { day: dayAgo(5) } }).latest();
+    expect(out.stale).toBe(false);
+  });
+
+  it('IS stale once nothing new has come for a week — the 11-day outage shape', async () => {
+    const out = await svc({ latest: { day: dayAgo(11) } }).latest();
+    expect(out.staleDays).toBe(11);
+    expect(out.stale).toBe(true);
+  });
+
+  it('says nothing either way when there is no edition at all', async () => {
+    const out = await svc({ latest: null }).latest();
+    expect(out).toEqual({ day: null, staleDays: null, stale: false });
+  });
+});
