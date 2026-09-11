@@ -13,7 +13,7 @@ import { NotesService } from '../notes/notes.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
-import { audioStats, denoiseLine, deviceHandledLevel, feTag, wordCount, PASS_OFF_REASON } from './emo-audio-stats';
+import { audioStats, denoiseLine, feTag, wordCount, PASS_OFF_REASON } from './emo-audio-stats';
 
 /** IMA ADPCM (4:1) — the one codec the 512 KB no-PSRAM boards can afford (BEA-1595).
  *  Wire format: 256-byte blocks = [int16 LE predictor][uint8 step index][reserved] + 252 bytes
@@ -400,9 +400,8 @@ export class EmoDeviceService {
       const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
       let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : opts.codec === 'adpcm' ? decodeImaAdpcm(body) : body;
       if (!pcm.length) return null;
-      // fe=ns1agc: the device already set the level — a second gain stage would pump (BEA-1622)
       const fe = feTag(opts.fe);
-      if (!deviceHandledLevel(fe)) pcm = normalizePcm(pcm);
+      pcm = normalizePcm(pcm);   /* 2026-09-11: ALWAYS — see turnInner() for why the fe tag no longer skips it */
       const wav = wavWrap(pcm, sr);
       const dir = this.pendingDir();
       fs.mkdirSync(dir, { recursive: true });
@@ -539,9 +538,13 @@ export class EmoDeviceService {
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
     let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : opts.codec === 'adpcm' ? decodeImaAdpcm(body) : body;
     if (!pcm.length) throw new BadRequestException('Could not decode the audio');
-    // fe=ns1agc: the device already set the level — a second gain stage would pump (BEA-1622)
     const fe = feTag(opts.fe);
-    if (!deviceHandledLevel(fe)) pcm = normalizePcm(pcm);
+    /* 2026-09-11: every device take is normalised, tag or no tag. BEA-1622 skipped it for fe=ns1agc
+       ("the device already set the level — a second gain stage would pump"). Measured on the owner's
+       own takes: the device's front-end leaves speech anywhere from -25 to -52 dBFS ("my audio is
+       tooooo low, one foot away"), and normalizePcm() is ONE static gain per file, not an AGC — it
+       cannot pump. Transcription was shown unchanged by amplification; playback is what this fixes. */
+    pcm = normalizePcm(pcm);
     const wav = wavWrap(pcm, sr);
     let audioPath: string | undefined;
     // disk guard (941): an hour-long meeting decodes to >100MB of WAV — don't hoard those
