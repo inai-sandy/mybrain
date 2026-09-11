@@ -14,6 +14,7 @@ import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
 import { audioStats, denoiseLine, feTag, wordCount, PASS_OFF_REASON } from './emo-audio-stats';
+import { clarityChain, levelOnly } from './emo-clarity';
 
 /** IMA ADPCM (4:1) — the one codec the 512 KB no-PSRAM boards can afford (BEA-1595).
  *  Wire format: 256-byte blocks = [int16 LE predictor][uint8 step index][reserved] + 252 bytes
@@ -108,43 +109,13 @@ export function decodeOpusStream(body: Buffer): Buffer {
   return Buffer.concat(parts);
 }
 
-/** Peak-normalize 16-bit PCM toward -3 dBFS (gain capped at 8x) — device mics run quiet. */
+/** Every device take goes through the clarity chain — high-pass 200 Hz → presence shelf → speech level
+ *  to -16 dBFS with a soft limiter (emo-clarity.ts, chosen by the owner's ear on 2026-09-11). Kept
+ *  under this name because three callers and two specs know it. */
 export function normalizePcm(pcm: Buffer): Buffer {
-  /* 2026-09-11: normalise on SPEECH LEVEL, not on the peak. The peak version was defeated by a single
-     click: the owner's 1-foot take had a transient at 66% of full scale and speech at -27 dBFS, so it
-     got +0.5 dB and stayed quiet ("my audio is tooooo low"). Now the loud 10% of 20 ms frames (the
-     speech) is brought to SPEECH_TARGET_DBFS, and anything that would clip is soft-limited. Still ONE
-     static gain per file — never an AGC, never a second gain stage that could pump. */
-  const n = Math.floor(pcm.length / 2);
-  if (n < 320) return pcm;
-  const frame = 320;                                    // 20 ms at 16 kHz
-  const rms: number[] = [];
-  for (let i = 0; i + frame <= n; i += frame) {
-    let sq = 0;
-    for (let j = 0; j < frame; j++) { const v = pcm.readInt16LE((i + j) * 2); sq += v * v; }
-    rms.push(Math.sqrt(sq / frame));
-  }
-  rms.sort((a, b) => a - b);
-  const speech = rms[Math.floor(rms.length * 0.9)] || 0;
-  if (speech < 1) return pcm;
-  const target = 32768 * Math.pow(10, SPEECH_TARGET_DBFS / 20);
-  let gain = target / speech;
-  if (gain > NORMALISE_MAX_GAIN) gain = NORMALISE_MAX_GAIN;
-  if (gain <= 1.05) return pcm;
-  const out = Buffer.alloc(pcm.length);
-  const knee = 32767 * 0.8;                             // above this the soft limiter bends toward full scale
-  for (let i = 0; i < n; i++) {
-    let v = pcm.readInt16LE(i * 2) * gain;
-    const a = Math.abs(v);
-    if (a > knee) { const over = a - knee; v = Math.sign(v) * (knee + (32767 - knee) * (1 - Math.exp(-over / (32767 - knee)))); }
-    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), i * 2);
-  }
-  return out;
+  return clarityChain(pcm);
 }
-/** Where the loud 10% of frames (the speech) lands after normalisation. -20 dBFS RMS is ordinary
- *  playback loudness for speech; the old peak rule left the owner's takes 7-30 dB under it. */
-export const SPEECH_TARGET_DBFS = -20;
-export const NORMALISE_MAX_GAIN = 16;                   // +24 dB: a very quiet take is lifted, silence is not turned into hiss
+export { SPEECH_TARGET_DBFS, NORMALISE_MAX_GAIN } from './emo-clarity';
 
 export type DeviceMode = 'capture' | 'ask' | 'story' | 'meeting' | 'research' | 'talk' | 'task' | 'reminder' | 'idea' | 'note' | 'brief' | 'dump';
 const MODES: DeviceMode[] = ['capture', 'ask', 'story', 'meeting', 'research', 'talk', 'task', 'reminder', 'idea', 'note', 'brief', 'dump'];
@@ -686,6 +657,6 @@ export class EmoDeviceService {
     if (!pcm24?.length) return null;
     // TTS comes out quiet next to the loudness-mastered clip pack — normalize it
     // to the same ceiling so spoken answers match the voice pack. (BEA-953)
-    return wavWrap(normalizePcm(resample24to16(pcm24)), 16000);
+    return wavWrap(levelOnly(resample24to16(pcm24)), 16000);   /* synthesised speech: level only, no EQ */
   }
 }
