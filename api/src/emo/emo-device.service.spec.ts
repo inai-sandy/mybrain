@@ -257,14 +257,14 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(pcm.length).toBe(5 * 960 * 2);   // 5 frames x 60ms
   });
 
-  /* 2026-09-11: the normaliser scales to SPEECH LEVEL (the loud 10% of 20 ms frames -> -20 dBFS RMS),
+  /* 2026-09-11: the normaliser scales to SPEECH LEVEL (the loud 10% of 20 ms frames -> -16 dBFS RMS since the V1 clarity chain),
      not to the peak — one click used to defeat it and leave the owner's speech 7-30 dB quiet. */
   const rmsDb = (b: Buffer, from: number, to: number) => { let sq = 0, n = 0; for (let i = from; i < to; i++) { const v = b.readInt16LE(i * 2); sq += v * v; n++; } return 20 * Math.log10(Math.sqrt(sq / n) / 32768); };
-  it('normalizePcm lifts quiet speech to -20 dBFS and soft-limits the peaks', () => {
+  it('normalizePcm lifts quiet speech to -16 dBFS and soft-limits the peaks', () => {
     const sr = 16000, pcm = Buffer.alloc(sr * 2);          // 1 s: 0.9 s near-silence, 0.1 s of "speech" at -40 dBFS
     for (let i = 0; i < sr; i++) pcm.writeInt16LE(i < sr * 0.9 ? (i % 2 ? 20 : -20) : (i % 2 ? 328 : -328), i * 2);
     const loud = normalizePcm(pcm);
-    expect(rmsDb(loud, sr * 0.9, sr)).toBeCloseTo(-20, 0);  // the speech lands on the target
+    expect(rmsDb(loud, sr * 0.9, sr)).toBeCloseTo(-16, 0);  // the speech lands on the target
     let peak = 0; for (let i = 0; i < sr; i++) peak = Math.max(peak, Math.abs(loud.readInt16LE(i * 2)));
     expect(peak).toBeLessThanOrEqual(32767);
   });
@@ -273,7 +273,7 @@ describe('EmoDeviceService (BEA-926)', () => {
     for (let i = 0; i < sr; i++) pcm.writeInt16LE(i % 2 ? 1463 : -1463, i * 2);   // -27 dBFS square everywhere
     pcm.writeInt16LE(21687, 8000);                                               // the owner's click
     const loud = normalizePcm(pcm);
-    expect(rmsDb(loud, 0, 4000)).toBeCloseTo(-20, 0);      // +7 dB, where the old peak rule gave +0.5
+    expect(rmsDb(loud, 0, 4000)).toBeCloseTo(-16, 0);      // +11 dB, where the old peak rule gave +0.5
     expect(Math.abs(loud.readInt16LE(8000))).toBeLessThanOrEqual(32767);   // the click is soft-limited, not wrapped
   });
 
