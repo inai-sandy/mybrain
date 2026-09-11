@@ -222,3 +222,27 @@ describe('transcribeMeeting — the ladder', () => {
     expect(utterancesToLines([])).toEqual([]);
   });
 });
+
+describe('Speaker labels for meetings — the switch (2026-09-11)', () => {
+  const realFetch = global.fetch;
+  afterEach(() => { global.fetch = realFetch; });
+  it('is ON by default and shows in config', async () => {
+    const { svc } = make({});
+    expect(await svc.meetingLabelsOn()).toBe(true);
+    expect((await svc.config()).meetingLabels).toBe(true);
+    await svc.setMeetingLabels(false);
+    expect(await svc.meetingLabelsOn()).toBe(false);
+  });
+  it('OFF: a meeting goes to the chosen engine with no labels, and Deepgram is never called', async () => {
+    const { svc } = make({ settings: { 'voice.meetingLabels': '0' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    (svc as any).run = jest.fn(async (engine: string) => (engine === 'openai' ? 'plain words from gpt' : null));
+    global.fetch = jest.fn(async () => { throw new Error('Deepgram must not be called when labels are off'); }) as any;
+    expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('plain words from gpt');
+    expect((svc as any).run.mock.calls[0][0]).toBe('openai');
+  });
+  it('OFF: a provider failure still throws a transport error (the device road retries)', async () => {
+    const { svc } = make({ settings: { 'voice.meetingLabels': '0' } });
+    (svc as any).run = jest.fn(async () => { throw new VoiceTranscribeError('OpenAI could not transcribe that (500)'); });
+    await expect(svc.transcribeMeeting(Buffer.from('wav'))).rejects.toBeInstanceOf(VoiceTransportError);
+  });
+});

@@ -51,6 +51,12 @@ export class VoiceController {
     return this.voice.setCleanup(body?.cleanup !== false);
   }
 
+  /** Speaker labels for meetings — Settings → Voice input (2026-09-11). */
+  @Put('meeting-labels')
+  async setMeetingLabels(@Body() body: { meetingLabels?: boolean }) {
+    return this.voice.setMeetingLabels(body?.meetingLabels !== false);
+  }
+
   /** The model that tidies dictation — a curated id, or '' for the default (BEA-1624). */
   @Put('cleanup-model')
   async setCleanupModel(@Body() body: { model?: string }) {

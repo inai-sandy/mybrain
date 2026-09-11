@@ -97,7 +97,7 @@ export class EmoMeetingService {
         summary,
         links.length ? `\n**Action items → Tasks (${links.length}):**\n${actionItems.map((a) => `- ${a}`).join('\n')}` : '',
         attendees ? `\n_Attendees${speakerLabels ? '' : ' (approx)'}: ${attendees}_` : '',
-        speakerLabels ? '' : `\n_Speaker labels (Speaker 1/2…) come with the Emo device meeting mode._`,
+        speakerLabels ? '' : `\n_No speaker labels on this one. The switch is in Settings → Voice input → Speaker labels for meetings._`,
         `\n\n---\n### Transcript\n${transcript}`,
       ].filter(Boolean).join('\n');
 
