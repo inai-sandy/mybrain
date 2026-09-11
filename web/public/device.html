@@ -126,6 +126,51 @@
   .band .ncard .tag{color:var(--yellow);letter-spacing:.16em}
   .bandfoot{margin:46px 0 0;font-size:16px;line-height:1.6;color:#8b8981;max-width:760px;font-weight:300}
   .band h2{max-width:18ch}
+
+  /* ===== what comes next, with real screens ===== */
+  .n2{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,52%);gap:64px;align-items:center;margin-top:72px}
+  .n2.rev{grid-template-columns:minmax(360px,52%) minmax(0,1fr)}
+  .n2tag{display:inline-block;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--yellow);margin-bottom:18px}
+  .n2text h3{font-family:var(--display);font-weight:500;font-size:clamp(28px,3.2vw,44px);letter-spacing:-.04em;line-height:1.06;margin:0 0 18px;color:#fff}
+  .n2text p{margin:0 0 14px;font-size:17px;line-height:1.6;color:#b9b7b0;font-weight:300;max-width:460px}
+  .n2text p b{color:#fff;font-weight:500}
+  .win{background:#141413;border:1px solid rgba(255,255,255,.12);border-radius:18px;overflow:hidden;box-shadow:0 40px 70px rgba(0,0,0,.5)}
+  .winbar{display:flex;align-items:center;gap:7px;padding:13px 16px;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.08)}
+  .winbar i{width:10px;height:10px;border-radius:50%;background:#3a3a38}
+  .winbar span{margin-left:12px;font-size:12.5px;color:#8b8981}
+  .winbody{padding:24px 24px 18px;min-height:236px}
+  .winfoot{display:flex;justify-content:space-between;padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:#6f6d66}
+  .doc{font-size:16.5px;line-height:1.62;color:#e9e7e1;min-height:150px}
+  .doc .cur{display:inline-block;width:2px;height:1.05em;background:var(--yellow);vertical-align:-2px;margin-left:1px;animation:cb 1s steps(1) infinite}
+  @keyframes cb{50%{opacity:0}}
+  .dictate{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:14px;border-top:1px dashed rgba(255,255,255,.12)}
+  .dmic{width:26px;height:26px;border-radius:9px;background:var(--yellow);flex:none;position:relative}
+  .dmic::after{content:"";position:absolute;left:50%;top:6px;transform:translateX(-50%);width:8px;height:10px;border-radius:4px;background:#111}
+  .dmic.live{animation:dp 1.4s var(--soft) infinite}
+  @keyframes dp{0%{box-shadow:0 0 0 0 rgba(242,193,78,.45)}100%{box-shadow:0 0 0 14px rgba(242,193,78,0)}}
+  .dbars{display:flex;align-items:flex-end;gap:3px;height:18px}
+  .dbars i{width:3px;background:#8b8981;border-radius:2px;height:4px;transition:height .1s linear}
+  .dictate em{font-style:normal;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#8b8981;margin-left:auto}
+  .said{font-size:16px;line-height:1.5;color:#e9e7e1;padding:12px 14px;background:rgba(255,255,255,.05);border-radius:12px;margin-bottom:18px}
+  .steps{list-style:none;margin:0;padding:0}
+  .steps li{display:flex;align-items:center;gap:11px;font-size:15px;color:#8b8981;padding:7px 0;opacity:0;transform:translateX(-6px);transition:opacity .35s,transform .4s var(--soft)}
+  .steps li.in{opacity:1;transform:none}
+  .steps li.done{color:#e9e7e1}
+  .steps li b{width:16px;height:16px;border-radius:50%;border:1.5px solid #4a4a46;flex:none;display:grid;place-items:center;font-size:10px;color:#111}
+  .steps li.done b{background:var(--yellow);border-color:var(--yellow)}
+  .steps li.run b{border-color:var(--yellow);animation:spin 1s linear infinite;border-right-color:transparent}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .handoff{margin-top:16px;border:1px solid rgba(242,193,78,.5);background:rgba(242,193,78,.08);border-radius:12px;padding:13px 15px;opacity:0;transform:translateY(8px);transition:opacity .4s,transform .5s var(--spring)}
+  .handoff.in{opacity:1;transform:none}
+  .handoff b{display:block;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--yellow);margin-bottom:6px}
+  .handoff span{display:block;font-size:15.5px;color:#fff}
+  .handoff em{display:block;font-style:normal;font-size:12.5px;color:#8b8981;margin-top:8px}
+  @media (max-width:900px){
+    .n2,.n2.rev{grid-template-columns:1fr;gap:28px;margin-top:44px}
+    .n2.rev>*:first-child{order:2}
+    .winbody{min-height:0;padding:18px}
+    .doc{font-size:15px;min-height:110px}
+  }
 </style>
 </head>
 <body>
@@ -242,21 +287,47 @@
     <div class="eyebrow"><i></i>Next</div>
     <h2>Two things that change what it is.</h2>
     <p class="lede">One removes the keyboard. The other removes the work. <b>Both start with the same tap.</b></p>
-    <div class="next">
-      <div class="ncard">
-        <span class="tag">Next · your voice, already typed</span>
+
+    <div class="n2">
+      <div class="n2text">
+        <span class="n2tag">Next · your voice, already typed</span>
         <h3>Stop typing. Anywhere.</h3>
-        <p>Hold the glass and talk. The words appear where you are writing — an email, a document, a message, the reply you have been avoiding for three days — punctuated, in your own phrasing, as fast as you can think it.</p>
-        <p style="margin-top:14px">Not a recording you clean up afterwards. Not a file to open. You say it once and the writing is simply there. <b>Typing becomes the slow way to write.</b></p>
+        <p>Hold the glass and talk. The words appear where you are already writing — the mail, the document, the reply you have been avoiding for three days — punctuated, in your own phrasing, as fast as you can think it.</p>
+        <p><b>Typing becomes the slow way to write.</b></p>
       </div>
-      <div class="ncard">
-        <span class="tag">Next · a worker with its own computer</span>
-        <h3>Give the work away, out loud.</h3>
-        <p>Describe the job once, on the way to the car, and hand it over. A worker with a machine of its own opens the applications, fills the forms, moves between the sites and finishes the thing, the way a person would.</p>
-        <p style="margin-top:14px">Show it once how you do something and it keeps the method for good. It comes back only when a decision needs a human — <b>and that arrives on your chest, not in a queue.</b></p>
+      <div class="n2art">
+        <div class="win">
+          <div class="winbar"><i></i><i></i><i></i><span>Reply to Priya</span></div>
+          <div class="winbody">
+            <div class="doc" id="doc"></div>
+            <div class="dictate" id="dictate"><span class="dmic"></span><span class="dbars" id="dbars"></span><em id="dlabel">listening</em></div>
+          </div>
+          <div class="winfoot"><span id="keys">0 keystrokes</span><span id="words">0 words</span></div>
+        </div>
       </div>
     </div>
-    <p class="bandfoot">Neither is finished. They are named here because they are what this object is being built towards, and because you should know where it is going before you decide to wear it.</p>
+
+    <div class="n2 rev">
+      <div class="n2art">
+        <div class="win">
+          <div class="winbar"><i></i><i></i><i></i><span>A worker, on its own computer</span></div>
+          <div class="winbody">
+            <div class="said" id="jobsaid">“Get last month's invoice from the vendor portal and put it in the accounts sheet.”</div>
+            <ul class="steps" id="steps"></ul>
+            <div class="handoff" id="handoff"><b>Needs you</b><span>Two invoices match. Which month?</span><em>Answer on the glass</em></div>
+          </div>
+          <div class="winfoot"><span id="jobstate">waiting</span><span id="jobtime">—</span></div>
+        </div>
+      </div>
+      <div class="n2text">
+        <span class="n2tag">Next · a worker with its own computer</span>
+        <h3>Give the work away, out loud.</h3>
+        <p>Describe the job once, on the way to the car, and hand it over. A worker with a machine of its own opens the applications, fills the forms, moves between the sites and finishes the thing, the way a person would.</p>
+        <p>Show it once and it keeps the method for good. <b>It comes back only when a decision needs a human — and that arrives on your chest, not in a queue.</b></p>
+      </div>
+    </div>
+
+    <p class="bandfoot">Neither is finished. They are named here because they are what this object is being built towards, and because you should know where it is going before you decide to wear one.</p>
   </div>
 </div>
 
@@ -278,10 +349,10 @@
 <section class="sec reveal">
   <div class="truth">
     <div>
-      <h3>Being built now.</h3>
-      <p>There is no price and no date, and there will not be one until it ships. Ask, and you will get a real answer from me.</p>
+      <h3>In production. Coming soon.</h3>
+      <p>The first EMO devices are being built now. We are not taking money for something you cannot hold yet, so there is no price and no pre-order on this page — when the first units are ready, the people who asked will hear from us first. Send one line and you are on that list.</p>
     </div>
-    <a class="cta" href="https://wa.me/919885698665?text=Hi%2C%20I%27d%20like%20to%20know%20about%20the%20EMO%20device." target="_blank" rel="noopener">Ask about the device</a>
+    <a class="cta" href="https://wa.me/919885698665?text=Hi%2C%20I%27d%20like%20to%20be%20told%20when%20the%20EMO%20device%20is%20ready." target="_blank" rel="noopener">Tell me when it is ready</a>
   </div>
 </section>
 
@@ -353,6 +424,57 @@
       }
     })();
   }
+  // ---------- what comes next: the two futures, shown ----------
+  {
+    const TEXT = 'Hi Priya, I have approved the revised quote. Please release the payment today and send me the receipt when it goes out.';
+    const doc = $('doc'), dbars = $('dbars');
+    if (dbars) dbars.innerHTML = '<i></i><i></i><i></i><i></i><i></i><i></i><i></i>';
+    const bs = dbars ? [...dbars.children] : [];
+    const dictateLoop = async () => {
+      while (true) {
+        await onScreen(doc.closest('.win'));
+        doc.innerHTML = '<span class="cur"></span>';
+        $('dlabel').textContent = 'listening'; $('keys').textContent = '0 keystrokes'; $('words').textContent = '0 words';
+        document.querySelector('.dmic').classList.add('live');
+        await sleep(700);
+        for (let i = 1; i <= TEXT.length; i++) {
+          doc.innerHTML = TEXT.slice(0, i) + '<span class="cur"></span>';
+          bs.forEach((b) => { b.style.height = (4 + Math.random() * 13).toFixed(0) + 'px'; });
+          if (i % 6 === 0) $('words').textContent = TEXT.slice(0, i).split(' ').length + ' words';
+          await sleep(26);
+        }
+        bs.forEach((b) => { b.style.height = '4px' });
+        document.querySelector('.dmic').classList.remove('live');
+        $('dlabel').textContent = 'spoken, not typed';
+        $('words').textContent = TEXT.split(' ').length + ' words';
+        await sleep(4200);
+      }
+    };
+    const STEPS = [['Open the vendor portal', 900], ['Sign in', 700], ['Find last month\'s invoice', 1300], ['Download it', 800], ['Open the accounts sheet', 900], ['Add the row', 1000]];
+    const ul = $('steps');
+    const jobLoop = async () => {
+      while (true) {
+        await onScreen(ul.closest('.win'));
+        ul.innerHTML = STEPS.map((s) => '<li><b></b>' + s[0] + '</li>').join('');
+        const lis = [...ul.children];
+        $('handoff').classList.remove('in'); $('jobstate').textContent = 'working'; $('jobtime').textContent = '0s';
+        let t = 0;
+        for (let i = 0; i < lis.length; i++) {
+          lis[i].classList.add('in', 'run');
+          await sleep(STEPS[i][1]); t += STEPS[i][1];
+          lis[i].classList.remove('run'); lis[i].classList.add('done');
+          lis[i].querySelector('b').textContent = '✓';
+          $('jobtime').textContent = Math.round(t / 1000) + 's';
+          if (i === 2) { $('handoff').classList.add('in'); $('jobstate').textContent = 'asking you'; await sleep(2600); $('handoff').classList.remove('in'); $('jobstate').textContent = 'working'; }
+        }
+        $('jobstate').textContent = 'done';
+        await sleep(3600);
+      }
+    };
+    if (!reduced) { dictateLoop(); jobLoop(); }
+    else { doc.textContent = TEXT; ul.innerHTML = STEPS.map((s) => '<li class="in done"><b>✓</b>' + s[0] + '</li>').join(''); }
+  }
+
 })();
 </script>
 
