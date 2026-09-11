@@ -86,6 +86,17 @@ export class VoiceService {
     await this.setSetting('voice.engine', engine);
     return { engine };
   }
+  /** Speaker labels for meetings (owner, 2026-09-11: "keep this diarization nova 3 settings as an
+   *  optional"). On (default): a MEETING take goes to Deepgram with diarization → Speaker 1/2 lines.
+   *  Off: it goes to the chosen engine like every other take — better words on mixed Telugu/English,
+   *  no labels. Setting `voice.meetingLabels`, '0' = off. */
+  async meetingLabelsOn(): Promise<boolean> {
+    return (await this.getSetting('voice.meetingLabels')) !== '0';
+  }
+  async setMeetingLabels(on: boolean): Promise<{ meetingLabels: boolean }> {
+    await this.setSetting('voice.meetingLabels', on ? '1' : '0');
+    return { meetingLabels: on };
+  }
   async cleanupOn(): Promise<boolean> {
     return (await this.getSetting('voice.cleanup')) !== '0';
   }
@@ -203,6 +214,7 @@ export class VoiceService {
       engine: await this.getEngine(),
       engines: await this.engines(),
       cleanup: await this.cleanupOn(),
+      meetingLabels: await this.meetingLabelsOn(),
       cleanupModel: await this.cleanupModel(),
       cleanupModels: [...CURATED_MODELS],
       language: await this.language(),
@@ -298,6 +310,17 @@ export class VoiceService {
    *  heard no speech. */
   async transcribeMeeting(buf: Buffer, mime = 'audio/wav'): Promise<string> {
     if (!buf?.length) return '';
+    if (!(await this.meetingLabelsOn())) {
+      /* the switch is OFF: the chosen engine, like every other take — no labels. A provider failure
+         still THROWS (the device road retries); '' still means "heard nothing". */
+      const engine = await this.getEngine();
+      if (buf.length > OPENAI_MAX_UPLOAD_BYTES && engine === 'openai') throw new VoiceTransportError(`meeting transcription failed — the file (${(buf.length / 1048576).toFixed(0)} MB) is over OpenAI's 25 MB limit and speaker labels are switched off`);
+      let text: string | null;
+      try { text = await this.run(engine, buf, 'meeting.wav', mime); } catch (e: any) { throw new VoiceTransportError(`meeting transcription failed — ${engine}: ${e?.message || e}`); }
+      if (text === null) throw new VoiceTransportError(`meeting transcription failed — ${engine} did not answer`);
+      await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: engine === 'openai' ? this.lastOpenAiModel : engine, cost: null } }).catch(() => undefined);
+      return (text || '').trim();
+    }
     const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
     let lastErr = 'no Deepgram key is connected';
     if (c?.apiKey) {

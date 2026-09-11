@@ -94,6 +94,7 @@ const CATS: Cat[] = [
   { id: 'voice', label: 'Voice', icon: Mic, desc: 'Dictation & speech', group: 'AI & voice', search: [
     { label: 'Voice input engine', keywords: 'voice input stt engine dictation openai deepgram transcribe cleanup model terra gpt' },
     { label: 'Dictation clean-up', keywords: 'voice cleanup tidy dictation ai' },
+    { label: 'Speaker labels for meetings', keywords: 'voice meeting speaker labels diarization deepgram nova speaker 1 speaker 2' },
     { label: 'Spoken language', keywords: 'voice language hint spoken' },
     { label: 'Voice vocabulary', keywords: 'vocabulary custom words names get right' },
   ] },
@@ -2316,7 +2317,7 @@ export function EmoSettingsSection() {
   );
 }
 
-type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
+type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; meetingLabels?: boolean; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
 function VoiceModelCard() {
   const [cfg, setCfg] = useState<VoiceCfg | null>(null);
   const toast = useToast();
@@ -2330,6 +2331,10 @@ function VoiceModelCard() {
     setCfg((c) => (c ? { ...c, engine } : c));
     const r = await fetch('/api/voice/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
     if (r.ok) toast('success', 'Voice engine saved');
+  }
+  async function setMeetingLabels(meetingLabels: boolean) {
+    setCfg((c) => (c ? { ...c, meetingLabels } : c));
+    await fetch('/api/voice/meeting-labels', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingLabels }) });
   }
   async function setCleanup(cleanup: boolean) {
     setCfg((c) => (c ? { ...c, cleanup } : c));
@@ -2388,6 +2393,13 @@ function VoiceModelCard() {
           </select>
         </label>
       ) : null}
+      <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 mt-3 cursor-pointer">
+        <div>
+          <div className="text-sm font-medium">Speaker labels for meetings</div>
+          <div className="text-xs text-zinc-500">On: a MEETING recording gets Speaker 1 / Speaker 2 lines (Deepgram nova-3). Off: it uses your voice engine like everything else — better words, no labels.</div>
+        </div>
+        <input type="checkbox" data-testid="voice-meeting-labels" checked={cfg.meetingLabels !== false} onChange={(e) => setMeetingLabels(e.target.checked)} className="h-4 w-4 accent-emerald-600 shrink-0" />
+      </label>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">
         Spoken language <span className="text-zinc-400">(optional — helps accuracy)</span>
         <input
