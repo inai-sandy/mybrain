@@ -1,4 +1,4 @@
-import { EmoDeviceService, wavWrap, resample24to16, decodeOpusStream, decodeImaAdpcm, ADPCM_BLOCK, normalizePcm, clampForDevice, DEVICE_BODY_BUDGET } from './emo-device.service';
+import { EmoDeviceService, wavWrap, resample24to16, decodeOpusStream, decodeImaAdpcm, ADPCM_BLOCK, normalizePcm, clampForDevice, DEVICE_BODY_BUDGET, encodeOpusStream } from './emo-device.service';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript');
 import * as fs from 'fs';
@@ -637,5 +637,52 @@ describe('the audio ruler on every device turn (BEA-1622)', () => {
     expect(voice.transcribeWith).toHaveBeenCalledTimes(2);
     expect(logs.filter((l) => /fe ns1agc/.test(l))).toHaveLength(2);
     expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.wav'))).toHaveLength(0);
+  });
+});
+
+/* 2026-09-11 meeting-road review */
+describe('long meeting audio is KEPT (as Opus) and the retry loop really runs', () => {
+  /* a small harness of its own: fresh mocks, and every card the road creates is collected */
+  const build = () => {
+    const created: any[] = [];
+    const voice: any = { transcribeMeeting: jest.fn(async () => 'Speaker 1: hi'), transcribeWith: jest.fn(async () => ''), getEngine: jest.fn(async () => 'openai'), whisperRescue: jest.fn(async (_b: any, _f: any, _m: any, first: string) => first) };
+    const router: any = { route: jest.fn(async () => ({ cards: [] })) };
+    const prisma: any = { emoCard: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) } };
+    const cards: any = { create: jest.fn(async (c: any) => { created.push(c); return { id: 'x' }; }), answer: jest.fn(async () => ({ ok: true })) };
+    const svc = new EmoDeviceService(voice, router, { ask: jest.fn() } as any, { talk: jest.fn() } as any, prisma, { create: jest.fn() } as any, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any, cards);
+    return { svc, voice, created };
+  };
+  const tone = (secs: number) => { const b = Buffer.alloc(16000 * secs * 2); for (let i = 0; i < 16000 * secs; i++) b.writeInt16LE(Math.round(6000 * Math.sin((2 * Math.PI * 440 * i) / 16000)), i * 2); return b; };
+  it('encodeOpusStream round-trips through decodeOpusStream at the same length', () => {
+    const pcm = tone(2);
+    const stream = encodeOpusStream(pcm);
+    expect(stream.length).toBeLessThan(pcm.length / 5);                            // ~32 kbps vs 256 kbps
+    const back = decodeOpusStream(stream);
+    expect(back.length).toBe(pcm.length);
+  });
+  it('a take over 15 MB is kept as .opus and readAudio hands it back as WAV', () => {
+    const { svc } = build();
+    const big = wavWrap(tone(2));
+    const name = (svc as any).saveRecordingOpus(big);
+    expect(name).toMatch(/\.opus$/);
+    const wav = svc.readAudio(name)!;
+    expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(wav.length).toBe(big.length);
+  });
+  it('a transport failure is retried 3 times, then a "kept, transcription failed" card — never "Nothing heard"', async () => {
+    const pend = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-pend-'));
+    process.env.EMO_PENDING_DIR = pend;
+    const { svc, voice, created } = build();
+    svc.retryDelayMs = 0;
+    voice.transcribeMeeting = jest.fn(async () => { throw new Error('meeting transcription failed — Deepgram diarize HTTP 503'); });
+    const name = `pend-${Date.now()}-abcdef12-meeting.wav`;
+    fs.writeFileSync(path.join(pend, name), wavWrap(tone(1)));
+    await (svc as any).processPending(name);
+    expect(voice.transcribeMeeting).toHaveBeenCalledTimes(3);
+    const card = created.find((c: any) => /transcription failed/i.test(c.title));
+    expect(card).toBeTruthy();
+    expect(created.find((c: any) => c.title === 'Nothing heard')).toBeUndefined();
+    expect(fs.existsSync(path.join(pend, 'failed', name))).toBe(true);              // the audio is kept
+    delete process.env.EMO_PENDING_DIR;
   });
 });

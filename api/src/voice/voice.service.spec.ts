@@ -1,4 +1,4 @@
-import { VoiceService, VoiceTranscribeError, OPENAI_STT_MODEL } from './voice.service';
+import { VoiceService, VoiceTranscribeError, VoiceTransportError, OPENAI_STT_MODEL, utterancesToLines, OPENAI_MAX_UPLOAD_BYTES } from './voice.service';
 
 function make(opts: { keys?: Record<string, any>; settings?: Record<string, string>; clean?: string; contacts?: { name: string }[]; openaiStatus?: number } = {}) {
   const settings: Record<string, string> = { ...(opts.settings || {}) };
@@ -175,5 +175,50 @@ describe('VoiceService — gpt-transcribe only', () => {
   it('says so plainly when no OpenAI key is connected', async () => {
     const { svc } = make({ keys: {}, settings: { 'voice.cleanup': '0' } });
     await expect(svc.transcribe(Buffer.from('audio'), 'a.webm', 'audio/webm')).rejects.toThrow(/No OpenAI key/i);
+  });
+});
+
+/* 2026-09-11 meeting-road review: the labeller's ladder. A meeting is the one take with a retry loop
+   behind it, so "could not reach the provider" must THROW and "heard nothing" must be ''. */
+describe('transcribeMeeting — the ladder', () => {
+  const realFetch = global.fetch;
+  afterEach(() => { global.fetch = realFetch; });
+  const dg = (body: any, ok = true, status = 200) => ({ ok, status, json: async () => body });
+  const utt = (speaker: number, transcript: string) => ({ speaker, transcript });
+
+  it('labels come back as Speaker N lines, same speaker merged', async () => {
+    const { svc } = make({ keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    global.fetch = jest.fn(async (url: string) => dg({ results: { utterances: [utt(0, 'hello'), utt(0, 'there'), utt(1, 'hi')] } })) as any;
+    expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('Speaker 1: hello there\nSpeaker 2: hi');
+    expect((global.fetch as any).mock.calls[0][0]).toContain('diarize=true');
+    expect((global.fetch as any).mock.calls[0][1].signal).toBeDefined();          // the timeout is on the call
+  });
+  it('the provider answered and heard nothing → an empty string, not a failure', async () => {
+    const { svc } = make({ keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    global.fetch = jest.fn(async () => dg({ results: { utterances: [], channels: [{ alternatives: [{ transcript: '' }] }] } })) as any;
+    expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('');
+  });
+  it('diarize fails → plain Deepgram text without labels', async () => {
+    const { svc } = make({ keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    let n = 0;
+    global.fetch = jest.fn(async () => (++n === 1 ? dg({}, false, 503) : dg({ results: { channels: [{ alternatives: [{ transcript: 'plain words' }] }] } }))) as any;
+    expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('plain words');
+    expect(n).toBe(2);
+  });
+  it('both Deepgram legs fail on a file over the OpenAI limit → THROWS a transport error (the retry loop runs)', async () => {
+    const { svc } = make({ keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    global.fetch = jest.fn(async () => dg({}, false, 500)) as any;
+    const big = Buffer.alloc(OPENAI_MAX_UPLOAD_BYTES + 1);
+    await expect(svc.transcribeMeeting(big)).rejects.toBeInstanceOf(VoiceTransportError);
+    expect((global.fetch as any).mock.calls.length).toBe(2);                     // OpenAI was never tried
+  });
+  it('a timeout is a transport error, said in minutes', async () => {
+    const { svc } = make({ keys: { deepgram: { apiKey: 'dg' } } });
+    global.fetch = jest.fn(async () => { const e: any = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; }) as any;
+    await expect(svc.transcribeMeeting(Buffer.alloc(OPENAI_MAX_UPLOAD_BYTES + 1))).rejects.toThrow(/no answer in 15 min/);
+  });
+  it('utterancesToLines is pure and starts at Speaker 1', () => {
+    expect(utterancesToLines([utt(2, 'a'), utt(2, 'b'), { transcript: '   ' }, utt(0, 'c')])).toEqual(['Speaker 3: a b', 'Speaker 1: c']);
+    expect(utterancesToLines([])).toEqual([]);
   });
 });

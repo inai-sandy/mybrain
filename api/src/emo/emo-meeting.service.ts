@@ -11,6 +11,38 @@ import { PromptsService } from '../prompts/prompts.service';
  * (Speaker 1/2…) arrives with the dedicated meeting-record mode / the Emo device; here we work from
  * the plain transcript, which still yields the summary + action items (the high-value parts).
  */
+/** Cut a labelled transcript into pieces for the per-chunk notes. Prefers a line break in the back
+ *  half of the piece, then a sentence end, then a hard cut. When the cut lands INSIDE one speaker's
+ *  line (a few minutes of monologue with no newline), the next piece starts with that speaker's
+ *  label again, so the chunk model never summarises words with no speaker on them (2026-09-11 review).
+ *  Pure; at most 30 pieces. */
+export function splitTranscript(transcript: string, chunk = 10000): string[] {
+  const chunks: string[] = [];
+  let carry = '';                                       /* the label to re-insert at the top of the next piece */
+  for (let i = 0; i < transcript.length && chunks.length < 30; ) {
+    let end = Math.min(i + chunk, transcript.length);
+    let midLine = false;
+    if (end < transcript.length) {
+      const nl = transcript.lastIndexOf('\n', end);
+      if (nl > i + chunk / 2) end = nl;
+      else {
+        const m = transcript.slice(i, end).search(/[.?!]\s(?![\s\S]*[.?!]\s)/);   /* the LAST sentence end in the piece */
+        if (m > chunk / 2) end = i + m + 1;
+        midLine = true;
+      }
+    }
+    let piece = transcript.slice(i, end);
+    if (carry && !/^\s*Speaker \d+:/.test(piece)) piece = `${carry} (continued): ${piece.replace(/^\s+/, '')}`;
+    chunks.push(piece);
+    if (midLine) {
+      const lastLabel = transcript.slice(0, end).match(/(Speaker \d+):(?![\s\S]*Speaker \d+:)/);
+      carry = lastLabel ? lastLabel[1] : '';
+    } else carry = '';
+    i = transcript[end] === '\n' ? end + 1 : end;          /* the line break itself belongs to neither piece */
+  }
+  return chunks;
+}
+
 @Injectable()
 export class EmoMeetingService {
   private readonly log = new Logger('EmoMeeting');
@@ -37,7 +69,7 @@ export class EmoMeetingService {
       let attendees: number | null;
       if (transcript.length <= 12000) {
         const meetingTmpl = await this.prompts.get('emo.meeting');
-        const raw = await this.llm.complete(
+        const raw = await this.llm.completeHelper('emo-meeting', 
           `${meetingTmpl}\n\nTranscript:\n${transcript}`,
           1000, 'emo-meeting',
         );
@@ -83,19 +115,11 @@ export class EmoMeetingService {
 
   /** Long meetings: per-chunk notes, then one merge pass — complete minutes at any length. */
   private async summarizeLong(transcript: string): Promise<{ summary: string; actionItems: string[]; attendees: number | null }> {
-    const CHUNK = 10000;
-    const chunks: string[] = [];
-    for (let i = 0; i < transcript.length && chunks.length < 30; ) {
-      let end = Math.min(i + CHUNK, transcript.length);
-      const nl = transcript.lastIndexOf('\n', end);          /* cut on a line boundary when possible */
-      if (nl > i + CHUNK / 2) end = nl;
-      chunks.push(transcript.slice(i, end));
-      i = end;
-    }
+    const chunks = splitTranscript(transcript, 10000);
     const notes: { points: string[]; decisions: string[]; actionItems: string[] }[] = [];
     for (let i = 0; i < chunks.length; i++) {
       const chunkTmpl = await this.prompts.get('emo.meetingChunk');
-      const raw = await this.llm.complete(
+      const raw = await this.llm.completeHelper('emo-meeting', 
         `${chunkTmpl.replace(/\{\{part\}\}/g, String(i + 1)).replace(/\{\{total\}\}/g, String(chunks.length))}\n\n${chunks[i]}`,
         700, 'emo-meeting-chunk',
       ).catch(() => '');
@@ -110,7 +134,7 @@ export class EmoMeetingService {
     }
     const flat = (k: 'points' | 'decisions' | 'actionItems') => notes.flatMap((n) => n[k]).filter(Boolean);
     const mergeTmpl = await this.prompts.get('emo.meetingMerge');
-    const mergeRaw = await this.llm.complete(
+    const mergeRaw = await this.llm.completeHelper('emo-meeting', 
       `${mergeTmpl}\n\nKey points:\n${flat('points').map((p) => `- ${p}`).join('\n')}\n\nDecisions:\n${flat('decisions').map((p) => `- ${p}`).join('\n')}\n\nAction items:\n${flat('actionItems').map((p) => `- ${p}`).join('\n')}`,
       1200, 'emo-meeting-merge',
     ).catch(() => '');

@@ -339,6 +339,7 @@ export class LlmService {
     // back HERE — never to a cheaper model.
     'voice-cleanup': { provider: 'openrouter', model: TERRA_MODEL },
     'emo-router': { provider: 'openrouter', model: TERRA_MODEL },
+    'emo-meeting': { provider: 'openrouter', model: TERRA_MODEL },   /* 2026-09-11: meeting minutes ran on the GENERAL model (the moving target) — now a named helper */
   };
 
   /**
