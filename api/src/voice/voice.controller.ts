@@ -57,10 +57,10 @@ export class VoiceController {
     return this.voice.setMeetingLabels(body?.meetingLabels !== false);
   }
 
-  /** Which labeller: 'openai' (default) or 'deepgram' (2026-09-12). */
-  @Put('meeting-labeller')
-  async setMeetingLabeller(@Body() body: { meetingLabeller?: string }) {
-    return this.voice.setMeetingLabeller(body?.meetingLabeller || 'openai');
+  /** Meeting language: 'auto' (sniffed per meeting), 'te' or 'en' — it decides who labels the speakers (2026-09-12). */
+  @Put('meeting-language')
+  async setMeetingLanguage(@Body() body: { meetingLanguage?: string }) {
+    return this.voice.setMeetingLanguage(body?.meetingLanguage || 'auto');
   }
 
   /** The model that tidies dictation — a curated id, or '' for the default (BEA-1624). */
