@@ -2317,7 +2317,7 @@ export function EmoSettingsSection() {
   );
 }
 
-type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; meetingLabels?: boolean; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
+type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; meetingLabels?: boolean; meetingLabeller?: 'openai' | 'deepgram'; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
 function VoiceModelCard() {
   const [cfg, setCfg] = useState<VoiceCfg | null>(null);
   const toast = useToast();
@@ -2331,6 +2331,10 @@ function VoiceModelCard() {
     setCfg((c) => (c ? { ...c, engine } : c));
     const r = await fetch('/api/voice/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
     if (r.ok) toast('success', 'Voice engine saved');
+  }
+  async function setMeetingLabeller(meetingLabeller: 'openai' | 'deepgram') {
+    setCfg((c) => (c ? { ...c, meetingLabeller } : c));
+    await fetch('/api/voice/meeting-labeller', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingLabeller }) });
   }
   async function setMeetingLabels(meetingLabels: boolean) {
     setCfg((c) => (c ? { ...c, meetingLabels } : c));
@@ -2399,6 +2403,19 @@ function VoiceModelCard() {
           <div className="text-xs text-zinc-500">On: a MEETING recording gets Speaker 1 / Speaker 2 lines (Deepgram nova-3). Off: it uses your voice engine like everything else — better words, no labels.</div>
         </div>
         <input type="checkbox" data-testid="voice-meeting-labels" checked={cfg.meetingLabels !== false} onChange={(e) => setMeetingLabels(e.target.checked)} className="h-4 w-4 accent-emerald-600 shrink-0" />
+      </label>
+      <label className={'text-sm text-zinc-600 dark:text-zinc-400 block mt-3' + (cfg.meetingLabels !== false ? '' : ' opacity-60')}>
+        Who labels the speakers <span className="text-zinc-400">(the other one is the backup)</span>
+        <select
+          data-testid="voice-meeting-labeller"
+          value={cfg.meetingLabeller || 'openai'}
+          disabled={cfg.meetingLabels === false}
+          onChange={(e) => setMeetingLabeller(e.target.value as 'openai' | 'deepgram')}
+          className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+        >
+          <option value="openai">OpenAI (recommended — found both people on your test meeting)</option>
+          <option value="deepgram">Deepgram nova-3</option>
+        </select>
       </label>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">
         Spoken language <span className="text-zinc-400">(optional — helps accuracy)</span>
