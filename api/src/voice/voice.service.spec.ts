@@ -325,3 +325,36 @@ describe('meeting language decides the labeller (2026-09-12: Telugu → Deepgram
     expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('plain');
   });
 });
+
+describe('meeting settings — one read, partial writes, per-language labellers (2026-09-12)', () => {
+  const realFetch = global.fetch;
+  afterEach(() => { global.fetch = realFetch; });
+  const dgOk = (utts: any[]) => ({ ok: true, status: 200, json: async () => ({ results: { utterances: utts } }) });
+  const openaiOk = (segments: any[]) => ({ ok: true, status: 200, json: async () => ({ segments }) });
+  it('defaults: labels on, auto, Telugu→Deepgram, English→OpenAI, unsure→Telugu', async () => {
+    const { svc } = make({});
+    expect(await svc.meetingSettings()).toEqual({ meetingLabels: true, meetingLanguage: 'auto', labellerTe: 'deepgram', labellerEn: 'openai', unsure: 'te' });
+    expect((await svc.config()).meeting.labellerEn).toBe('openai');
+  });
+  it('a partial write changes only what it names and never stores junk', async () => {
+    const { svc } = make({});
+    expect((await svc.setMeetingSettings({ labellerTe: 'openai' })).labellerTe).toBe('openai');
+    const after = await svc.setMeetingSettings({ unsure: 'en', labellerEn: 'nonsense', meetingLanguage: 'te' });
+    expect(after).toEqual({ meetingLabels: true, meetingLanguage: 'te', labellerTe: 'openai', labellerEn: 'openai', unsure: 'en' });
+  });
+  it('Telugu → OpenAI when the owner says so; the sniff unsure default follows the setting', async () => {
+    const { svc } = make({ settings: { 'voice.meetingLabeller.te': 'openai', 'voice.meetingUnsure': 'te' }, keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
+    (svc as any).run = jest.fn(async () => { throw new Error('sniff down'); });         // unsure → te
+    global.fetch = jest.fn(async () => openaiOk([{ speaker: 'A', text: 'ఒకటి' }])) as any;
+    expect(await svc.transcribeMeeting(Buffer.alloc(44 + 32000))).toBe('Speaker 1: ఒకటి');
+    expect(String((global.fetch as any).mock.calls[0][0])).toContain('openai.com');
+  });
+  it('English → Deepgram first when the owner says so; Deepgram fails → the OpenAI labeller is the backup', async () => {
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'en', 'voice.meetingLabeller.en': 'deepgram' }, keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
+    let n = 0;
+    global.fetch = jest.fn(async (url: string) => (String(url).includes('deepgram') ? { ok: false, status: 500, json: async () => ({}) } : openaiOk([{ speaker: 'A', text: 'one' }, { speaker: 'B', text: 'two' }]))) as any;
+    expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('Speaker 1: one\nSpeaker 2: two');
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
+    expect(urls[0]).toContain('deepgram'); expect(urls.some((u: string) => u.includes('openai.com'))).toBe(true);
+  });
+});

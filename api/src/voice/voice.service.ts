@@ -22,8 +22,10 @@ export type MeetingLabeller = 'openai' | 'deepgram';
  *  heard 1), Deepgram en as the backup. 'auto' sniffs the first 30 s with the owner's own transcriber. */
 export type MeetingLanguage = 'auto' | 'te' | 'en';
 export const MEETING_SNIFF_SECONDS = 30;
-/** Unsure (sniff failed, nothing heard): Telugu — the owner's meetings are Telugu/English by default. */
+/** Unsure (sniff failed, nothing heard): Telugu — the owner's meetings are Telugu/English by default.
+ *  A Setting (`voice.meetingUnsure`) can move it. */
 export const MEETING_LANGUAGE_WHEN_UNSURE: 'te' | 'en' = 'te';
+export type MeetingSettings = { meetingLabels: boolean; meetingLanguage: MeetingLanguage; labellerTe: MeetingLabeller; labellerEn: MeetingLabeller; unsure: 'te' | 'en' };
 
 /**
  * A transcription that failed for a reason the owner should SEE. Dictation used to answer '' on
@@ -160,19 +162,44 @@ export class VoiceService {
     await this.setSetting('voice.meetingLanguage', w);
     return { meetingLanguage: w };
   }
+  /** Every meeting knob in one read (Settings → Meetings & Recordings, 2026-09-12): the switch, the
+   *  language rule, WHO labels for Telugu and for English (the other is the backup), and what to
+   *  assume when the sniff is unsure. */
+  async meetingSettings(): Promise<MeetingSettings> {
+    const te = await this.getSetting('voice.meetingLabeller.te');
+    const en = await this.getSetting('voice.meetingLabeller.en');
+    const un = await this.getSetting('voice.meetingUnsure');
+    return {
+      meetingLabels: await this.meetingLabelsOn(),
+      meetingLanguage: await this.meetingLanguage(),
+      labellerTe: te === 'openai' ? 'openai' : 'deepgram',
+      labellerEn: en === 'deepgram' ? 'deepgram' : 'openai',
+      unsure: un === 'en' ? 'en' : MEETING_LANGUAGE_WHEN_UNSURE,
+    };
+  }
+  /** A partial update; unknown values fall back to the defaults, never to junk. */
+  async setMeetingSettings(patch: Partial<Record<keyof MeetingSettings, any>>): Promise<MeetingSettings> {
+    if (patch.meetingLabels !== undefined) await this.setMeetingLabels(patch.meetingLabels !== false);
+    if (patch.meetingLanguage !== undefined) await this.setMeetingLanguage(String(patch.meetingLanguage));
+    if (patch.labellerTe !== undefined) await this.setSetting('voice.meetingLabeller.te', patch.labellerTe === 'openai' ? 'openai' : 'deepgram');
+    if (patch.labellerEn !== undefined) await this.setSetting('voice.meetingLabeller.en', patch.labellerEn === 'deepgram' ? 'deepgram' : 'openai');
+    if (patch.unsure !== undefined) await this.setSetting('voice.meetingUnsure', patch.unsure === 'en' ? 'en' : 'te');
+    return this.meetingSettings();
+  }
   /** The first MEETING_SNIFF_SECONDS of a WAV through the owner's own transcriber (it reads mixed
    *  speech right, and writes Telugu in Telugu script) → 'te' | 'en'. Never throws: unsure → the
    *  default. ~2-3 s and a fraction of a paisa. */
   async sniffMeetingLanguage(buf: Buffer, mime = 'audio/wav'): Promise<'te' | 'en'> {
+    const unsure = (await this.meetingSettings()).unsure;
     try {
       const head = mime === 'audio/wav' ? wavHead(buf, MEETING_SNIFF_SECONDS) : buf;
       const text = await this.run('openai', head, 'sniff.wav', mime);
       const lang = languageOfText(text || '');
       this.log.log(`meeting: sniffed ${lang === 'te' ? 'Telugu' : 'English'} from the first ${MEETING_SNIFF_SECONDS} s (${(text || '').slice(0, 40).replace(/\n/g, ' ')}…)`);
-      return lang ?? MEETING_LANGUAGE_WHEN_UNSURE;
+      return lang ?? unsure;
     } catch (e: any) {
-      this.log.warn(`meeting: language sniff failed (${e?.message || e}) — assuming ${MEETING_LANGUAGE_WHEN_UNSURE}`);
-      return MEETING_LANGUAGE_WHEN_UNSURE;
+      this.log.warn(`meeting: language sniff failed (${e?.message || e}) — assuming ${unsure}`);
+      return unsure;
     }
   }
   async cleanupOn(): Promise<boolean> {
@@ -294,6 +321,7 @@ export class VoiceService {
       cleanup: await this.cleanupOn(),
       meetingLabels: await this.meetingLabelsOn(),
       meetingLanguage: await this.meetingLanguage(),
+      meeting: await this.meetingSettings(),
       cleanupModel: await this.cleanupModel(),
       cleanupModels: [...CURATED_MODELS],
       language: await this.language(),
@@ -401,9 +429,10 @@ export class VoiceService {
       return (text || '').trim();
     }
     let lastErr = 'no Deepgram key is connected';
-    const pref = await this.meetingLanguage();
-    const lang: 'te' | 'en' = pref === 'auto' ? await this.sniffMeetingLanguage(buf, mime) : pref;
-    const labeller: MeetingLabeller = lang === 'en' ? 'openai' : 'deepgram';
+    const ms = await this.meetingSettings();
+    const lang: 'te' | 'en' = ms.meetingLanguage === 'auto' ? await this.sniffMeetingLanguage(buf, mime) : ms.meetingLanguage;
+    const labeller: MeetingLabeller = lang === 'en' ? ms.labellerEn : ms.labellerTe;
+    this.log.log(`meeting: language ${lang} → labeller ${labeller} (backup: ${labeller === 'openai' ? 'deepgram' : 'openai'})`);
     if (labeller === 'openai') {
       /* OpenAI first (2026-09-12): a real failure or a file over its 25 MB limit falls through to the
          Deepgram ladder below — the backup, never a dead end. */
@@ -454,6 +483,17 @@ export class VoiceService {
       } catch (e: any) {
         lastErr = `plain Deepgram: ${e?.message || e}`;
       }
+    }
+    if (labeller === 'deepgram' && buf.length <= OPENAI_MAX_UPLOAD_BYTES) {
+      /* Deepgram was first and failed: the OpenAI LABELLER is the backup before any unlabelled text */
+      this.log.warn(`meeting: ${lastErr} — trying the OpenAI labeller (the backup)`);
+      try {
+        const lines = await this.openaiDiarize(buf, mime);
+        if (lines) {
+          await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: OPENAI_DIARIZE_MODEL, cost: null } }).catch(() => undefined);
+          return lines.join('\n');
+        }
+      } catch (e: any) { lastErr = `OpenAI labeller: ${e?.message || e}`; }
     }
     if (buf.length <= OPENAI_MAX_UPLOAD_BYTES) {
       this.log.warn(`meeting: ${lastErr} — trying OpenAI (no speaker labels)`);

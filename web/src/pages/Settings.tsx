@@ -89,12 +89,12 @@ const CATS: Cat[] = [
     { label: 'Meetings transcription engine', keywords: 'meetings transcription engine deepgram whisper elevenlabs' },
     { label: 'Deepgram model', keywords: 'deepgram nova model live' },
     { label: 'Auto-delete meeting audio', keywords: 'meeting audio delete after transcription retention' },
+    { label: 'Speaker labels (EMO device meetings)', keywords: 'emo pendant meeting speaker labels diarization deepgram openai nova speaker 1 speaker 2 telugu english language who labels' },
     { label: 'Meeting summary model', keywords: 'meeting summary model' },
   ] },
   { id: 'voice', label: 'Voice', icon: Mic, desc: 'Dictation & speech', group: 'AI & voice', search: [
     { label: 'Voice input engine', keywords: 'voice input stt engine dictation openai deepgram transcribe cleanup model terra gpt' },
     { label: 'Dictation clean-up', keywords: 'voice cleanup tidy dictation ai' },
-    { label: 'Speaker labels for meetings', keywords: 'voice meeting speaker labels diarization deepgram nova speaker 1 speaker 2 telugu english language' },
     { label: 'Spoken language', keywords: 'voice language hint spoken' },
     { label: 'Voice vocabulary', keywords: 'vocabulary custom words names get right' },
   ] },
@@ -228,6 +228,7 @@ function renderSection(id: Tab, email?: string): ReactNode {
     </div>;
     case 'meetings': return <div className="space-y-4">
       <MeetingsEngineCard />
+      <MeetingLabelsCard />
       <RecordingsRetentionCard />
       <ModuleAiHeader />
       <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
@@ -2009,6 +2010,67 @@ function DeepgramModelCard() {
   );
 }
 
+/** Speaker labels for EMO device meetings (2026-09-12): the switch, the language rule, who labels per
+ *  language, and what to assume when unsure — every knob the meeting road reads, in one card. */
+function MeetingLabelsCard() {
+  type MS = { meetingLabels: boolean; meetingLanguage: 'auto' | 'te' | 'en'; labellerTe: 'deepgram' | 'openai'; labellerEn: 'openai' | 'deepgram'; unsure: 'te' | 'en' };
+  const [ms, setMs] = useState<MS | null>(null);
+  const toast = useToast();
+  useEffect(() => { fetch('/api/voice/meeting-settings').then((r) => r.json()).then(setMs).catch(() => undefined); }, []);
+  if (!ms) return null;
+  async function save(patch: Partial<MS>) {
+    setMs((m) => (m ? { ...m, ...patch } : m));
+    const r = await fetch('/api/voice/meeting-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => null);
+    if (r && r.ok) { setMs(await r.json()); toast('success', 'Saved'); } else toast('error', 'Could not save');
+  }
+  const on = ms.meetingLabels !== false;
+  const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500';
+  const dim = on ? '' : ' opacity-60';
+  return (
+    <AccordionCard title="Speaker labels (EMO device meetings)" icon={Mic}>
+      <p className="text-sm text-zinc-500 mb-3">A recording made in the pendant's MEETING mode gets Speaker 1 / Speaker 2 lines. The language decides who labels: measured on your own meetings, Deepgram gets Telugu right (speakers and Telugu script) and OpenAI gets English right. Whichever is chosen, the other is the backup.</p>
+      <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 cursor-pointer">
+        <div>
+          <div className="text-sm font-medium">Speaker labels for meetings</div>
+          <div className="text-xs text-zinc-500">Off: a MEETING recording uses your voice engine like everything else — no labels.</div>
+        </div>
+        <input type="checkbox" data-testid="voice-meeting-labels" checked={on} onChange={(e) => save({ meetingLabels: e.target.checked })} className="h-4 w-4 accent-emerald-600 shrink-0" />
+      </label>
+      <label className={'text-sm text-zinc-600 dark:text-zinc-400 block mt-3' + dim}>
+        Meeting language
+        <select data-testid="voice-meeting-language" value={ms.meetingLanguage} disabled={!on} onChange={(e) => save({ meetingLanguage: e.target.value as MS['meetingLanguage'] })} className={sel}>
+          <option value="auto">Auto — listen to the first 30 s and decide (recommended)</option>
+          <option value="te">Telugu</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <div className={'grid gap-3 sm:grid-cols-2 mt-3' + dim}>
+        <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
+          Who labels Telugu meetings
+          <select data-testid="voice-labeller-te" value={ms.labellerTe} disabled={!on} onChange={(e) => save({ labellerTe: e.target.value as MS['labellerTe'] })} className={sel}>
+            <option value="deepgram">Deepgram nova-3 (recommended)</option>
+            <option value="openai">OpenAI labeller</option>
+          </select>
+        </label>
+        <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
+          Who labels English meetings
+          <select data-testid="voice-labeller-en" value={ms.labellerEn} disabled={!on} onChange={(e) => save({ labellerEn: e.target.value as MS['labellerEn'] })} className={sel}>
+            <option value="openai">OpenAI labeller (recommended)</option>
+            <option value="deepgram">Deepgram nova-3</option>
+          </select>
+        </label>
+      </div>
+      <label className={'text-sm text-zinc-600 dark:text-zinc-400 block mt-3' + (on && ms.meetingLanguage === 'auto' ? '' : ' opacity-60')}>
+        When the first 30 s are unclear, assume
+        <select data-testid="voice-meeting-unsure" value={ms.unsure} disabled={!on || ms.meetingLanguage !== 'auto'} onChange={(e) => save({ unsure: e.target.value as MS['unsure'] })} className={sel}>
+          <option value="te">Telugu</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+    </AccordionCard>
+  );
+}
+
 function MeetingsEngineCard() {
   const [engines, setEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
   const [engine, setEngine] = useState('deepgram');
@@ -2317,7 +2379,7 @@ export function EmoSettingsSection() {
   );
 }
 
-type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; meetingLabels?: boolean; meetingLanguage?: 'auto' | 'te' | 'en'; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
+type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
 function VoiceModelCard() {
   const [cfg, setCfg] = useState<VoiceCfg | null>(null);
   const toast = useToast();
@@ -2331,14 +2393,6 @@ function VoiceModelCard() {
     setCfg((c) => (c ? { ...c, engine } : c));
     const r = await fetch('/api/voice/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
     if (r.ok) toast('success', 'Voice engine saved');
-  }
-  async function setMeetingLanguage(meetingLanguage: 'auto' | 'te' | 'en') {
-    setCfg((c) => (c ? { ...c, meetingLanguage } : c));
-    await fetch('/api/voice/meeting-language', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingLanguage }) });
-  }
-  async function setMeetingLabels(meetingLabels: boolean) {
-    setCfg((c) => (c ? { ...c, meetingLabels } : c));
-    await fetch('/api/voice/meeting-labels', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingLabels }) });
   }
   async function setCleanup(cleanup: boolean) {
     setCfg((c) => (c ? { ...c, cleanup } : c));
@@ -2397,27 +2451,6 @@ function VoiceModelCard() {
           </select>
         </label>
       ) : null}
-      <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 mt-3 cursor-pointer">
-        <div>
-          <div className="text-sm font-medium">Speaker labels for meetings</div>
-          <div className="text-xs text-zinc-500">On: a MEETING recording gets Speaker 1 / Speaker 2 lines (Deepgram nova-3). Off: it uses your voice engine like everything else — better words, no labels.</div>
-        </div>
-        <input type="checkbox" data-testid="voice-meeting-labels" checked={cfg.meetingLabels !== false} onChange={(e) => setMeetingLabels(e.target.checked)} className="h-4 w-4 accent-emerald-600 shrink-0" />
-      </label>
-      <label className={'text-sm text-zinc-600 dark:text-zinc-400 block mt-3' + (cfg.meetingLabels !== false ? '' : ' opacity-60')}>
-        Meeting language <span className="text-zinc-400">(decides who labels the speakers)</span>
-        <select
-          data-testid="voice-meeting-language"
-          value={cfg.meetingLanguage || 'auto'}
-          disabled={cfg.meetingLabels === false}
-          onChange={(e) => setMeetingLanguage(e.target.value as 'auto' | 'te' | 'en')}
-          className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-        >
-          <option value="auto">Auto — listen to the first 30 s and decide (recommended)</option>
-          <option value="te">Telugu (Deepgram, Telugu script)</option>
-          <option value="en">English (OpenAI labeller)</option>
-        </select>
-      </label>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">
         Spoken language <span className="text-zinc-400">(optional — helps accuracy)</span>
         <input
