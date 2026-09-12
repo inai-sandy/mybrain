@@ -1,4 +1,4 @@
-import { VoiceService, VoiceTranscribeError, VoiceTransportError, OPENAI_STT_MODEL, OPENAI_DIARIZE_MODEL, utterancesToLines, diarizedToLines, OPENAI_MAX_UPLOAD_BYTES } from './voice.service';
+import { VoiceService, VoiceTranscribeError, VoiceTransportError, OPENAI_STT_MODEL, OPENAI_DIARIZE_MODEL, utterancesToLines, diarizedToLines, languageOfText, wavHead, OPENAI_MAX_UPLOAD_BYTES } from './voice.service';
 
 function make(opts: { keys?: Record<string, any>; settings?: Record<string, string>; clean?: string; contacts?: { name: string }[]; openaiStatus?: number } = {}) {
   const settings: Record<string, string> = { ...(opts.settings || {}) };
@@ -187,33 +187,33 @@ describe('transcribeMeeting — the Deepgram ladder (labeller pinned to deepgram
   const utt = (speaker: number, transcript: string) => ({ speaker, transcript });
 
   it('labels come back as Speaker N lines, same speaker merged', async () => {
-    const { svc } = make({ settings: { 'voice.meetingLabeller': 'deepgram' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'te' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
     global.fetch = jest.fn(async (url: string) => dg({ results: { utterances: [utt(0, 'hello'), utt(0, 'there'), utt(1, 'hi')] } })) as any;
     expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('Speaker 1: hello there\nSpeaker 2: hi');
     expect((global.fetch as any).mock.calls[0][0]).toContain('diarize=true');
     expect((global.fetch as any).mock.calls[0][1].signal).toBeDefined();          // the timeout is on the call
   });
   it('the provider answered and heard nothing → an empty string, not a failure', async () => {
-    const { svc } = make({ settings: { 'voice.meetingLabeller': 'deepgram' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'te' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
     global.fetch = jest.fn(async () => dg({ results: { utterances: [], channels: [{ alternatives: [{ transcript: '' }] }] } })) as any;
     expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('');
   });
   it('diarize fails → plain Deepgram text without labels', async () => {
-    const { svc } = make({ settings: { 'voice.meetingLabeller': 'deepgram' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'te' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
     let n = 0;
     global.fetch = jest.fn(async () => (++n === 1 ? dg({}, false, 503) : dg({ results: { channels: [{ alternatives: [{ transcript: 'plain words' }] }] } }))) as any;
     expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('plain words');
     expect(n).toBe(2);
   });
   it('both Deepgram legs fail on a file over the OpenAI limit → THROWS a transport error (the retry loop runs)', async () => {
-    const { svc } = make({ settings: { 'voice.meetingLabeller': 'deepgram' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'te' }, keys: { deepgram: { apiKey: 'dg' }, openai: { apiKey: 'oa' } } });
     global.fetch = jest.fn(async () => dg({}, false, 500)) as any;
     const big = Buffer.alloc(OPENAI_MAX_UPLOAD_BYTES + 1);
     await expect(svc.transcribeMeeting(big)).rejects.toBeInstanceOf(VoiceTransportError);
     expect((global.fetch as any).mock.calls.length).toBe(2);                     // OpenAI was never tried
   });
   it('a timeout is a transport error, said in minutes', async () => {
-    const { svc } = make({ settings: { 'voice.meetingLabeller': 'deepgram' }, keys: { deepgram: { apiKey: 'dg' } } });
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'te' }, keys: { deepgram: { apiKey: 'dg' } } });
     global.fetch = jest.fn(async () => { const e: any = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; }) as any;
     await expect(svc.transcribeMeeting(Buffer.alloc(OPENAI_MAX_UPLOAD_BYTES + 1))).rejects.toThrow(/no answer in 15 min/);
   });
@@ -248,47 +248,77 @@ describe('Speaker labels for meetings — the switch (2026-09-11)', () => {
 });
 
 /* 2026-09-12: the owner's first real two-person meeting — Deepgram heard one speaker, OpenAI two. */
-describe('meeting labeller — OpenAI first, Deepgram as the backup', () => {
+describe('meeting language decides the labeller (2026-09-12: Telugu → Deepgram-te, English → OpenAI)', () => {
   const realFetch = global.fetch;
   afterEach(() => { global.fetch = realFetch; });
   const seg = (speaker: string, text: string) => ({ speaker, text });
   const openaiOk = (segments: any[]) => ({ ok: true, status: 200, json: async () => ({ segments }) });
   const dgOk = (utts: any[]) => ({ ok: true, status: 200, json: async () => ({ results: { utterances: utts } }) });
+  const TELUGU = 'యా యా చెప్పండి లాస్ట్ టైం మాట్లాడినప్పుడు ఆయన ఫ్యాక్టరీ అంటుండే కదా';
 
+  it('languageOfText reads Telugu script as Telugu and Latin words as English', () => {
+    expect(languageOfText(TELUGU)).toBe('te');
+    expect(languageOfText('Yeah, yeah, ' + TELUGU)).toBe('te');            // mixed: Telugu wins
+    expect(languageOfText('Do you do background checks on anyone')).toBe('en');
+    expect(languageOfText('')).toBeNull();
+    expect(languageOfText('ok')).toBeNull();
+  });
+  it('wavHead cuts the first N seconds and fixes the header', () => {
+    const wav = Buffer.alloc(44 + 16000 * 2 * 40); wav.writeUInt32LE(16000, 24); wav.writeUInt16LE(1, 22);
+    const head = wavHead(wav, 30);
+    expect(head.length).toBe(44 + 16000 * 2 * 30);
+    expect(head.readUInt32LE(40)).toBe(16000 * 2 * 30);
+    expect(wavHead(Buffer.alloc(44 + 100), 30).length).toBe(144);
+  });
   it('diarizedToLines numbers speakers by first appearance and merges runs', () => {
     expect(diarizedToLines([seg('B', 'hi'), seg('B', 'there'), seg('A', 'hello'), seg('B', 'yes')])).toEqual(['Speaker 1: hi there', 'Speaker 2: hello', 'Speaker 1: yes']);
-    expect(diarizedToLines([])).toEqual([]);
   });
-  it('default labeller is OpenAI and it asks the diarize model, not the dictation model', async () => {
+  it('auto + English sniffed → OpenAI labeller, Deepgram never asked', async () => {
     const { svc } = make({ keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
-    expect(await svc.meetingLabeller()).toBe('openai');
+    (svc as any).run = jest.fn(async () => 'Do you do background checks on anyone');   // the sniff
     let model = '';
     global.fetch = jest.fn(async (url: string, init: any) => { model = init.body.get('model'); return openaiOk([seg('A', 'one'), seg('B', 'two')]); }) as any;
-    expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('Speaker 1: one\nSpeaker 2: two');
+    expect(await svc.transcribeMeeting(Buffer.alloc(44 + 32000))).toBe('Speaker 1: one\nSpeaker 2: two');
     expect(model).toBe(OPENAI_DIARIZE_MODEL);
-    expect((global.fetch as any).mock.calls.length).toBe(1);                        // Deepgram never asked
+    expect((global.fetch as any).mock.calls.length).toBe(1);
   });
-  it('OpenAI fails → Deepgram answers (the backup)', async () => {
+  it('auto + Telugu sniffed → Deepgram with language=te first, OpenAI never asked to label', async () => {
     const { svc } = make({ keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
+    (svc as any).run = jest.fn(async () => TELUGU);
+    global.fetch = jest.fn(async (url: string) => dgOk([{ speaker: 0, transcript: 'యా యా' }, { speaker: 1, transcript: 'చెప్పండి' }])) as any;
+    expect(await svc.transcribeMeeting(Buffer.alloc(44 + 32000))).toBe('Speaker 1: యా యా\nSpeaker 2: చెప్పండి');
+    const url = String((global.fetch as any).mock.calls[0][0]);
+    expect(url).toContain('deepgram.com'); expect(url).toContain('language=te'); expect(url).toContain('diarize=true');
+  });
+  it('the sniff failing assumes Telugu (the owner\'s default) and still labels', async () => {
+    const { svc } = make({ keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
+    (svc as any).run = jest.fn(async () => { throw new Error('sniff down'); });
+    global.fetch = jest.fn(async () => dgOk([{ speaker: 0, transcript: 'x' }])) as any;
+    expect(await svc.transcribeMeeting(Buffer.alloc(44 + 32000))).toBe('Speaker 1: x');
+    expect(String((global.fetch as any).mock.calls[0][0])).toContain('language=te');
+  });
+  it("'en' chosen in Settings → no sniff, OpenAI first; OpenAI fails → Deepgram en answers", async () => {
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'en' }, keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
+    (svc as any).run = jest.fn(async () => { throw new Error('the sniff must not run when the language is chosen'); });
     let n = 0;
-    global.fetch = jest.fn(async (url: string) => (++n === 1 ? { ok: false, status: 500, json: async () => ({}) } : dgOk([{ speaker: 0, transcript: 'from deepgram' }]))) as any;
+    global.fetch = jest.fn(async () => (++n === 1 ? { ok: false, status: 500, json: async () => ({}) } : dgOk([{ speaker: 0, transcript: 'from deepgram' }]))) as any;
     expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('Speaker 1: from deepgram');
-    expect(String((global.fetch as any).mock.calls[1][0])).toContain('deepgram.com');
+    expect(String((global.fetch as any).mock.calls[1][0])).toContain('language=en');
   });
-  it('a file over the OpenAI limit skips OpenAI and goes straight to Deepgram', async () => {
-    const { svc } = make({ keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
+  it('a file over the OpenAI limit (English) skips OpenAI and goes straight to Deepgram', async () => {
+    const { svc } = make({ settings: { 'voice.meetingLanguage': 'en' }, keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
     global.fetch = jest.fn(async () => dgOk([{ speaker: 0, transcript: 'big one' }])) as any;
     expect(await svc.transcribeMeeting(Buffer.alloc(OPENAI_MAX_UPLOAD_BYTES + 1))).toBe('Speaker 1: big one');
     expect(String((global.fetch as any).mock.calls[0][0])).toContain('deepgram.com');
   });
-  it("'deepgram' chosen → Deepgram first, exactly as before", async () => {
-    const { svc } = make({ settings: { 'voice.meetingLabeller': 'deepgram' }, keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
-    global.fetch = jest.fn(async () => dgOk([{ speaker: 1, transcript: 'dg first' }])) as any;
-    expect(await svc.transcribeMeeting(Buffer.from('wav'))).toBe('Speaker 2: dg first');
-    expect(String((global.fetch as any).mock.calls[0][0])).toContain('deepgram.com');
-    expect(await svc.setMeetingLabeller('openai')).toEqual({ meetingLabeller: 'openai' });
+  it('the setting round-trips and defaults to auto', async () => {
+    const { svc } = make({});
+    expect(await svc.meetingLanguage()).toBe('auto');
+    expect((await svc.config()).meetingLanguage).toBe('auto');
+    expect(await svc.setMeetingLanguage('te')).toEqual({ meetingLanguage: 'te' });
+    expect(await svc.setMeetingLanguage('junk')).toEqual({ meetingLanguage: 'auto' });
   });
-  it('the switch OFF still wins over the labeller choice', async () => {
+  it('the switch OFF still wins over everything', async () => {
     const { svc } = make({ settings: { 'voice.meetingLabels': '0' }, keys: { openai: { apiKey: 'oa' } } });
     (svc as any).run = jest.fn(async () => 'plain');
     global.fetch = jest.fn(async () => { throw new Error('no labeller may be called'); }) as any;

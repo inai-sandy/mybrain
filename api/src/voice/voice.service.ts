@@ -15,6 +15,15 @@ export const OPENAI_STT_MODEL = 'gpt-transcribe';
  *  two, 37/99 words, with natural turns. Meetings only — dictation stays on OPENAI_STT_MODEL. */
 export const OPENAI_DIARIZE_MODEL = 'gpt-4o-transcribe-diarize';
 export type MeetingLabeller = 'openai' | 'deepgram';
+/** The meeting's language decides WHO labels the speakers (2026-09-12, measured on the owner's two
+ *  real meetings): Telugu → Deepgram nova-3 with language=te (2 speakers, Telugu script; OpenAI's
+ *  labeller romanises Telugu and split the call into 4 voices; Deepgram's own detect_language called
+ *  the call "en" and dropped it to 24 words); English → OpenAI's labeller (2 speakers where Deepgram
+ *  heard 1), Deepgram en as the backup. 'auto' sniffs the first 30 s with the owner's own transcriber. */
+export type MeetingLanguage = 'auto' | 'te' | 'en';
+export const MEETING_SNIFF_SECONDS = 30;
+/** Unsure (sniff failed, nothing heard): Telugu — the owner's meetings are Telugu/English by default. */
+export const MEETING_LANGUAGE_WHEN_UNSURE: 'te' | 'en' = 'te';
 
 /**
  * A transcription that failed for a reason the owner should SEE. Dictation used to answer '' on
@@ -46,6 +55,26 @@ const ENGINES: { id: Engine; name: string; connector: ConnectorName }[] = [
 const ttsCache = new Map<string, Buffer>(); // spoken fillers/ack repeat → instant after first generation (BEA-889)
 
 /** One transcription engine for the whole app (in-app mic + Telegram voice): record → STT → optional AI cleanup. */
+/** Which language a transcript is written in: Telugu script anywhere worth counting → 'te';
+ *  Latin words and no Telugu → 'en'; nothing readable → null (unsure). Pure. */
+export function languageOfText(text: string): 'te' | 'en' | null {
+  const te = (text.match(/[\u0C00-\u0C7F]/g) || []).length;
+  const latin = (text.match(/[A-Za-z]{2,}/g) || []).length;
+  if (te >= 8 || (te > 0 && te >= latin)) return 'te';
+  if (latin >= 3) return 'en';
+  return null;
+}
+/** The first `seconds` of a 16-bit mono WAV, as a WAV. Pure. */
+export function wavHead(wav: Buffer, seconds: number): Buffer {
+  if (wav.length < 44) return wav;
+  const sr = wav.readUInt32LE(24) || 16000;
+  const ch = wav.readUInt16LE(22) || 1;
+  const bytes = Math.min(wav.length - 44, Math.floor(sr * ch * 2 * seconds));
+  const out = Buffer.concat([wav.subarray(0, 44), wav.subarray(44, 44 + bytes)]);
+  out.writeUInt32LE(out.length - 8, 4); out.writeUInt32LE(bytes, 40);
+  return out;
+}
+
 /** OpenAI diarized_json segments ({speaker:'A'|'B'|…, text}) → "Speaker N: …" lines, N by order of
  *  first appearance, consecutive same-speaker segments merged. Pure. */
 export function diarizedToLines(segments: any[]): string[] {
@@ -120,15 +149,31 @@ export class VoiceService {
     await this.setSetting('voice.meetingLabels', on ? '1' : '0');
     return { meetingLabels: on };
   }
-  /** WHICH labeller (2026-09-12): 'openai' (default — found both people on his real meeting) or
-   *  'deepgram' (found one). Whichever is chosen, the other is the backup when it fails. */
-  async meetingLabeller(): Promise<MeetingLabeller> {
-    return (await this.getSetting('voice.meetingLabeller')) === 'deepgram' ? 'deepgram' : 'openai';
+  /** Meeting language: 'auto' (default — a 30 s sniff per meeting), 'te' or 'en'. It decides the
+   *  labeller (see MeetingLanguage). */
+  async meetingLanguage(): Promise<MeetingLanguage> {
+    const v = await this.getSetting('voice.meetingLanguage');
+    return v === 'te' || v === 'en' ? v : 'auto';
   }
-  async setMeetingLabeller(which: string): Promise<{ meetingLabeller: MeetingLabeller }> {
-    const w: MeetingLabeller = which === 'deepgram' ? 'deepgram' : 'openai';
-    await this.setSetting('voice.meetingLabeller', w);
-    return { meetingLabeller: w };
+  async setMeetingLanguage(which: string): Promise<{ meetingLanguage: MeetingLanguage }> {
+    const w: MeetingLanguage = which === 'te' || which === 'en' ? which : 'auto';
+    await this.setSetting('voice.meetingLanguage', w);
+    return { meetingLanguage: w };
+  }
+  /** The first MEETING_SNIFF_SECONDS of a WAV through the owner's own transcriber (it reads mixed
+   *  speech right, and writes Telugu in Telugu script) → 'te' | 'en'. Never throws: unsure → the
+   *  default. ~2-3 s and a fraction of a paisa. */
+  async sniffMeetingLanguage(buf: Buffer, mime = 'audio/wav'): Promise<'te' | 'en'> {
+    try {
+      const head = mime === 'audio/wav' ? wavHead(buf, MEETING_SNIFF_SECONDS) : buf;
+      const text = await this.run('openai', head, 'sniff.wav', mime);
+      const lang = languageOfText(text || '');
+      this.log.log(`meeting: sniffed ${lang === 'te' ? 'Telugu' : 'English'} from the first ${MEETING_SNIFF_SECONDS} s (${(text || '').slice(0, 40).replace(/\n/g, ' ')}…)`);
+      return lang ?? MEETING_LANGUAGE_WHEN_UNSURE;
+    } catch (e: any) {
+      this.log.warn(`meeting: language sniff failed (${e?.message || e}) — assuming ${MEETING_LANGUAGE_WHEN_UNSURE}`);
+      return MEETING_LANGUAGE_WHEN_UNSURE;
+    }
   }
   async cleanupOn(): Promise<boolean> {
     return (await this.getSetting('voice.cleanup')) !== '0';
@@ -248,7 +293,7 @@ export class VoiceService {
       engines: await this.engines(),
       cleanup: await this.cleanupOn(),
       meetingLabels: await this.meetingLabelsOn(),
-      meetingLabeller: await this.meetingLabeller(),
+      meetingLanguage: await this.meetingLanguage(),
       cleanupModel: await this.cleanupModel(),
       cleanupModels: [...CURATED_MODELS],
       language: await this.language(),
@@ -356,7 +401,9 @@ export class VoiceService {
       return (text || '').trim();
     }
     let lastErr = 'no Deepgram key is connected';
-    const labeller = await this.meetingLabeller();
+    const pref = await this.meetingLanguage();
+    const lang: 'te' | 'en' = pref === 'auto' ? await this.sniffMeetingLanguage(buf, mime) : pref;
+    const labeller: MeetingLabeller = lang === 'en' ? 'openai' : 'deepgram';
     if (labeller === 'openai') {
       /* OpenAI first (2026-09-12): a real failure or a file over its 25 MB limit falls through to the
          Deepgram ladder below — the backup, never a dead end. */
@@ -380,7 +427,7 @@ export class VoiceService {
       const model = await this.getDeepgramModel();
       try {
         const r = await fetch(
-          `https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true&diarize=true&utterances=true${await this.keytermQuery(model)}`,
+          `https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&language=${lang}&smart_format=true&punctuate=true&diarize=true&utterances=true${await this.keytermQuery(model)}`,
           { method: 'POST', headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime }, body: new Uint8Array(buf), signal: AbortSignal.timeout(DEEPGRAM_TIMEOUT_MS) },
         );
         if (r.ok) {
@@ -399,7 +446,7 @@ export class VoiceService {
       }
       this.log.warn(`meeting: ${lastErr} — trying plain Deepgram (speaker labels will be missing)`);
       try {
-        const plain = await this.deepgram(buf, mime, { throwOnTransport: true });
+        const plain = await this.deepgram(buf, mime, { throwOnTransport: true, language: lang });
         if (plain !== null) {
           await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model, cost: null } }).catch(() => undefined);
           return plain;
@@ -584,13 +631,13 @@ export class VoiceService {
 
   /** Plain Deepgram. Engine road (default): null on anything but text, as every runner does.
    *  `throwOnTransport` (the meeting ladder): a transport failure THROWS, and "heard nothing" is ''. */
-  private async deepgram(buf: Buffer, mime: string, opts: { throwOnTransport?: boolean } = {}): Promise<string | null> {
+  private async deepgram(buf: Buffer, mime: string, opts: { throwOnTransport?: boolean; language?: string } = {}): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('deepgram');
     if (!c?.apiKey) { if (opts.throwOnTransport) throw new VoiceTransportError('no Deepgram key is connected'); return null; }
     const model = await this.getDeepgramModel();
     let r: Response;
     try {
-      r = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true${await this.keytermQuery(model)}`, {
+      r = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}${opts.language ? `&language=${opts.language}` : ''}&smart_format=true&punctuate=true${await this.keytermQuery(model)}`, {
         method: 'POST',
         headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime || 'audio/webm' },
         body: new Uint8Array(buf),

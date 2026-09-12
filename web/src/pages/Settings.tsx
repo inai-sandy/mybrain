@@ -94,7 +94,7 @@ const CATS: Cat[] = [
   { id: 'voice', label: 'Voice', icon: Mic, desc: 'Dictation & speech', group: 'AI & voice', search: [
     { label: 'Voice input engine', keywords: 'voice input stt engine dictation openai deepgram transcribe cleanup model terra gpt' },
     { label: 'Dictation clean-up', keywords: 'voice cleanup tidy dictation ai' },
-    { label: 'Speaker labels for meetings', keywords: 'voice meeting speaker labels diarization deepgram nova speaker 1 speaker 2' },
+    { label: 'Speaker labels for meetings', keywords: 'voice meeting speaker labels diarization deepgram nova speaker 1 speaker 2 telugu english language' },
     { label: 'Spoken language', keywords: 'voice language hint spoken' },
     { label: 'Voice vocabulary', keywords: 'vocabulary custom words names get right' },
   ] },
@@ -2317,7 +2317,7 @@ export function EmoSettingsSection() {
   );
 }
 
-type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; meetingLabels?: boolean; meetingLabeller?: 'openai' | 'deepgram'; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
+type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; meetingLabels?: boolean; meetingLanguage?: 'auto' | 'te' | 'en'; cleanupModel?: string; cleanupModels?: string[]; language: string; vocabulary: string };
 function VoiceModelCard() {
   const [cfg, setCfg] = useState<VoiceCfg | null>(null);
   const toast = useToast();
@@ -2332,9 +2332,9 @@ function VoiceModelCard() {
     const r = await fetch('/api/voice/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
     if (r.ok) toast('success', 'Voice engine saved');
   }
-  async function setMeetingLabeller(meetingLabeller: 'openai' | 'deepgram') {
-    setCfg((c) => (c ? { ...c, meetingLabeller } : c));
-    await fetch('/api/voice/meeting-labeller', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingLabeller }) });
+  async function setMeetingLanguage(meetingLanguage: 'auto' | 'te' | 'en') {
+    setCfg((c) => (c ? { ...c, meetingLanguage } : c));
+    await fetch('/api/voice/meeting-language', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingLanguage }) });
   }
   async function setMeetingLabels(meetingLabels: boolean) {
     setCfg((c) => (c ? { ...c, meetingLabels } : c));
@@ -2405,16 +2405,17 @@ function VoiceModelCard() {
         <input type="checkbox" data-testid="voice-meeting-labels" checked={cfg.meetingLabels !== false} onChange={(e) => setMeetingLabels(e.target.checked)} className="h-4 w-4 accent-emerald-600 shrink-0" />
       </label>
       <label className={'text-sm text-zinc-600 dark:text-zinc-400 block mt-3' + (cfg.meetingLabels !== false ? '' : ' opacity-60')}>
-        Who labels the speakers <span className="text-zinc-400">(the other one is the backup)</span>
+        Meeting language <span className="text-zinc-400">(decides who labels the speakers)</span>
         <select
-          data-testid="voice-meeting-labeller"
-          value={cfg.meetingLabeller || 'openai'}
+          data-testid="voice-meeting-language"
+          value={cfg.meetingLanguage || 'auto'}
           disabled={cfg.meetingLabels === false}
-          onChange={(e) => setMeetingLabeller(e.target.value as 'openai' | 'deepgram')}
+          onChange={(e) => setMeetingLanguage(e.target.value as 'auto' | 'te' | 'en')}
           className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         >
-          <option value="openai">OpenAI (recommended — found both people on your test meeting)</option>
-          <option value="deepgram">Deepgram nova-3</option>
+          <option value="auto">Auto — listen to the first 30 s and decide (recommended)</option>
+          <option value="te">Telugu (Deepgram, Telugu script)</option>
+          <option value="en">English (OpenAI labeller)</option>
         </select>
       </label>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">
