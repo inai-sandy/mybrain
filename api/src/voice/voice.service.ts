@@ -10,6 +10,11 @@ export type Engine = 'openai' | 'elevenlabs' | 'deepgram' | 'gemini';
 
 /** The ONE OpenAI speech-to-text model this app uses (BEA-1625, the owner's choice). */
 export const OPENAI_STT_MODEL = 'gpt-transcribe';
+/** The OpenAI model that LABELS SPEAKERS in a meeting (2026-09-12). On the owner's first real
+ *  two-person meeting Deepgram nova-3 (and nova-2, en and multi) heard ONE speaker; this model heard
+ *  two, 37/99 words, with natural turns. Meetings only — dictation stays on OPENAI_STT_MODEL. */
+export const OPENAI_DIARIZE_MODEL = 'gpt-4o-transcribe-diarize';
+export type MeetingLabeller = 'openai' | 'deepgram';
 
 /**
  * A transcription that failed for a reason the owner should SEE. Dictation used to answer '' on
@@ -41,6 +46,24 @@ const ENGINES: { id: Engine; name: string; connector: ConnectorName }[] = [
 const ttsCache = new Map<string, Buffer>(); // spoken fillers/ack repeat → instant after first generation (BEA-889)
 
 /** One transcription engine for the whole app (in-app mic + Telegram voice): record → STT → optional AI cleanup. */
+/** OpenAI diarized_json segments ({speaker:'A'|'B'|…, text}) → "Speaker N: …" lines, N by order of
+ *  first appearance, consecutive same-speaker segments merged. Pure. */
+export function diarizedToLines(segments: any[]): string[] {
+  const order = new Map<string, number>();
+  const lines: string[] = [];
+  let cur = '';
+  for (const s of segments || []) {
+    const text = String(s?.text || '').trim();
+    if (!text) continue;
+    const id = String(s?.speaker ?? '?');
+    if (!order.has(id)) order.set(id, order.size + 1);
+    const label = `Speaker ${order.get(id)}`;
+    if (label !== cur) { lines.push(`${label}: ${text}`); cur = label; }
+    else lines[lines.length - 1] += ` ${text}`;
+  }
+  return lines;
+}
+
 /** Deepgram utterances → "Speaker N: …" lines, consecutive same-speaker utterances merged. Pure. */
 export function utterancesToLines(utts: any[]): string[] {
   const lines: string[] = [];
@@ -96,6 +119,16 @@ export class VoiceService {
   async setMeetingLabels(on: boolean): Promise<{ meetingLabels: boolean }> {
     await this.setSetting('voice.meetingLabels', on ? '1' : '0');
     return { meetingLabels: on };
+  }
+  /** WHICH labeller (2026-09-12): 'openai' (default — found both people on his real meeting) or
+   *  'deepgram' (found one). Whichever is chosen, the other is the backup when it fails. */
+  async meetingLabeller(): Promise<MeetingLabeller> {
+    return (await this.getSetting('voice.meetingLabeller')) === 'deepgram' ? 'deepgram' : 'openai';
+  }
+  async setMeetingLabeller(which: string): Promise<{ meetingLabeller: MeetingLabeller }> {
+    const w: MeetingLabeller = which === 'deepgram' ? 'deepgram' : 'openai';
+    await this.setSetting('voice.meetingLabeller', w);
+    return { meetingLabeller: w };
   }
   async cleanupOn(): Promise<boolean> {
     return (await this.getSetting('voice.cleanup')) !== '0';
@@ -215,6 +248,7 @@ export class VoiceService {
       engines: await this.engines(),
       cleanup: await this.cleanupOn(),
       meetingLabels: await this.meetingLabelsOn(),
+      meetingLabeller: await this.meetingLabeller(),
       cleanupModel: await this.cleanupModel(),
       cleanupModels: [...CURATED_MODELS],
       language: await this.language(),
@@ -321,8 +355,27 @@ export class VoiceService {
       await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: engine === 'openai' ? this.lastOpenAiModel : engine, cost: null } }).catch(() => undefined);
       return (text || '').trim();
     }
-    const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
     let lastErr = 'no Deepgram key is connected';
+    const labeller = await this.meetingLabeller();
+    if (labeller === 'openai') {
+      /* OpenAI first (2026-09-12): a real failure or a file over its 25 MB limit falls through to the
+         Deepgram ladder below — the backup, never a dead end. */
+      try {
+        const lines = await this.openaiDiarize(buf, mime);
+        if (lines !== null) {
+          await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: OPENAI_DIARIZE_MODEL, cost: null } }).catch(() => undefined);
+          if (lines.length) return lines.join('\n');
+          /* answered, heard nothing: silence, not a failure */
+          return '';
+        }
+        lastErr = `the file (${(buf.length / 1048576).toFixed(0)} MB) is over OpenAI's 25 MB limit`;
+      } catch (e: any) {
+        lastErr = `OpenAI labeller: ${e?.message || e}`;
+      }
+      this.log.warn(`meeting: ${lastErr} — trying Deepgram (the backup labeller)`);
+    }
+    const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
+    if (!c?.apiKey && lastErr === 'no Deepgram key is connected') lastErr = 'no Deepgram key is connected';
     if (c?.apiKey) {
       const model = await this.getDeepgramModel();
       try {
@@ -504,6 +557,29 @@ export class VoiceService {
     const vocab = (await this.getSetting('voice.vocabulary')) || '';
     return vocab.split(',').map((w) => w.trim()).filter(Boolean).slice(0, 80)
       .map((w) => `&keyterm=${encodeURIComponent(w)}`).join('');
+  }
+
+  /** OpenAI's speaker-labelling transcription → "Speaker N: …" lines (speakers numbered in order
+   *  of first appearance). null = the file is over the upload limit (not tried); throws on a
+   *  transport failure; [] = answered and heard nothing. */
+  private async openaiDiarize(buf: Buffer, mime: string): Promise<string[] | null> {
+    if (buf.length > OPENAI_MAX_UPLOAD_BYTES) return null;
+    const c = await this.connectors.get<{ apiKey: string }>('openai');
+    if (!c?.apiKey) throw new VoiceTransportError('no OpenAI key is connected');
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(buf)]), mime === 'audio/wav' ? 'meeting.wav' : 'meeting.webm');
+    form.append('model', OPENAI_DIARIZE_MODEL);
+    form.append('response_format', 'diarized_json');
+    form.append('chunking_strategy', 'auto');           /* required above 30 s; the model cuts on voice activity */
+    let r: Response;
+    try {
+      r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${c.apiKey}` }, body: form as any, signal: AbortSignal.timeout(DEEPGRAM_TIMEOUT_MS) });
+    } catch (e: any) {
+      throw new VoiceTransportError(e?.name === 'TimeoutError' ? `no answer in ${DEEPGRAM_TIMEOUT_MS / 60000} min` : String(e?.message || e));
+    }
+    if (!r.ok) throw new VoiceTransportError(`HTTP ${r.status}`);
+    const d: any = await r.json();
+    return diarizedToLines(Array.isArray(d?.segments) ? d.segments : []);
   }
 
   /** Plain Deepgram. Engine road (default): null on anything but text, as every runner does.
