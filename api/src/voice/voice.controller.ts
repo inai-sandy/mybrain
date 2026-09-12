@@ -57,6 +57,16 @@ export class VoiceController {
     return this.voice.setMeetingLabels(body?.meetingLabels !== false);
   }
 
+  /** Every meeting knob, one read / one partial write (Settings → Meetings & Recordings, 2026-09-12). */
+  @Get('meeting-settings')
+  async meetingSettings() {
+    return this.voice.meetingSettings();
+  }
+  @Put('meeting-settings')
+  async setMeetingSettings(@Body() body: Record<string, any>) {
+    return this.voice.setMeetingSettings(body || {});
+  }
+
   /** Meeting language: 'auto' (sniffed per meeting), 'te' or 'en' — it decides who labels the speakers (2026-09-12). */
   @Put('meeting-language')
   async setMeetingLanguage(@Body() body: { meetingLanguage?: string }) {
